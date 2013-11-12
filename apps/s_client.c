@@ -405,6 +405,7 @@ static void sc_usage(void)
 	BIO_printf(bio_err," -use_srtp profiles - Offer SRTP key management with a colon-separated profile list\n");
  	BIO_printf(bio_err," -keymatexport label   - Export keying material using label\n");
  	BIO_printf(bio_err," -keymatexportlen len  - Export len bytes of keying material (default 20)\n");
+	BIO_printf(bio_err," -asynch       - Run in asynchronous mode (currently only on write\n");
 	}
 
 #ifndef OPENSSL_NO_TLSEXT
@@ -641,6 +642,7 @@ int MAIN(int argc, char **argv)
 	int crlf=0;
 	int write_tty,read_tty,write_ssl,read_ssl,tty_on,ssl_pending;
 	SSL_CTX *ctx=NULL;
+	int ssl_mode=0;
 	int ret=1,in_init=1,i,nbio_test=0;
 	int starttls_proto = PROTO_OFF;
 	int prexit = 0;
@@ -706,6 +708,7 @@ static char *jpake_secret = NULL;
 	meth=SSLv23_client_method();
 
 	apps_startup();
+	thread_setup();
 	c_Pause=0;
 	c_quiet=0;
 	c_ign_eof=0;
@@ -1134,6 +1137,10 @@ static char *jpake_secret = NULL;
 			keymatexportlen=atoi(*(++argv));
 			if (keymatexportlen == 0) goto bad;
 			}
+		else if (strcmp(*argv,"-asynch") == 0)
+			{
+			ssl_mode = SSL_MODE_ASYNCHRONOUS;
+			}
                 else
 			{
 			BIO_printf(bio_err,"unknown option %s\n",*argv);
@@ -1347,6 +1354,20 @@ bad:
 	if (srtp_profiles != NULL)
 		SSL_CTX_set_tlsext_use_srtp(ctx, srtp_profiles);
 #endif
+	if (ssl_mode)
+	    {
+		SSL_CTX_set_mode(ctx,ssl_mode);
+		if (c_debug)
+			{
+			SSL_CTX_set_asynch_completion_callback(ctx, ssl_asynch_callback);
+			SSL_CTX_set_asynch_completion_callback_arg(ctx, bio_c_out);
+			}
+		if (!c_nbio)
+			BIO_printf(bio_err,
+				"Warning: asynch mode works best with non-blocking I/O, you may see some odd delays.\n"
+				"Warning: please consider using the flag -nbio\n");
+		}
+
 	if (exc) ssl_ctx_set_excert(ctx, exc);
 	/* DTLS: partial reads end up discarding unread UDP bytes :-( 
 	 * Setting read ahead solves this problem.
@@ -1934,10 +1955,27 @@ SSL_set_tlsext_status_ids(con, ids);
 					write_ssl=1;
 					}
 				break;
+			case SSL_ERROR_WAIT_ASYNCH_WRITE:
+				BIO_printf(bio_c_out,"write W asynch BLOCK\n");
+				write_ssl=1;
+				read_tty=0;
+				break;
 			case SSL_ERROR_WANT_WRITE:
 				BIO_printf(bio_c_out,"write W BLOCK\n");
 				write_ssl=1;
 				read_tty=0;
+				break;
+			case SSL_ERROR_WAIT_ASYNCH_READ:
+				BIO_printf(bio_c_out,"write R asynch BLOCK\n");
+				write_tty=0;
+				read_ssl=1;
+				write_ssl=0;
+				break;
+			case SSL_ERROR_WAIT_ASYNCH:
+				BIO_printf(bio_c_out,"write asynch operation BLOCK\n");
+				write_tty=0;
+				read_ssl=1;
+				write_ssl=0;
 				break;
 			case SSL_ERROR_WANT_READ:
 				BIO_printf(bio_c_out,"write R BLOCK\n");
@@ -2034,10 +2072,29 @@ printf("read=%d pending=%d peek=%d\n",k,SSL_pending(con),SSL_peek(con,zbuf,10240
 				read_ssl=0;
 				write_tty=1;
 				break;
+			case SSL_ERROR_WAIT_ASYNCH_WRITE:
+				BIO_printf(bio_c_out,"read W asynch BLOCK\n");
+				write_ssl=1;
+				read_tty=0;
+				break;
 			case SSL_ERROR_WANT_WRITE:
 				BIO_printf(bio_c_out,"read W BLOCK\n");
 				write_ssl=1;
 				read_tty=0;
+				break;
+			case SSL_ERROR_WAIT_ASYNCH_READ:
+				BIO_printf(bio_c_out,"read R asynch BLOCK\n");
+				write_tty=0;
+				read_ssl=1;
+				if ((read_tty == 0) && (write_ssl == 0))
+					write_ssl=1;
+				break;
+			case SSL_ERROR_WAIT_ASYNCH:
+				BIO_printf(bio_c_out,"read asynch operation BLOCK\n");
+				write_tty=0;
+				read_ssl=1;
+				if ((read_tty == 0) && (write_ssl == 0))
+					write_ssl=1;
 				break;
 			case SSL_ERROR_WANT_READ:
 				BIO_printf(bio_c_out,"read R BLOCK\n");
@@ -2193,6 +2250,7 @@ end:
 		BIO_free(bio_c_msg);
 		bio_c_msg=NULL;
 		}
+	thread_cleanup();
 	apps_shutdown();
 	OPENSSL_EXIT(ret);
 	}

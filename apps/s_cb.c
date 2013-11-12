@@ -1748,3 +1748,54 @@ int ssl_load_stores(SSL_CTX *ctx,
 		X509_STORE_free(ch);
 	return rv;
 	}
+
+struct asynch_data
+	{
+	BIO *bio;
+	const char *prefix;
+	};
+static int write_asynch_dump(const void *data, size_t len, void *vdata)
+	{
+	struct asynch_data *adata = (struct asynch_data *)vdata;
+	return BIO_write(adata->bio, adata->prefix, strlen(adata->prefix))
+		+ BIO_write(adata->bio, data, len);
+	}
+int ssl_asynch_callback(int write_p, int status, const void *buf, size_t len,
+	SSL *ssl, void *arg)
+	{
+	struct asynch_data adata = { (BIO *)arg, NULL };
+	const char *long_prefix;
+	if (status < 0) /* recoverable error, can be handled many
+			   ways.  Here, we do the simple thing and
+			   assume that the engine module is a bit
+			   conjested, and simply wait a little */
+		{
+		sleep(1);
+		return 1;
+		}
+	else if (status == 0) /* unrecoverable error.  We really don't
+				 know how to handle this in a uniform
+				 way.  Return it back and hope for the
+				 best... */
+		return 0;
+
+	/* From now on, status is positive */
+	if (write_p)
+		{
+		long_prefix = "asynch write completion: ";
+		adata.prefix = "awc: ";
+		}
+	else
+		{
+		long_prefix = "asynch read completion: ";
+		adata.prefix = "arc: ";
+		}
+	BIO_printf(adata.bio, "%sBEGIN\n", long_prefix);
+	BIO_printf(adata.bio, "%sstatus = %d, ssl = %p\n", adata.prefix,
+		status, ssl);
+	BIO_printf(adata.bio, "%sbuf = %p, len = %u:\n", adata.prefix,
+		buf, (unsigned int)len);
+	BIO_dump_cb(write_asynch_dump, &adata, (const char *)buf,(int)len);
+	BIO_printf(adata.bio, "%sEND\n", long_prefix);
+	return 1;
+	}

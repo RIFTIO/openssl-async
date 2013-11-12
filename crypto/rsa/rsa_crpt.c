@@ -76,11 +76,44 @@ int RSA_public_encrypt(int flen, const unsigned char *from, unsigned char *to,
 	{
 	return(rsa->meth->rsa_pub_enc(flen, from, to, rsa, padding));
 	}
+int RSA_public_encrypt_asynch(int flen, const unsigned char *from, unsigned char *to,
+	RSA *rsa, int padding,
+	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	void *cb_data)
+	{
+#ifdef OPENSSL_FIPS
+	if (FIPS_mode())
+		{
+		RSAerr(RSA_F_RSA_PUBLIC_ENCRYPT_ASYNCH, RSA_R_NO_ASYNCH_SUPPORT_IN_FIPS);
+		return -1;
+		}
+#endif
+	if (!(rsa->meth->flags & RSA_FLAG_ASYNCH))
+		{
+		RSAerr(RSA_F_RSA_PUBLIC_ENCRYPT_ASYNCH, RSA_R_NO_ASYNCH_SUPPORT);
+		return -1;
+		}
+	return(rsa->meth->rsa_pub_enc_asynch(flen, from, to, rsa, padding,
+			cb, cb_data));
+	}
 
 int RSA_private_encrypt(int flen, const unsigned char *from, unsigned char *to,
 	     RSA *rsa, int padding)
 	{
 	return(rsa->meth->rsa_priv_enc(flen, from, to, rsa, padding));
+	}
+int RSA_private_encrypt_asynch(int flen, const unsigned char *from, unsigned char *to,
+	RSA *rsa, int padding,
+	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	void *cb_data)
+	{
+	if (!(rsa->meth->flags & RSA_FLAG_ASYNCH))
+		{
+		RSAerr(RSA_F_RSA_PRIVATE_ENCRYPT_ASYNCH, RSA_R_NO_ASYNCH_SUPPORT);
+		return -1;
+		}
+	return(rsa->meth->rsa_priv_enc_asynch(flen, from, to, rsa, padding,
+			cb, cb_data));
 	}
 
 int RSA_private_decrypt(int flen, const unsigned char *from, unsigned char *to,
@@ -88,11 +121,37 @@ int RSA_private_decrypt(int flen, const unsigned char *from, unsigned char *to,
 	{
 	return(rsa->meth->rsa_priv_dec(flen, from, to, rsa, padding));
 	}
+int RSA_private_decrypt_asynch(int flen, const unsigned char *from, unsigned char *to,
+	RSA *rsa, int padding,
+	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	void *cb_data)
+	{
+	if (!(rsa->meth->flags & RSA_FLAG_ASYNCH))
+		{
+		RSAerr(RSA_F_RSA_PRIVATE_DECRYPT_ASYNCH, RSA_R_NO_ASYNCH_SUPPORT);
+		return -1;
+		}
+	return(rsa->meth->rsa_priv_dec_asynch(flen, from, to, rsa, padding,
+			cb, cb_data));
+	}
 
 int RSA_public_decrypt(int flen, const unsigned char *from, unsigned char *to,
 	     RSA *rsa, int padding)
 	{
 	return(rsa->meth->rsa_pub_dec(flen, from, to, rsa, padding));
+	}
+int RSA_public_decrypt_asynch(int flen, const unsigned char *from, unsigned char *to,
+	RSA *rsa, int padding,
+	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	void *cb_data)
+	{
+	if (!(rsa->meth->flags & RSA_FLAG_ASYNCH))
+		{
+		RSAerr(RSA_F_RSA_PUBLIC_DECRYPT_ASYNCH, RSA_R_NO_ASYNCH_SUPPORT);
+		return -1;
+		}
+	return(rsa->meth->rsa_pub_dec_asynch(flen, from, to, rsa, padding,
+			cb, cb_data));
 	}
 
 int RSA_flags(const RSA *r)

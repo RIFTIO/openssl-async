@@ -425,7 +425,19 @@ typedef struct ssl3_buffer_st
 /* Set if we encrypt then mac instead of usual mac then encrypt */
 #define TLS1_FLAGS_ENCRYPT_THEN_MAC		0x0080
 
+/* SSL3_FLAGS_ASYNCH is set when we have SSL3 use the asynchronous
+ * cipher functionality.
+ * This involves some extra structures as well as a limited queue 
+ * of records and states.
+ */
+#define SSL3_FLAGS_ASYNCH			0x0080
+
 #ifndef OPENSSL_NO_SSL_INTERN
+
+typedef struct ssl3_transmission_st SSL3_TRANSMISSION;
+typedef struct ssl3_transmission_pool_st SSL3_TRANSMISSION_POOL;
+typedef struct ssl3_read_record_st SSL3_READ_RECORD;
+typedef struct ssl3_read_record_pool_st SSL3_READ_RECORD_POOL;
 
 typedef struct ssl3_state_st
 	{
@@ -593,6 +605,80 @@ typedef struct ssl3_state_st
 #endif /* !OPENSSL_NO_EC */
 
 #endif /* !OPENSSL_NO_TLSEXT */
+
+	/* If we run an asynch cipher, we use a separate structure
+	 * to keep track of each transmission of data.
+	 * This pointer is just a cache until just before the cipher
+	 * operation is started, at which point it will be removed from
+	 * here, and the callbacks will take care of it.
+	 */
+	SSL3_TRANSMISSION_POOL *transmission_pool;
+	SSL3_TRANSMISSION *tmp_transmission;
+	int outstanding_write_crypto; /* Amount in engine */
+	int outstanding_write_records; /* Amount waiting to be written */
+	/* Additionally, we hold a queue of reading records. */
+	int outstanding_read_crypto; /* Amount in engine */
+	int outstanding_read_records; /* Amount waiting to be written */
+	int outstanding_read_length;  /* Approximate total amount of appdata */
+	SSL3_READ_RECORD_POOL *read_record_pool;
+
+	/* For synch key exchange, we expect only one, so we simply cache
+	 * necessary data here.
+	 */
+	int pkeystate;      /* 0 when not used
+	                     * -1 while crypto is being done
+	                     * 1 in post
+	                     */
+    struct
+        {
+        int status;
+        int num;
+        EVP_MD_CTX md_ctx;
+        unsigned char md_buf[EVP_MAX_MD_SIZE*2]; /* A duplicate */
+        unsigned char *q;
+        unsigned char *p;
+        int i, j;
+        EVP_PKEY *pkey;
+        } key_exchange_cache;
+    struct
+        {
+        int status;
+        unsigned char *p;
+        unsigned char *q;
+        int n;
+        EVP_PKEY *pkey;
+        RSA *rsa;
+        unsigned char *tmp_buf;
+        } send_client_key_exchange;
+    struct
+        {
+        int status;
+#ifndef OPENSSL_NO_RSA
+        unsigned char *q;
+        int j, num;
+        RSA *rsa;
+        unsigned char md_buf[EVP_MAX_MD_SIZE*2]; /* A duplicate */
+        unsigned int u;
+#endif
+        unsigned char *p, *d;
+        int i;
+        int n;
+        EVP_MD_CTX md_ctx;
+        } send_server_key_exchange;
+    struct
+        {
+        int status;
+        unsigned char *p;
+        int n;
+        EVP_PKEY *pkey;
+        } get_client_key_exchange;
+    struct
+        {
+        int status;
+        unsigned char *p;
+        EVP_PKEY *pkey;
+        } get_cert_verify;
+
 	} SSL3_STATE;
 
 #endif

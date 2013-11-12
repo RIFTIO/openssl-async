@@ -142,15 +142,15 @@ int EVP_DigestSignFinal(EVP_MD_CTX *ctx, unsigned char *sigret, size_t *siglen)
 		{
 		EVP_PKEY_CTX *dctx;
 		if (!sigret)
-			return pctx->pmeth->signctx(pctx, sigret, siglen, ctx);
+			return pctx->pmeth->signctx.synch(pctx, sigret, siglen, ctx);
 		dctx = EVP_PKEY_CTX_dup(ctx->pctx);
 		if (!dctx)
 			return 0;
-		r = dctx->pmeth->signctx(dctx, sigret, siglen, ctx);
+		r = dctx->pmeth->signctx.synch(dctx, sigret, siglen, ctx);
 		EVP_PKEY_CTX_free(dctx);
 		return r;
 		}
-	if (pctx->pmeth->signctx)
+	if (pctx->pmeth->signctx.synch)
 		sctx = 1;
 	else
 		sctx = 0;
@@ -163,7 +163,7 @@ int EVP_DigestSignFinal(EVP_MD_CTX *ctx, unsigned char *sigret, size_t *siglen)
 		if (!EVP_MD_CTX_copy_ex(&tmp_ctx,ctx))
 		     	return 0;
 		if (sctx)
-			r = tmp_ctx.pctx->pmeth->signctx(tmp_ctx.pctx,
+			r = tmp_ctx.pctx->pmeth->signctx.synch(tmp_ctx.pctx,
 					sigret, siglen, &tmp_ctx);
 		else
 			r = EVP_DigestFinal_ex(&tmp_ctx,md,&mdlen);
@@ -177,7 +177,7 @@ int EVP_DigestSignFinal(EVP_MD_CTX *ctx, unsigned char *sigret, size_t *siglen)
 		{
 		if (sctx)
 			{
-			if (pctx->pmeth->signctx(pctx, sigret, siglen, ctx) <= 0)
+			if (pctx->pmeth->signctx.synch(pctx, sigret, siglen, ctx) <= 0)
 				return 0;
 			}
 		else
@@ -198,7 +198,7 @@ int EVP_DigestVerifyFinal(EVP_MD_CTX *ctx, unsigned char *sig, size_t siglen)
 	unsigned int mdlen;
 	int vctx;
 
-	if (ctx->pctx->pmeth->verifyctx)
+	if (ctx->pctx->pmeth->verifyctx.synch)
 		vctx = 1;
 	else
 		vctx = 0;
@@ -207,7 +207,7 @@ int EVP_DigestVerifyFinal(EVP_MD_CTX *ctx, unsigned char *sig, size_t siglen)
 		return -1;	
 	if (vctx)
 		{
-		r = tmp_ctx.pctx->pmeth->verifyctx(tmp_ctx.pctx,
+		r = tmp_ctx.pctx->pmeth->verifyctx.synch(tmp_ctx.pctx,
 					sig, siglen, &tmp_ctx);
 		}
 	else

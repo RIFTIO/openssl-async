@@ -2949,6 +2949,13 @@ int ssl3_pending(const SSL *s)
 	if (s->rstate == SSL_ST_READ_BODY)
 		return 0;
 	
+	if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+		{
+		if (s->s3->pkeystate)
+			return -1; /* Simulate that there's something to read */
+		return ssl3_asynch_read_pending(s);
+		}
+
 	return (s->s3->rrec.type == SSL3_RT_APPLICATION_DATA) ? s->s3->rrec.length : 0;
 	}
 
@@ -3032,6 +3039,8 @@ void ssl3_free(SSL *s)
 	if (s->s3->tlsext_custom_types != NULL)
 		OPENSSL_free(s->s3->tlsext_custom_types);
 #endif
+	ssl3_cleanup_transmission_pool(s);
+	ssl3_cleanup_read_record_pool(s);
 	OPENSSL_cleanse(s->s3,sizeof *s->s3);
 	OPENSSL_free(s->s3);
 	s->s3=NULL;
@@ -3122,6 +3131,11 @@ void ssl3_clear(SSL *s)
 	s->s3->num_renegotiations=0;
 	s->s3->in_read_app_data=0;
 	s->version=SSL3_VERSION;
+
+	/* This ensures that the mode can't be changed with SSL_set_mode()
+	   later on */
+	if (s->mode & SSL_MODE_ASYNCHRONOUS)
+		s->s3->flags |= SSL3_FLAGS_ASYNCH;
 
 #if !defined(OPENSSL_NO_TLSEXT) && !defined(OPENSSL_NO_NEXTPROTONEG)
 	if (s->next_proto_negotiated)
@@ -4388,7 +4402,9 @@ int ssl3_write(SSL *s, const void *buf, int len)
 			}
 
 		s->rwstate=SSL_WRITING;
+		CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 		n=BIO_flush(s->wbio);
+		CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 		if (n <= 0) return(n);
 		s->rwstate=SSL_NOTHING;
 

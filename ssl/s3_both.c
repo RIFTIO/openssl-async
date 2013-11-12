@@ -776,3 +776,15 @@ int ssl3_release_read_buffer(SSL *s)
 	return 1;
 	}
 
+int ssl3_release_buffer(SSL *s, SSL3_BUFFER *b, int write_p)
+	{
+	if (b->buf != NULL)
+		{
+		if (write_p)
+			freelist_insert(s->ctx, 0, b->len, b->buf);
+		else
+			freelist_insert(s->ctx, 1, b->len, b->buf);
+		b->buf = NULL;
+		}
+	return 1;
+	}

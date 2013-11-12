@@ -109,7 +109,7 @@ static int int_update(EVP_MD_CTX *ctx,const void *data,size_t count)
 static int cmac_signctx_init(EVP_PKEY_CTX *ctx, EVP_MD_CTX *mctx)
 	{
 	EVP_MD_CTX_set_flags(mctx, EVP_MD_CTX_FLAG_NO_INIT);
-	mctx->update = int_update;
+	mctx->update.synch = int_update;
 	return 1;
 	}
 
@@ -201,22 +201,22 @@ const EVP_PKEY_METHOD cmac_pkey_meth =
 	0,
 	pkey_cmac_keygen,
 
-	0, 0,
+	0, { 0, 0 },
 
-	0, 0,
+	0, { 0, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
 	cmac_signctx_init,
-	cmac_signctx,
+	{ cmac_signctx, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
 	pkey_cmac_ctrl,
 	pkey_cmac_ctrl_str

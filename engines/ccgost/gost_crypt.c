@@ -45,8 +45,8 @@ EVP_CIPHER cipher_gost =
 	8,/*iv_len */
 	EVP_CIPH_CFB_MODE| EVP_CIPH_NO_PADDING |
 	EVP_CIPH_CUSTOM_IV| EVP_CIPH_RAND_KEY | EVP_CIPH_ALWAYS_CALL_INIT,
-	gost_cipher_init,
-	gost_cipher_do_cfb,
+	{ gost_cipher_init },
+	{ gost_cipher_do_cfb },
 	gost_cipher_cleanup,
 	sizeof(struct ossl_gost_cipher_ctx),/* ctx_size */
 	gost89_set_asn1_parameters,
@@ -63,8 +63,8 @@ EVP_CIPHER cipher_gost_cpacnt =
 	8,/*iv_len */
 	EVP_CIPH_OFB_MODE| EVP_CIPH_NO_PADDING |
 	EVP_CIPH_CUSTOM_IV| EVP_CIPH_RAND_KEY | EVP_CIPH_ALWAYS_CALL_INIT,
-	gost_cipher_init_cpa,
-	gost_cipher_do_cnt,
+	{ gost_cipher_init_cpa },
+	{ gost_cipher_do_cnt },
 	gost_cipher_cleanup,
 	sizeof(struct ossl_gost_cipher_ctx), /* ctx_size */
 	gost89_set_asn1_parameters,
@@ -92,13 +92,13 @@ EVP_MD imit_gost_cpa =
 	NID_undef,
 	4,
 	0,
-	gost_imit_init_cpa,
-	gost_imit_update,
-	gost_imit_final,
+	{ gost_imit_init_cpa },
+	{ gost_imit_update },
+	{ gost_imit_final },
 	gost_imit_copy,
 	gost_imit_cleanup,
-	NULL,
-	NULL,
+	{ NULL },
+	{ NULL },
 	{0,0,0,0,0},
 	8,
 	sizeof(struct ossl_gost_imit_ctx), 

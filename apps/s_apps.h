@@ -180,6 +180,12 @@ void MS_CALLBACK tlsext_cb(SSL *s, int client_server, int type,
 int MS_CALLBACK generate_cookie_callback(SSL *ssl, unsigned char *cookie, unsigned int *cookie_len);
 int MS_CALLBACK verify_cookie_callback(SSL *ssl, unsigned char *cookie, unsigned int cookie_len);
 
+int ssl_asynch_callback(int write_p, int status, const void *buf, size_t len, SSL *ssl, void *arg);
+
+void thread_setup(void);
+void thread_cleanup(void);
+int thread_app_lock_id(void);
+
 typedef struct ssl_excert_st SSL_EXCERT;
 
 void ssl_ctx_set_excert(SSL_CTX *ctx, SSL_EXCERT *exc);

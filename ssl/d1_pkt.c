@@ -412,7 +412,7 @@ dtls1_process_record(SSL *s)
 	rr->data=rr->input;
 	rr->orig_len=rr->length;
 
-	enc_err = s->method->ssl3_enc->enc(s,0);
+	enc_err = s->method->ssl3_enc->enc(s,0,NULL);
 	/* enc_err is:
 	 *    0: (in non-constant time) if the record is publically invalid.
 	 *    1: if the padding is valid
@@ -477,7 +477,7 @@ printf("\n");
 			mac = &rr->data[rr->length];
 			}
 
-		i=s->method->ssl3_enc->mac(s,md,0 /* not send */);
+		i=s->method->ssl3_enc->mac(s,md,0 /* not send */, NULL);
 		if (i < 0 || mac == NULL || CRYPTO_memcmp(md, mac, (size_t)mac_size) != 0)
 			enc_err = -1;
 		if (rr->length > SSL3_RT_MAX_COMPRESSED_LENGTH+mac_size)
@@ -1620,7 +1620,7 @@ int do_dtls1_write(SSL *s, int type, const unsigned char *buf, unsigned int len,
 
 	if (mac_size != 0)
 		{
-		if(s->method->ssl3_enc->mac(s,&(p[wr->length + eivlen]),1) < 0)
+		if(s->method->ssl3_enc->mac(s,&(p[wr->length + eivlen]),1,NULL) < 0)
 			goto err;
 		wr->length+=mac_size;
 		}
@@ -1632,7 +1632,7 @@ int do_dtls1_write(SSL *s, int type, const unsigned char *buf, unsigned int len,
 	if (eivlen)
 		wr->length += eivlen;
 
-	s->method->ssl3_enc->enc(s,1);
+	s->method->ssl3_enc->enc(s,1,NULL);
 
 	/* record length after mac and block padding */
 /*	if (type == SSL3_RT_APPLICATION_DATA ||

@@ -252,33 +252,36 @@ int ssl3_change_cipher_state(SSL *s, int which)
 			EVP_CIPHER_CTX_init(s->enc_read_ctx);
 		dd= s->enc_read_ctx;
 
-		ssl_replace_hash(&s->read_hash,m);
+        if (s->s3 && (s->s3->flags & SSL3_FLAGS_ASYNCH))
+            ssl_replace_hash_asynch(&s->read_hash,m);
+        else
+		    ssl_replace_hash(&s->read_hash,m);
 #ifndef OPENSSL_NO_COMP
-		/* COMPRESS */
-		if (s->expand != NULL)
-			{
-			COMP_CTX_free(s->expand);
-			s->expand=NULL;
-			}
-		if (comp != NULL)
-			{
-			s->expand=COMP_CTX_new(comp);
-			if (s->expand == NULL)
-				{
-				SSLerr(SSL_F_SSL3_CHANGE_CIPHER_STATE,SSL_R_COMPRESSION_LIBRARY_ERROR);
-				goto err2;
-				}
-			if (s->s3->rrec.comp == NULL)
-				s->s3->rrec.comp=(unsigned char *)
-					OPENSSL_malloc(SSL3_RT_MAX_PLAIN_LENGTH);
-			if (s->s3->rrec.comp == NULL)
-				goto err;
-			}
+	    /* COMPRESS */
+	    if (s->expand != NULL)
+		    {
+		    COMP_CTX_free(s->expand);
+		    s->expand=NULL;
+		    }
+	    if (comp != NULL)
+		    {
+		    s->expand=COMP_CTX_new(comp);
+		    if (s->expand == NULL)
+			    {
+			    SSLerr(SSL_F_SSL3_CHANGE_CIPHER_STATE,SSL_R_COMPRESSION_LIBRARY_ERROR);
+			    goto err2;
+			    }
+		    if (s->s3->rrec.comp == NULL)
+			    s->s3->rrec.comp=(unsigned char *)
+				    OPENSSL_malloc(SSL3_RT_MAX_PLAIN_LENGTH);
+		    if (s->s3->rrec.comp == NULL)
+			    goto err;
+		    }
 #endif
-		memset(&(s->s3->read_sequence[0]),0,8);
-		mac_secret= &(s->s3->read_mac_secret[0]);
-		}
-	else
+	    memset(&(s->s3->read_sequence[0]),0,8);
+	    mac_secret= &(s->s3->read_mac_secret[0]);
+	    }
+    else
 		{
 		if (s->enc_write_ctx != NULL)
 			reuse_dd = 1;
@@ -288,7 +291,10 @@ int ssl3_change_cipher_state(SSL *s, int which)
 			/* make sure it's intialized in case we exit later with an error */
 			EVP_CIPHER_CTX_init(s->enc_write_ctx);
 		dd= s->enc_write_ctx;
-		ssl_replace_hash(&s->write_hash,m);
+        if (s->s3 && (s->s3->flags & SSL3_FLAGS_ASYNCH))
+            ssl_replace_hash_asynch(&s->write_hash,m);
+        else
+            ssl_replace_hash(&s->write_hash,m);
 #ifndef OPENSSL_NO_COMP
 		/* COMPRESS */
 		if (s->compress != NULL)
@@ -374,6 +380,15 @@ int ssl3_change_cipher_state(SSL *s, int which)
 	s->session->key_arg_length=0;
 
 	EVP_CipherInit_ex(dd,c,NULL,key,iv,(which & SSL3_CC_WRITE));
+
+    if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+        if (!EVP_CIPHER_CTX_ctrl_ex(dd, EVP_CTRL_SETUP_ASYNCH_CALLBACK,
+                                    0, NULL, (void(*)(void))ssl3_asynch_handle_cipher_callbacks))
+            goto err2;
+        
+    if (!EVP_CipherInit_ex(dd,c,NULL,key,iv,(which & SSL3_CC_WRITE)))
+        goto err2;
+
 
 #ifdef OPENSSL_SSL_TRACE_CRYPTO
 	if (s->msg_callback)
@@ -487,6 +502,14 @@ void ssl3_cleanup_key_block(SSL *s)
 	s->s3->tmp.key_block_length=0;
 	}
 
+static int ssl3_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post);
+static int ssl3_enc_post(SSL3_TRANSMISSION *trans, int status)
+    {
+    trans->status = status;
+    return ssl3_enc_inner(trans->s, !!(trans->flags & SSL3_TRANS_FLAGS_SEND),
+                          trans, 1);
+    }
+
 /* ssl3_enc encrypts/decrypts the record in |s->wrec| / |s->rrec|, respectively.
  *
  * Returns:
@@ -496,7 +519,11 @@ void ssl3_cleanup_key_block(SSL *s)
  *   -1: if the record's padding is invalid or, if sending, an internal error
  *       occurred.
  */
-int ssl3_enc(SSL *s, int send)
+int ssl3_enc(SSL *s, int send, SSL3_TRANSMISSION *trans)
+    {
+    return ssl3_enc_inner(s, send, trans, 0);
+    }
+int ssl3_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post)
 	{
 	SSL3_RECORD *rec;
 	EVP_CIPHER_CTX *ds;
@@ -522,6 +549,19 @@ int ssl3_enc(SSL *s, int send)
 		else
 			enc=EVP_CIPHER_CTX_cipher(s->enc_read_ctx);
 		}
+        
+    if (trans)
+        {
+        rec = &(trans->rec);
+        
+        if (post)
+            {
+            l = rec->length;
+            bs = EVP_CIPHER_block_size(ds->cipher);
+            
+            goto post;
+            }
+        }
 
 	if ((s->session == NULL) || (ds == NULL) ||
 		(enc == NULL))
@@ -555,7 +595,22 @@ int ssl3_enc(SSL *s, int send)
 				return 0;
 			/* otherwise, rec->length >= bs */
 			}
-		
+        if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+            {
+            OPENSSL_assert(trans != NULL);
+            trans->post = 0;
+            ssl3_asynch_push_callback(trans, ssl3_enc_post);
+            
+            EVP_CIPHER_CTX_ctrl_ex(ds,
+                                   EVP_CTRL_UPDATE_ASYNCH_CALLBACK_DATA,
+                                   0, trans, NULL);
+            if (!EVP_Cipher(ds, trans->rec.data, trans->rec.input, l))
+                return 0;
+            return(-1); /* same kind of indication as no data
+                         * in non-blocking I/O */
+            }
+
+post:
 		EVP_Cipher(ds,rec->data,rec->input,l);
 
 		if (EVP_MD_CTX_md(s->read_hash) != NULL)
@@ -586,8 +641,6 @@ void ssl3_free_digest_list(SSL *s)
 	OPENSSL_free(s->s3->handshake_dgst);
 	s->s3->handshake_dgst=NULL;
 	}	
-
-
 
 void ssl3_finish_mac(SSL *s, const unsigned char *buf, int len)
 	{
@@ -723,104 +776,193 @@ static int ssl3_handshake_mac(SSL *s, int md_nid,
 	return((int)ret);
 	}
 
-int n_ssl3_mac(SSL *ssl, unsigned char *md, int send)
-	{
-	SSL3_RECORD *rec;
-	unsigned char *mac_sec,*seq;
-	EVP_MD_CTX md_ctx;
-	const EVP_MD_CTX *hash;
-	unsigned char *p,rec_char;
-	size_t md_size;
-	int npad;
-	int t;
+static int n_ssl3_mac_inner(SSL *ssl, unsigned char *md, int send,
+                            SSL3_TRANSMISSION *trans, int post);
+static int n_ssl3_mac_post1(SSL3_TRANSMISSION *trans, int status)
+    {
+    return n_ssl3_mac_inner(trans->s, trans->md,
+                            !!(trans->flags & SSL3_TRANS_FLAGS_SEND),
+                            trans, 1);
+    }
+static int n_ssl3_mac_post2(SSL3_TRANSMISSION *trans, int status)
+    {
+    return n_ssl3_mac_inner(trans->s, trans->md,
+                            !!(trans->flags & SSL3_TRANS_FLAGS_SEND),
+                            trans, 2);
+    }
+int n_ssl3_mac(SSL *ssl, unsigned char *md, int send, SSL3_TRANSMISSION *trans)
+    {
+    return n_ssl3_mac_inner(ssl, md, send, trans, 0);
+    }
+static int n_ssl3_mac_inner(SSL *ssl, unsigned char *md, int send,
+                            SSL3_TRANSMISSION *trans, int post)
+    {
+    SSL3_RECORD *rec;
+    unsigned char *mac_sec,*seq;
+    EVP_MD_CTX _md_ctx, *md_ctx;
+    const EVP_MD_CTX *hash;
+    unsigned char *p,rec_char;
+    size_t md_size;
+    int npad;
+    int t;
+    
+    if (send)
+        {
+        if (trans)
+            rec= &(trans->rec);
+        else
+            rec= &(ssl->s3->wrec);
+        mac_sec= &(ssl->s3->write_mac_secret[0]);
+        seq= &(ssl->s3->write_sequence[0]);
+        hash=ssl->write_hash;
+        }
+    else
+        {
+        if (trans)
+            rec= &(trans->rec);
+        else
+            rec= &(ssl->s3->rrec);
+        mac_sec= &(ssl->s3->read_mac_secret[0]);
+        seq= &(ssl->s3->read_sequence[0]);
+        hash=ssl->read_hash;
+        }
+    if (trans)
+        trans->md = md;
+        
+        t=EVP_MD_CTX_size(hash);
+        if (t < 0)
+            return -1;
+        md_size=t;
+        npad=(48/md_size)*md_size;
+        
+        if (!send &&
+            !trans &&
+            EVP_CIPHER_CTX_mode(ssl->enc_read_ctx) == EVP_CIPH_CBC_MODE &&
+            ssl3_cbc_record_digest_supported(hash))
+        {
+        /* This is a CBC-encrypted record. We must avoid leaking any
+         * timing-side channel information about how many blocks of
+         * data we are hashing because that gives an attacker a
+         * timing-oracle. */
+         
+        /* npad is, at most, 48 bytes and that's with MD5:
+         *   16 + 48 + 8 (sequence bytes) + 1 + 2 = 75.
+         *
+         * With SHA-1 (the largest hash speced for SSLv3) the hash size
+         * goes up 4, but npad goes down by 8, resulting in a smaller
+         * total size. */
+        unsigned char header[75];
+        unsigned j = 0;
+        memcpy(header+j, mac_sec, md_size);
+        j += md_size;
+        memcpy(header+j, ssl3_pad_1, npad);
+        j += npad;
+        memcpy(header+j, seq, 8);
+        j += 8;
+        header[j++] = rec->type;
+        header[j++] = rec->length >> 8;
+        header[j++] = rec->length & 0xff;
+        
+        ssl3_cbc_digest_record(
+            hash,
+            md, &md_size,
+            header, rec->input,
+            rec->length + md_size, rec->orig_len,
+            mac_sec, md_size,
+            1 /* is SSLv3 */);
+        }
+    else
+        {
+        if (trans)
+            md_ctx = &trans->md_ctx;
+        else
+            md_ctx = &_md_ctx;
 
-	if (send)
-		{
-		rec= &(ssl->s3->wrec);
-		mac_sec= &(ssl->s3->write_mac_secret[0]);
-		seq= &(ssl->s3->write_sequence[0]);
-		hash=ssl->write_hash;
-		}
-	else
-		{
-		rec= &(ssl->s3->rrec);
-		mac_sec= &(ssl->s3->read_mac_secret[0]);
-		seq= &(ssl->s3->read_sequence[0]);
-		hash=ssl->read_hash;
-		}
-
-	t=EVP_MD_CTX_size(hash);
-	if (t < 0)
-		return -1;
-	md_size=t;
-	npad=(48/md_size)*md_size;
-
-	if (!send &&
-	    EVP_CIPHER_CTX_mode(ssl->enc_read_ctx) == EVP_CIPH_CBC_MODE &&
-	    ssl3_cbc_record_digest_supported(hash))
-		{
-		/* This is a CBC-encrypted record. We must avoid leaking any
-		 * timing-side channel information about how many blocks of
-		 * data we are hashing because that gives an attacker a
-		 * timing-oracle. */
-
-		/* npad is, at most, 48 bytes and that's with MD5:
-		 *   16 + 48 + 8 (sequence bytes) + 1 + 2 = 75.
-		 *
-		 * With SHA-1 (the largest hash speced for SSLv3) the hash size
-		 * goes up 4, but npad goes down by 8, resulting in a smaller
-		 * total size. */
-		unsigned char header[75];
-		unsigned j = 0;
-		memcpy(header+j, mac_sec, md_size);
-		j += md_size;
-		memcpy(header+j, ssl3_pad_1, npad);
-		j += npad;
-		memcpy(header+j, seq, 8);
-		j += 8;
-		header[j++] = rec->type;
-		header[j++] = rec->length >> 8;
-		header[j++] = rec->length & 0xff;
-
-		ssl3_cbc_digest_record(
-			hash,
-			md, &md_size,
-			header, rec->input,
-			rec->length + md_size, rec->orig_len,
-			mac_sec, md_size,
-			1 /* is SSLv3 */);
-		}
-	else
-		{
-		unsigned int md_size_u;
-		/* Chop the digest off the end :-) */
-		EVP_MD_CTX_init(&md_ctx);
-
-		EVP_MD_CTX_copy_ex( &md_ctx,hash);
-		EVP_DigestUpdate(&md_ctx,mac_sec,md_size);
-		EVP_DigestUpdate(&md_ctx,ssl3_pad_1,npad);
-		EVP_DigestUpdate(&md_ctx,seq,8);
-		rec_char=rec->type;
-		EVP_DigestUpdate(&md_ctx,&rec_char,1);
-		p=md;
-		s2n(rec->length,p);
-		EVP_DigestUpdate(&md_ctx,md,2);
-		EVP_DigestUpdate(&md_ctx,rec->input,rec->length);
-		EVP_DigestFinal_ex( &md_ctx,md,NULL);
-
-		EVP_MD_CTX_copy_ex( &md_ctx,hash);
-		EVP_DigestUpdate(&md_ctx,mac_sec,md_size);
-		EVP_DigestUpdate(&md_ctx,ssl3_pad_2,npad);
-		EVP_DigestUpdate(&md_ctx,md,md_size);
-		EVP_DigestFinal_ex( &md_ctx,md,&md_size_u);
-		md_size = md_size_u;
-
-		EVP_MD_CTX_cleanup(&md_ctx);
-	}
-
-	ssl3_record_sequence_update(seq);
-	return(md_size);
-	}
+        switch(post)
+            {
+            case 1:
+                goto post1;
+            case 2:
+                goto post2;
+            default:
+                break;
+            }
+            
+post0:  /* This happens in application thread, which is
+         * quite important, we really want the sequence
+         * to updated in application thread space. */
+        if (trans)
+            {
+            memcpy(trans->seq_cache,seq,8);
+            ssl3_record_sequence_update(seq);
+            seq = trans->seq_cache;
+            /* TODO : Does this need to be pushed or can we simply do
+             * this with EVP_MD_CTX_ctrl_ex */
+            //ssl3_asynch_push_callback(trans, n_ssl3_mac_post1);
+            trans->post = 0;
+            }
+            
+        /* Chop the digest off the end :-) */
+        EVP_MD_CTX_init(md_ctx);
+        
+        EVP_MD_CTX_copy_ex( md_ctx,hash);
+        if (trans)
+            {
+            EVP_MD_CTX_ctrl_ex( md_ctx,
+                                EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK,
+                                0, trans, n_ssl3_mac_post1);
+            }
+        EVP_DigestUpdate(md_ctx,mac_sec,md_size);
+        EVP_DigestUpdate(md_ctx,ssl3_pad_1,npad);
+        EVP_DigestUpdate(md_ctx,seq,8);
+        rec_char=rec->type;
+        EVP_DigestUpdate(md_ctx,&rec_char,1);
+        p=md;
+        s2n(rec->length,p);
+        EVP_DigestUpdate(md_ctx,md,2);
+        EVP_DigestUpdate(md_ctx,rec->input,rec->length);
+        EVP_DigestFinal_ex( md_ctx,md,NULL);
+        if (trans)
+            {
+            return 1;
+            }
+            
+post1:
+        if (trans)
+            {
+            /* TODO : Does this need to be pushed or can we simply do
+             * this with EVP_MD_CTX_ctrl_ex */
+            //ssl3_asynch_push_callback(trans, n_ssl3_mac_post2);
+            trans->post = 0;
+            }
+        EVP_MD_CTX_copy_ex( md_ctx,hash);
+        if (trans)
+            {
+            EVP_MD_CTX_ctrl_ex( md_ctx,
+                                EVP_MD_CTRL_UPDATE_ASYNCH_CALLBACK_DATA,
+                                0, trans, n_ssl3_mac_post2);
+            }
+        EVP_DigestUpdate(md_ctx,mac_sec,md_size);
+        EVP_DigestUpdate(md_ctx,ssl3_pad_2,npad);
+        EVP_DigestUpdate(md_ctx,md,md_size);
+        EVP_DigestFinal_ex( md_ctx,md,&md_size);
+        if (trans)
+            {
+                return 1;
+            }
+        
+post2:
+        EVP_MD_CTX_cleanup(md_ctx);
+        }
+        
+    if (!trans)
+        {
+        ssl3_record_sequence_update(seq);
+        return(md_size);
+        }
+    else
+        return 1;
+    }
 
 void ssl3_record_sequence_update(unsigned char *seq)
 	{

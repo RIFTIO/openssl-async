@@ -80,6 +80,9 @@ typedef struct hmac_ctx_st
 	EVP_MD_CTX o_ctx;
 	unsigned int key_length;
 	unsigned char key[HMAC_MAX_MD_CBLOCK];
+
+	/* For asynch operations */
+	struct hmac_ctx_asynch_st *ctx_asynch;
 	} HMAC_CTX;
 
 #define HMAC_size(e)	(EVP_MD_size((e)->md))
@@ -94,6 +97,11 @@ __owur int HMAC_Init(HMAC_CTX *ctx, const void *key, int len,
 	       const EVP_MD *md); /* deprecated */
 /*__owur*/ int HMAC_Init_ex(HMAC_CTX *ctx, const void *key, int len,
 		  const EVP_MD *md, ENGINE *impl);
+int HMAC_Init_asynch(HMAC_CTX *ctx, const void *key, int len,
+                     const EVP_MD *md, ENGINE *impl,
+                     void (*callback_fn)(unsigned char *md, size_t len,
+                     void *userdata, int status),
+                     void *callback_data);
 /*__owur*/ int HMAC_Update(HMAC_CTX *ctx, const unsigned char *data, size_t len);
 /*__owur*/ int HMAC_Final(HMAC_CTX *ctx, unsigned char *md, unsigned int *len);
 unsigned char *HMAC(const EVP_MD *evp_md, const void *key, int key_len,

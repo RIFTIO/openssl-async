@@ -64,6 +64,35 @@
 #include "cryptlib.h"
 #include <openssl/hmac.h>
 
+struct hmac_ctx_asynch_st
+	{
+	void (*cb)(unsigned char *md, size_t len,
+		void *userdata, int status);
+	void *cb_data;
+	enum
+		{
+		/* The following states are used for init */
+		hmac_init,
+		hmac_initkey_final,
+		hmac_initkey_pad,
+		hmac_reset,
+		hmac_reset_final,
+		hmac_init_final,
+		/* The following state is used for update and final */
+		hmac_data,
+		hmac_final,
+		hmac_final2,
+		hmac_final3,
+		hmac_final4,
+		} next_state;  /* State for our internal asynch callback */
+
+	/* cache */
+	int ctx_i_done;
+	int ctx_o_done;
+	const EVP_MD *md;
+	ENGINE *impl;
+	};
+
 int HMAC_Init_ex(HMAC_CTX *ctx, const void *key, int len,
 		  const EVP_MD *md, ENGINE *impl)
 	{
@@ -127,6 +156,224 @@ int HMAC_Init_ex(HMAC_CTX *ctx, const void *key, int len,
 	return 0;
 	}
 
+static void _hmac_cb(unsigned char *md, unsigned int size,
+	void *userdata, int status);
+
+/* FIXME: We have a possible race condition, if i_ctx and o_ctx are done 
+ * EXACTLY at the same time and we run on two different cores, we might have
+ * a case when they won't look ready at the same time
+ */
+static void _hmac_cb_i(unsigned char *md, unsigned int size,
+	void *userdata, int status)
+	{
+	HMAC_CTX *ctx = (HMAC_CTX *)userdata;
+	ctx->ctx_asynch->ctx_i_done = 1;
+	_hmac_cb(md, size, userdata, status);
+	}
+static void _hmac_cb_o(unsigned char *md, unsigned int size,
+	void *userdata, int status)
+	{
+	HMAC_CTX *ctx = (HMAC_CTX *)userdata;
+	ctx->ctx_asynch->ctx_o_done = 1;
+	_hmac_cb(md, size, userdata, status);
+	}
+static void _hmac_cb(unsigned char *md, unsigned int size,
+	void *userdata, int status)
+	{
+	HMAC_CTX *ctx = (HMAC_CTX *)userdata;
+	OPENSSL_assert(ctx->ctx_asynch != NULL);
+	unsigned char pad[HMAC_MAX_MD_CBLOCK];
+
+	unsigned int i;
+
+	if (!status)		/* Callback because of error, break out */
+		goto err;
+
+	switch(ctx->ctx_asynch->next_state)
+		{
+	case hmac_init:		/* Never called with this */
+		goto err;
+	case hmac_initkey_final:
+		/* Continue where it left off */
+		ctx->ctx_asynch->next_state = hmac_initkey_pad;
+		if (!EVP_DigestFinal_ex(&(ctx->md_ctx),ctx->key,
+				&ctx->key_length))
+			goto err;
+		break;
+	case hmac_initkey_pad:
+		ctx->ctx_asynch->next_state = hmac_reset;
+		if(ctx->key_length != HMAC_MAX_MD_CBLOCK)
+			memset(&ctx->key[ctx->key_length], 0,
+				HMAC_MAX_MD_CBLOCK - ctx->key_length);
+		/* Fall through */
+
+/* We use the fact that we have two separate contexts to fiddle with to
+ * run them in parallell.
+ */
+	case hmac_reset:
+		ctx->ctx_asynch->next_state = hmac_reset_final;
+		if (!EVP_MD_CTX_ctrl_ex(&ctx->i_ctx,
+				EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK,
+				0, ctx, (void (*)(void))_hmac_cb_i)
+			|| !EVP_DigestInit_ex(&ctx->i_ctx,
+				ctx->ctx_asynch->md, ctx->ctx_asynch->impl))
+			goto err;
+		if (!EVP_MD_CTX_ctrl_ex(&ctx->o_ctx,
+				EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK,
+				0, ctx, (void (*)(void))_hmac_cb_o)
+		    || !EVP_DigestInit_ex(&ctx->o_ctx,
+				ctx->ctx_asynch->md, ctx->ctx_asynch->impl))
+			goto err;
+		break;
+	case hmac_reset_final:
+		if (ctx->ctx_asynch->ctx_i_done && ctx->ctx_asynch->ctx_o_done)
+			{
+			ctx->ctx_asynch->ctx_i_done = 0;
+			ctx->ctx_asynch->ctx_o_done = 0;
+			ctx->ctx_asynch->next_state = hmac_init_final;
+			for (i=0; i<HMAC_MAX_MD_CBLOCK; i++)
+				pad[i]=0x36^ctx->key[i];
+			if (!EVP_DigestUpdate(&ctx->i_ctx,
+					pad,EVP_MD_block_size(ctx->ctx_asynch->md)))
+				goto err;
+
+			for (i=0; i<HMAC_MAX_MD_CBLOCK; i++)
+				pad[i]=0x5c^ctx->key[i];
+			if (!EVP_DigestUpdate(&ctx->o_ctx,
+					pad,EVP_MD_block_size(ctx->ctx_asynch->md)))
+				goto err;
+			}
+		break;
+	case hmac_init_final:
+		if (ctx->ctx_asynch->ctx_i_done)
+			{
+			if (!EVP_MD_CTX_copy_ex(&ctx->md_ctx,&ctx->i_ctx))
+				goto err;
+			}
+		if (!(ctx->ctx_asynch->ctx_i_done && ctx->ctx_asynch->ctx_o_done))
+			break;
+
+		/* FALLTHROUGH, because the rule is that at the end of init, we
+		   call the user callback with NULL arguments */
+		ctx->ctx_asynch->next_state = hmac_data;
+	case hmac_data:
+		ctx->ctx_asynch->cb(NULL, 0, ctx->ctx_asynch->cb_data, 1);
+		break;
+	case hmac_final:
+		ctx->ctx_asynch->next_state = hmac_final2;
+		if (!EVP_DigestFinal_ex(&ctx->md_ctx, NULL, 0))
+			goto err;
+		break;
+	case hmac_final2:
+		ctx->ctx_asynch->next_state = hmac_final3;
+		if (!EVP_MD_CTX_copy_ex(&ctx->md_ctx,&ctx->o_ctx))
+			goto err;
+		if (!EVP_DigestUpdate(&ctx->md_ctx, md, size))
+			goto err;
+		break;
+	case hmac_final3:
+		ctx->ctx_asynch->next_state = hmac_final4;
+		if (!EVP_DigestFinal_ex(&ctx->md_ctx, NULL, 0))
+			goto err;
+		break;
+	case hmac_final4:
+		ctx->ctx_asynch->cb(md, size, ctx->ctx_asynch->cb_data, 1);
+		break;
+		}
+	return;
+err:
+	ctx->ctx_asynch->cb(NULL, 0, ctx->ctx_asynch->cb_data, 0);
+	}
+
+int HMAC_Init_asynch(HMAC_CTX *ctx, const void *key, int len,
+	const EVP_MD *md, ENGINE *impl,
+	void (*callback_fn)(unsigned char *md, size_t len,
+		void *userdata, int status),
+	void *callback_data)
+	{
+	int j,reset=0;
+
+#ifdef OPENSSL_FIPS
+	if (FIPS_mode())
+		{
+		/* If we have an ENGINE need to allow non FIPS */
+		if ((impl || ctx->i_ctx.engine)
+			&&  !(ctx->i_ctx.flags & EVP_CIPH_FLAG_NON_FIPS_ALLOW))
+			{
+			EVPerr(EVP_F_HMAC_INIT_ASYNCH, EVP_R_DISABLED_FOR_FIPS);
+			return 0;
+			}
+		/* Other algorithm blocking will be done in FIPS_cmac_init,
+		 * via FIPS_hmac_init_ex().
+		 */
+		if (!impl && !ctx->i_ctx.engine)
+			return FIPS_hmac_init_ex(ctx, key, len, md, NULL);
+		}
+#endif
+
+	if (md != NULL)
+		{
+		reset=1;
+		ctx->md=md;
+		}
+	else
+		md=ctx->md;
+
+	if (!ctx->ctx_asynch)
+		{
+		ctx->ctx_asynch =
+			OPENSSL_malloc(sizeof(struct hmac_ctx_asynch_st));
+		memset(ctx->ctx_asynch, '\0', sizeof(struct hmac_ctx_asynch_st));
+		}
+
+	ctx->ctx_asynch->cb = callback_fn;
+	ctx->ctx_asynch->cb_data = callback_data;
+	ctx->ctx_asynch->next_state = hmac_init;
+	ctx->ctx_asynch->md = md;
+	ctx->ctx_asynch->impl = impl;
+
+	if (ctx->ctx_asynch->cb == NULL)
+		{
+		EVPerr(EVP_F_HMAC_INIT_ASYNCH, EVP_R_NO_CALLBACK_SET);
+		return 0;
+		}
+
+	if (key != NULL)
+		{
+		j=EVP_MD_block_size(md);
+		OPENSSL_assert(j <= (int)sizeof(ctx->key));
+		if (j < len)
+			{
+			ctx->ctx_asynch->next_state = hmac_initkey_final;
+			if (!EVP_MD_CTX_ctrl_ex(&ctx->i_ctx,
+					EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK,
+					0, ctx, (void (*)(void))_hmac_cb)
+				|| !EVP_DigestInit_ex(&ctx->md_ctx,md, impl))
+				goto err;
+			if (!EVP_DigestUpdate(&ctx->md_ctx,key,len))
+				goto err;
+			return 1;
+			}
+		else
+			{
+			OPENSSL_assert(len>=0 && len<=(int)sizeof(ctx->key));
+			memcpy(ctx->key,key,len);
+			ctx->key_length=len;
+			}
+		ctx->ctx_asynch->next_state = hmac_initkey_pad;
+		_hmac_cb(NULL, 0, ctx, 1);
+		}
+	else if (reset)
+		{
+		ctx->ctx_asynch->next_state = hmac_reset;
+		_hmac_cb(NULL, 0, ctx, 1);
+		}
+	return 1;
+err:
+	_hmac_cb(NULL, 0, ctx, 0);
+	return 0;
+	}
+
 int HMAC_Init(HMAC_CTX *ctx, const void *key, int len, const EVP_MD *md)
 	{
 	if(key && md)
@@ -134,12 +381,29 @@ int HMAC_Init(HMAC_CTX *ctx, const void *key, int len, const EVP_MD *md)
 	return HMAC_Init_ex(ctx,key,len,md, NULL);
 	}
 
-int HMAC_Update(HMAC_CTX *ctx, const unsigned char *data, size_t len)
+static int _hmac_Update_synch(HMAC_CTX *ctx, const unsigned char *data, size_t len)
 	{
 	return EVP_DigestUpdate(&ctx->md_ctx,data,len);
 	}
 
-int HMAC_Final(HMAC_CTX *ctx, unsigned char *md, unsigned int *len)
+static int _hmac_Update_asynch(HMAC_CTX *ctx, const unsigned char *data, size_t len)
+	{
+	if (ctx->ctx_asynch && ctx->ctx_asynch->next_state != hmac_data)
+		{
+		EVPerr(EVP_F__HMAC_UPDATE_ASYNCH, EVP_R_INITIALIZING);
+		return 0;
+		}
+	return EVP_DigestUpdate(&ctx->md_ctx,data,len);
+	}
+
+int HMAC_Update(HMAC_CTX *ctx, const unsigned char *data, size_t len)
+	{
+	if (ctx->ctx_asynch)
+		return _hmac_Update_asynch(ctx, data, len);
+	return _hmac_Update_synch(ctx, data, len);
+	}
+
+static int _hmac_Final_synch(HMAC_CTX *ctx, unsigned char *md, unsigned int *len)
 	{
 	unsigned int i;
 	unsigned char buf[EVP_MAX_MD_SIZE];
@@ -157,11 +421,26 @@ int HMAC_Final(HMAC_CTX *ctx, unsigned char *md, unsigned int *len)
 	return 0;
 	}
 
+static int _hmac_Final_asynch(HMAC_CTX *ctx)
+	{
+	ctx->ctx_asynch->next_state = hmac_final;
+	_hmac_cb(NULL, 0, ctx, 1);
+	return 1;
+	}
+
+int HMAC_Final(HMAC_CTX *ctx, unsigned char *md, unsigned int *len)
+	{
+	if (ctx->ctx_asynch)
+		return _hmac_Final_asynch(ctx);
+	return _hmac_Final_synch(ctx, md, len);
+	}
+
 void HMAC_CTX_init(HMAC_CTX *ctx)
 	{
 	EVP_MD_CTX_init(&ctx->i_ctx);
 	EVP_MD_CTX_init(&ctx->o_ctx);
 	EVP_MD_CTX_init(&ctx->md_ctx);
+	ctx->ctx_asynch = NULL;
 	}
 
 int HMAC_CTX_copy(HMAC_CTX *dctx, HMAC_CTX *sctx)

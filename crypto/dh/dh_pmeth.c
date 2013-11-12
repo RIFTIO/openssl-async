@@ -504,72 +504,86 @@ static int pkey_dh_derive(EVP_PKEY_CTX *ctx, unsigned char *key, size_t *keylen)
 
 const EVP_PKEY_METHOD dh_pkey_meth = 
 	{
-	EVP_PKEY_DH,
-	0,
-	pkey_dh_init,
-	pkey_dh_copy,
-	pkey_dh_cleanup,
+	EVP_PKEY_DH,        /* pkey_id */
+	0,                  /* flags */
+	pkey_dh_init,       /* init */
+	pkey_dh_copy,       /* copy */
+	pkey_dh_cleanup,    /* cleanup */
 
-	0,
-	pkey_dh_paramgen,
+	0,                  /* paramgen_init */
+	pkey_dh_paramgen,   /* paramgen */
 
-	0,
-	pkey_dh_keygen,
+	0,                  /* keygen_init */
+	pkey_dh_keygen,     /* keygen */
 
-	0,
-	0,
+	0,                  /* sign_init */
+	{ 0, 0 },           /* sign.synch/asynch */
 
-	0,
-	0,
+	0,                  /* verify_init */
+	{ 0, 0 },           /* verify.synch/asynch */
 
-	0,0,
+	0,                  /* verify_recover_init */
+    { 0, 0 },           /* verify_recover.synch/asynch */
 
-	0,0,0,0,
+	0,                  /* signctx_init */
+    { 0, 0 },           /* signctx.synch/asynch */
+    
+    0,                  /* verifyctx_init */
+    { 0, 0 },           /* verifyctx.synch/asynch */
 
-	0,0,
+	0,                  /* encrypt_init */
+    { 0, 0 },           /* encrypt.synch/asynch */
 
-	0,0,
+	0,                  /* decrypt_init */
+    { 0, 0 },           /* decrypt.synch/asynch */
 
-	0,
-	pkey_dh_derive,
+	0,                      /* derive_init */
+	{ pkey_dh_derive, 0 },  /* derive.synch/asynch */
 
-	pkey_dh_ctrl,
-	pkey_dh_ctrl_str
+	pkey_dh_ctrl,           /* ctrl */
+	pkey_dh_ctrl_str        /* ctrl_str */
 
 	};
 
 const EVP_PKEY_METHOD dhx_pkey_meth = 
 	{
-	EVP_PKEY_DHX,
-	0,
-	pkey_dh_init,
-	pkey_dh_copy,
-	pkey_dh_cleanup,
+	EVP_PKEY_DHX,       /* pkey_id */
+	0,                  /* flags */
+	pkey_dh_init,       /* init */
+	pkey_dh_copy,       /* copy */
+	pkey_dh_cleanup,    /* cleanup */
 
-	0,
-	pkey_dh_paramgen,
+	0,                  /* paramgen_init */
+	pkey_dh_paramgen,   /* paramgen */
 
-	0,
-	pkey_dh_keygen,
+	0,                  /* keygen_init */
+	pkey_dh_keygen,     /* keygen */
 
-	0,
-	0,
+	0,                  /* sign_init */
+	{ 0, 0 },           /* sign.synch/asynch */
 
-	0,
-	0,
+	0,                  /* verify_init */
+	{ 0, 0 },           /* verify.synch/asynch */
 
-	0,0,
+	0,                  /* verify_recover_init */
+    { 0, 0 },           /* verify_recover.synch/asynch */
 
-	0,0,0,0,
+	0,                  /* signctx_init */
+    { 0, 0 },           /* signctx.synch/asynch */
+    
+    0,                  /* verifyctx_init */
+    { 0, 0 },           /* verifyctx.synch/asynch */
 
-	0,0,
+	0,                  /* encrypt_init */
+    { 0, 0 },           /* encrypt.synch/asynch */
 
-	0,0,
+	0,                  /* decrypt_init */
+    { 0, 0 },           /* decrypt.synch/asynch */
 
-	0,
-	pkey_dh_derive,
+	0,                      /* derive_init */
+	{ pkey_dh_derive, 0 },  /* derive.synch/asynch */
 
-	pkey_dh_ctrl,
-	pkey_dh_ctrl_str
+	pkey_dh_ctrl,           /* ctrl */
+	pkey_dh_ctrl_str        /* ctrl_str */
 
 	};

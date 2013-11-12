@@ -441,8 +441,8 @@ static int aesni_ccm_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
 static const EVP_CIPHER aesni_##keylen##_##mode = { \
 	nid##_##keylen##_##nmode,blocksize,keylen/8,ivlen, \
 	flags|EVP_CIPH_##MODE##_MODE,	\
-	aesni_init_key,			\
-	aesni_##mode##_cipher,		\
+	{ aesni_init_key },		\
+	{ aesni_##mode##_cipher },	\
 	NULL,				\
 	sizeof(EVP_AES_KEY),		\
 	NULL,NULL,NULL,NULL }; \
@@ -450,8 +450,8 @@ static const EVP_CIPHER aes_##keylen##_##mode = { \
 	nid##_##keylen##_##nmode,blocksize,	\
 	keylen/8,ivlen, \
 	flags|EVP_CIPH_##MODE##_MODE,	\
-	aes_init_key,			\
-	aes_##mode##_cipher,		\
+	{ aes_init_key },		\
+	{ aes_##mode##_cipher },	\
 	NULL,				\
 	sizeof(EVP_AES_KEY),		\
 	NULL,NULL,NULL,NULL }; \
@@ -463,8 +463,8 @@ static const EVP_CIPHER aesni_##keylen##_##mode = { \
 	nid##_##keylen##_##mode,blocksize, \
 	(EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE?2:1)*keylen/8, ivlen, \
 	flags|EVP_CIPH_##MODE##_MODE,	\
-	aesni_##mode##_init_key,	\
-	aesni_##mode##_cipher,		\
+	{ aesni_##mode##_init_key },	\
+	{ aesni_##mode##_cipher },	\
 	aes_##mode##_cleanup,		\
 	sizeof(EVP_AES_##MODE##_CTX),	\
 	NULL,NULL,aes_##mode##_ctrl,NULL }; \
@@ -472,8 +472,8 @@ static const EVP_CIPHER aes_##keylen##_##mode = { \
 	nid##_##keylen##_##mode,blocksize, \
 	(EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE?2:1)*keylen/8, ivlen, \
 	flags|EVP_CIPH_##MODE##_MODE,	\
-	aes_##mode##_init_key,		\
-	aes_##mode##_cipher,		\
+	{ aes_##mode##_init_key },	\
+	{ aes_##mode##_cipher },	\
 	aes_##mode##_cleanup,		\
 	sizeof(EVP_AES_##MODE##_CTX),	\
 	NULL,NULL,aes_##mode##_ctrl,NULL }; \
@@ -872,8 +872,8 @@ const EVP_CIPHER *EVP_aes_##keylen##_##mode(void) \
 static const EVP_CIPHER aes_##keylen##_##mode = { \
 	nid##_##keylen##_##nmode,blocksize,keylen/8,ivlen, \
 	flags|EVP_CIPH_##MODE##_MODE,	\
-	aes_init_key,			\
-	aes_##mode##_cipher,		\
+	{ aes_init_key },		\
+	{ aes_##mode##_cipher },	\
 	NULL,				\
 	sizeof(EVP_AES_KEY),		\
 	NULL,NULL,NULL,NULL }; \
@@ -885,8 +885,8 @@ static const EVP_CIPHER aes_##keylen##_##mode = { \
 	nid##_##keylen##_##mode,blocksize, \
 	(EVP_CIPH_##MODE##_MODE==EVP_CIPH_XTS_MODE?2:1)*keylen/8, ivlen, \
 	flags|EVP_CIPH_##MODE##_MODE,	\
-	aes_##mode##_init_key,		\
-	aes_##mode##_cipher,		\
+	{ aes_##mode##_init_key },	\
+	{ aes_##mode##_cipher },	\
 	aes_##mode##_cleanup,		\
 	sizeof(EVP_AES_##MODE##_CTX),	\
 	NULL,NULL,aes_##mode##_ctrl,NULL }; \

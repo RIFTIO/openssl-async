@@ -122,7 +122,7 @@
 #endif
 
 static int do_ssl3_write(SSL *s, int type, const unsigned char *buf,
-			 unsigned int len, int create_empty_fragment);
+	unsigned int len, int create_empty_fragment);
 static int ssl3_get_record(SSL *s);
 
 int ssl3_read_n(SSL *s, int n, int max, int extend)
@@ -219,7 +219,10 @@ int ssl3_read_n(SSL *s, int n, int max, int extend)
 		return -1;
 		}
 
-	if (!s->read_ahead)
+	/* Avoid reading ahead when usign asynch operations as well,
+	 * for simplicity. */
+	if (!s->read_ahead
+		|| s->s3->flags & SSL3_FLAGS_ASYNCH)
 		/* ignore max parameter */
 		max = n;
 	else
@@ -240,7 +243,11 @@ int ssl3_read_n(SSL *s, int n, int max, int extend)
 		if (s->rbio != NULL)
 			{
 			s->rwstate=SSL_READING;
+			/* See comment in do_ssl3_write, around the call
+			 * to ssl3_write_pending2 */
+			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 			i=BIO_read(s->rbio,pkt+len+left, max-left);
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 			}
 		else
 			{
@@ -282,6 +289,41 @@ int ssl3_read_n(SSL *s, int n, int max, int extend)
  * ssl3_get_record to loop forever. */
 #define MAX_EMPTY_RECORDS 32
 
+int ssl3_asynch_read_pending(const SSL *s)
+	{
+	int r = s->s3->outstanding_read_length;
+
+	/* SSL_pending is supposed to return the number of application
+	 * bytes, or in other words, the sum of lengths of all records
+	 * with type SSL3_RT_APPLICATION_DATA.
+	 * When using non-blocking I/O, the application expects to be
+	 * able to check for needs to read more by checking the state
+	 * of the socket.  That allows the application to do more reads
+	 * when needed even if there aren't any application-specific
+	 * records that need reading.
+	 *
+	 * However, in the asynch case, we're caught somewhere in between,
+	 * as the behavior toward the application is to simulate a need
+	 * for a re-read, BUT the socket isn't informed of this and will
+	 * not know to tell the application there's more to read.  This
+	 * will look like an error to the application.  Therefore, when
+	 * there are some outstanding records, we'd better return a non-
+	 * zero value.
+	 * 1 would be a hack, -1 is an indication that something is a
+	 * bit out of the ordinary.  I've chosen the latter for now.
+	 * -- Richard Levitte
+	 */
+	if (s->s3->outstanding_read_records && r == 0)
+		r = -1;
+	return r;
+	}
+static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION *trans);
+int ssl3_get_record_check_mac_cb(SSL3_TRANSMISSION *trans, int status)
+	{
+	if (status > 0)
+		return ssl3_get_record_inner(trans->s, trans);
+	return status;
+	}
 /* Call this to get a new input record.
  * It will return <= 0 if more data is needed, normally due to an error
  * or non-blocking IO.
@@ -292,17 +334,24 @@ int ssl3_read_n(SSL *s, int n, int max, int extend)
  */
 /* used only by ssl3_read_bytes */
 static int ssl3_get_record(SSL *s)
+    {
+    return ssl3_get_record_inner(s, NULL);
+    }
+static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION *trans)
 	{
 	int ssl_major,ssl_minor,al;
 	int enc_err,n,i,ret= -1;
 	SSL3_RECORD *rr;
 	SSL_SESSION *sess;
 	unsigned char *p;
-	unsigned char md[EVP_MAX_MD_SIZE];
+	unsigned char _md[EVP_MAX_MD_SIZE], *md = _md;
 	short version;
 	unsigned mac_size;
+	int clear_enc=0, clear_mac=0;
 	size_t extra;
 	unsigned empty_record_count = 0;
+	unsigned char *mac = NULL;
+	unsigned char mac_tmp[EVP_MAX_MD_SIZE];
 
 	rr= &(s->s3->rrec);
 	sess=s->session;
@@ -319,7 +368,60 @@ static int ssl3_get_record(SSL *s)
 		return -1;
 		}
 
+    if ((sess == NULL) ||
+        (s->enc_read_ctx == NULL))
+        clear_enc=1;
+    if (clear_enc ||
+        (EVP_MD_CTX_md(s->read_hash) == NULL))
+         clear_mac=1;
+
+    /* TODO For Testing */
+    if (clear_enc == 0 && clear_mac == 0)
+        {
+        clear_enc=clear_mac=0;
+        }
+
+    if (trans)
+        {
+        enc_err = trans->status;
+        rr = &trans->rec;
+        clear_enc = trans->clear_enc;
+        clear_mac = trans->clear_mac;
+        md = trans->_md;
+        goto post_dec;
+        }
+
 again:
+	/* In asynch mode, check if there are some already decrypted transmissions */
+	if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+		{
+		struct ssl3_read_record_st *arr = ssl3_extract_read_record(s);
+
+		if (arr)
+			{
+			s->s3->outstanding_read_records--;
+			if (arr->rec.type == SSL3_RT_APPLICATION_DATA)
+				/* This is an approximate length */
+				s->s3->outstanding_read_length -= arr->origlen;
+			ssl3_release_read_buffer(s);
+			memcpy(&s->s3->rrec, &arr->rec, sizeof(SSL3_RECORD));
+			memcpy(&s->s3->rbuf, &arr->buf, sizeof(SSL3_BUFFER));
+			s->packet = arr->packet;
+			s->packet_length = arr->packet_length;
+			mac = arr->mac;
+			i = mac_size = arr->mac_size;
+			memcpy(&_md, &arr->md, EVP_MAX_MD_SIZE);
+			md = _md;
+
+			enc_err = (arr->status==0 ? -1 : 1);
+			ssl3_release_read_record(arr);
+
+			/* We're done with the actual reading */
+			s->rwstate = SSL_NOTHING;
+
+			goto post_mac;
+			}
+		}
 	/* check if we have the header */
 	if (	(s->rstate != SSL_ST_READ_BODY) ||
 		(s->packet_length < SSL3_RT_HEADER_LENGTH)) 
@@ -348,8 +450,8 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 			if (version != s->version)
 				{
 				SSLerr(SSL_F_SSL3_GET_RECORD,SSL_R_WRONG_VERSION_NUMBER);
-                                if ((s->version & 0xFF00) == (version & 0xFF00))
-                                	/* Send back error using their minor version number :-) */
+                if ((s->version & 0xFF00) == (version & 0xFF00))
+                    /* Send back error using their minor version number :-) */
 					s->version = (unsigned short)version;
 				al=SSL_AD_PROTOCOL_VERSION;
 				goto f_err;
@@ -415,9 +517,9 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 	/* If in encrypt-then-mac mode calculate mac from encrypted record.
 	 * All the details below are public so no timing details can leak.
 	 */
-	if (SSL_USE_ETM(s) && s->read_hash)
+	if (SSL_USE_ETM(s) && s->read_hash && !(s->s3->flags & SSL3_FLAGS_ASYNCH))
 		{
-		unsigned char *mac;
+		unsigned char *mac_check;
 		mac_size=EVP_MD_CTX_size(s->read_hash);
 		OPENSSL_assert(mac_size <= EVP_MAX_MD_SIZE);
 		if (rr->length < mac_size)
@@ -427,9 +529,9 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 			goto f_err;
 			}
 		rr->length -= mac_size;
-		mac = rr->data + rr->length;
-		i=s->method->ssl3_enc->mac(s,md,0 /* not send */);
-		if (i < 0 || CRYPTO_memcmp(md, mac, (size_t)mac_size) != 0)
+		mac_check = rr->data + rr->length;
+		i=s->method->ssl3_enc->mac(s,md,0 /* not send */,trans);
+		if (i < 0 || CRYPTO_memcmp(md, mac_check, (size_t)mac_size) != 0)
 			{
 			al=SSL_AD_BAD_RECORD_MAC;
 			SSLerr(SSL_F_SSL3_GET_RECORD,SSL_R_DECRYPTION_FAILED_OR_BAD_RECORD_MAC);
@@ -437,7 +539,48 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 			}
 		}
 
-	enc_err = s->method->ssl3_enc->enc(s,0);
+	if (!clear_enc && (s->s3->flags & SSL3_FLAGS_ASYNCH))
+        {
+        trans = ssl3_get_transmission(s);
+
+        if (trans == NULL)
+            {
+            s->rwstate=SSL_READING;
+            return -1; /* treat it like a non-blocking
+                          I/O that couldn't transmit for
+                          the moment */
+            }
+
+        trans->flags &= ~SSL3_TRANS_FLAGS_SEND;
+        s->s3->outstanding_read_records++;
+        if (s->s3->rrec.type == SSL3_RT_APPLICATION_DATA)
+            /* This is an approximate length */
+            s->s3->outstanding_read_length += rr->length;
+        trans->post = 0;
+        ssl3_asynch_push_callback(trans, ssl3_get_record_check_mac_cb);
+        trans->origlen = rr->length;
+        trans->packet = s->packet;
+        trans->packet_length = s->packet_length;
+        trans->clear_enc = clear_enc;
+        trans->clear_mac = clear_mac;
+        memcpy(&(trans->buf), &(s->s3->rbuf), sizeof(SSL3_BUFFER));
+        memset(&(s->s3->rbuf), 0, sizeof(SSL3_BUFFER));
+        memcpy(&(trans->rec), rr, sizeof(SSL3_RECORD));
+        memset(rr, 0, sizeof(SSL3_RECORD));
+        CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+        s->s3->outstanding_read_crypto++;
+        CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+        }
+
+	enc_err = s->method->ssl3_enc->enc(s,0,trans);
+
+	if (trans)
+	    {
+		s->rwstate=SSL_READING;
+		return(-1);
+	    }
+
+post_dec:
 	/* enc_err is:
 	 *    0: (in non-constant time) if the record is publically invalid.
 	 *    1: if the padding is valid
@@ -456,13 +599,12 @@ printf("\n");
 #endif
 
 	/* r->length is now the compressed data plus mac */
-	if ((sess != NULL) &&
+	if ((!clear_mac) &&
+	    (sess != NULL) &&
 	    (s->enc_read_ctx != NULL) &&
 	    (EVP_MD_CTX_md(s->read_hash) != NULL) && !SSL_USE_ETM(s))
 		{
 		/* s->read_hash != NULL => mac_size != -1 */
-		unsigned char *mac = NULL;
-		unsigned char mac_tmp[EVP_MAX_MD_SIZE];
 		mac_size=EVP_MD_CTX_size(s->read_hash);
 		OPENSSL_assert(mac_size <= EVP_MAX_MD_SIZE);
 
@@ -501,12 +643,34 @@ printf("\n");
 			mac = &rr->data[rr->length];
 			}
 
-		i=s->method->ssl3_enc->mac(s,md,0 /* not send */);
-		if (i < 0 || mac == NULL || CRYPTO_memcmp(md, mac, (size_t)mac_size) != 0)
-			enc_err = -1;
-		if (rr->length > SSL3_RT_MAX_COMPRESSED_LENGTH+extra+mac_size)
-			enc_err = -1;
+		if (trans)
+		    {
+		    trans->post = 0;
+		    ssl3_asynch_push_callback(trans,
+									  ssl3_get_record_asynch_cb);
+		    trans->mac = mac;
+		    trans->mac_size = mac_size;
+		    }
+
+		i=s->method->ssl3_enc->mac(s,md,0,trans);
+
+		if (trans)
+		    return 1;
 		}
+	else if (trans)
+		{
+		/* This callback will be called immediately */
+		ssl3_asynch_push_callback(trans,
+		                          ssl3_get_record_asynch_cb);
+		return 1;
+		}
+
+post_mac:
+	if (!clear_mac &&
+		(i < 0 || mac == NULL || CRYPTO_memcmp(md, mac, (size_t)mac_size) != 0))
+		enc_err = -1;
+	if (rr->length > SSL3_RT_MAX_COMPRESSED_LENGTH+extra+mac_size)
+		enc_err = -1;
 
 	if (enc_err < 0)
 		{
@@ -515,16 +679,16 @@ printf("\n");
 		 * failure is directly visible from the ciphertext anyway,
 		 * we should not reveal which kind of error occurred -- this
 		 * might become visible to an attacker (e.g. via a logfile) */
-		al=SSL_AD_BAD_RECORD_MAC;
-		SSLerr(SSL_F_SSL3_GET_RECORD,SSL_R_DECRYPTION_FAILED_OR_BAD_RECORD_MAC);
-		goto f_err;
-		}
+		 al=SSL_AD_BAD_RECORD_MAC;
+		 SSLerr(SSL_F_SSL3_GET_RECORD,SSL_R_DECRYPTION_FAILED_OR_BAD_RECORD_MAC);
+		 goto f_err;
+		 }
 
 	/* r->length is now just compressed */
 	if (s->expand != NULL)
-		{
+	    {
 		if (rr->length > SSL3_RT_MAX_COMPRESSED_LENGTH+extra)
-			{
+		    {
 			al=SSL_AD_RECORD_OVERFLOW;
 			SSLerr(SSL_F_SSL3_GET_RECORD,SSL_R_COMPRESSED_LENGTH_TOO_LONG);
 			goto f_err;
@@ -674,26 +838,58 @@ int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len)
 		}
 	}
 
+static int ssl3_write_pending2(SSL *s, SSL3_BUFFER *wb);
+static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
+	unsigned int len, int create_empty_fragment,
+	SSL3_TRANSMISSION *trans, int post);
+static int do_ssl3_write_post_mac(SSL3_TRANSMISSION *trans, int status)
+	{
+	trans->status = status;
+	return do_ssl3_write_inner(trans->s, trans->dsw_type,
+		trans->dsw_buf, trans->dsw_len,
+		trans->dsw_create_empty_fragment, trans, 1);
+	}
+static int do_ssl3_write_post_enc(SSL3_TRANSMISSION *trans, int status)
+	{
+	CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+	trans->s->s3->outstanding_write_crypto--;
+	CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+	trans->status = status;
+	return do_ssl3_write_inner(trans->s, trans->dsw_type,
+		trans->dsw_buf, trans->dsw_len,
+		trans->dsw_create_empty_fragment, trans, 2);
+	}
 static int do_ssl3_write(SSL *s, int type, const unsigned char *buf,
-			 unsigned int len, int create_empty_fragment)
+	unsigned int len, int create_empty_fragment)
+	{
+	return do_ssl3_write_inner(s, type, buf, len, create_empty_fragment,
+		NULL, 0);
+	}
+static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
+	unsigned int len, int create_empty_fragment,
+	SSL3_TRANSMISSION *trans, int post)
 	{
 	unsigned char *p,*plen;
 	int i,mac_size,clear=0;
 	int prefix_len=0;
 	int eivlen;
 	long align=0;
-	SSL3_RECORD *wr;
-	SSL3_BUFFER *wb=&(s->s3->wbuf);
+	SSL3_RECORD *wr = NULL;
+	SSL3_BUFFER *wb = NULL;
 	SSL_SESSION *sess;
 
- 	if (wb->buf == NULL)
-		if (!ssl3_setup_write_buffer(s))
-			return -1;
+	if (!trans)
+		{
+		wb=&(s->s3->wbuf);
+		if (wb->buf == NULL)
+			if (!ssl3_setup_write_buffer(s))
+				return -1;
 
-	/* first check if there is a SSL3_BUFFER still being written
-	 * out.  This will happen with non blocking IO */
-	if (wb->left != 0)
-		return(ssl3_write_pending(s,type,buf,len));
+		/* first check if there is a SSL3_BUFFER still being written
+		 * out.  This will happen with non blocking IO */
+		if (wb->left != 0)
+			return(ssl3_write_pending(s,type,buf,len));
+		}
 
 	/* If we have an alert to send, lets send it */
 	if (s->s3->alert_dispatch)
@@ -709,6 +905,25 @@ static int do_ssl3_write(SSL *s, int type, const unsigned char *buf,
 
 	wr= &(s->s3->wrec);
 	sess=s->session;
+
+	if (post)
+		{
+		wb = &trans->buf;
+		wr = &(trans->rec);
+		prefix_len = trans->dsw_prefix_len;
+		plen = wb->buf + trans->dsw_plen_offset;
+		p = trans->dsw_p;
+		eivlen = trans->dsw_eivlen;
+		mac_size = trans->dsw_mac_size;
+
+		switch(post)
+			{
+		case 1:
+			goto post_mac;
+		case 2:
+			goto post_enc;
+			}
+		}
 
 	if (	(sess == NULL) ||
 		(s->enc_write_ctx == NULL) ||
@@ -777,6 +992,37 @@ static int do_ssl3_write(SSL *s, int type, const unsigned char *buf,
 		} while (0);
 #endif
 
+	if (!((sess == NULL) || (s->enc_write_ctx == NULL))
+		&& s->s3->flags & SSL3_FLAGS_ASYNCH)
+		{
+		if (!trans)
+			{
+			trans = ssl3_get_transmission(s);
+			if (trans == NULL)
+				{
+				s->rwstate=SSL_WRITING;
+				return -1; /* treat it like a non-blocking I/O that
+					      couldn't transmit for the moment */
+				}
+			/* trans->orig is used in s3_asynch.c, only when
+			 * s->asynch_completion_callback is set. */
+			if(s->asynch_completion_callback)
+				{
+				trans->orig = BUF_memdup(buf, len);
+				trans->origlen = len;
+				}
+
+			trans->flags |= SSL3_TRANS_FLAGS_SEND;
+			memcpy(&trans->buf, wb, sizeof(SSL3_BUFFER));
+			memset(wb, 0, sizeof(SSL3_BUFFER));
+			memcpy(&(trans->rec), wr, sizeof(SSL3_RECORD));
+			memset(wr, 0, sizeof(SSL3_RECORD));
+			trans->dsw_sibling = NULL;
+			}
+		wb = &trans->buf;
+		wr = &trans->rec;
+		}
+
 	/* 'create_empty_fragment' is true only when this function calls itself */
 	if (!clear && !create_empty_fragment && !s->s3->empty_fragment_done)
 		{
@@ -789,16 +1035,39 @@ static int do_ssl3_write(SSL *s, int type, const unsigned char *buf,
 			 * this prepares and buffers the data for an empty fragment
 			 * (these 'prefix_len' bytes are sent out later
 			 * together with the actual payload) */
-			prefix_len = do_ssl3_write(s, type, buf, 0, 1);
-			if (prefix_len <= 0)
-				goto err;
-
-			if (prefix_len >
-		(SSL3_RT_HEADER_LENGTH + SSL3_RT_SEND_MAX_ENCRYPTED_OVERHEAD))
+			SSL3_TRANSMISSION *t = NULL;
+			if (trans)
 				{
-				/* insufficient space */
-				SSLerr(SSL_F_DO_SSL3_WRITE, ERR_R_INTERNAL_ERROR);
-				goto err;
+				t = ssl3_get_transmission_before(s, trans);
+				t->flags |= SSL3_TRANS_FLAGS_SEND;
+				if (t == NULL)
+					{
+					ssl3_release_transmission(trans);
+					s->rwstate=SSL_WRITING;
+					return -1; /* treat it like a non-blocking I/O that
+					      couldn't transmit for the moment */
+					}
+				t->dsw_sibling = trans;
+				/* This is a trick */
+				ssl3_setup_write_buffer(s);
+				memcpy(&t->buf, &s->s3->wbuf, sizeof(SSL3_BUFFER));
+				memset(&s->s3->wbuf, 0, sizeof(SSL3_BUFFER));
+				}
+			prefix_len =
+				do_ssl3_write_inner(s, type, buf, 0, 1, t, 0);
+			if (!trans) /* When using transmissions, we really don't care,
+				       assembling till be done differently */
+				{
+				if (prefix_len <= 0)
+					goto err;
+
+				if (prefix_len >
+		(SSL3_RT_HEADER_LENGTH + SSL3_RT_SEND_MAX_ENCRYPTED_OVERHEAD))
+					{
+					/* insufficient space */
+					SSLerr(SSL_F_DO_SSL3_WRITE, ERR_R_INTERNAL_ERROR);
+					goto err;
+					}
 				}
 			}
 		
@@ -893,16 +1162,54 @@ static int do_ssl3_write(SSL *s, int type, const unsigned char *buf,
 		wr->input=wr->data;
 		}
 
+	/* Since here's where we start with the mac and encryption, here's also
+	 * where we need to populate the transmission. */
+	if (trans)
+	    {
+	    CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+	    trans->s->s3->outstanding_write_records++;
+	    trans->s->s3->outstanding_write_crypto++;
+	    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+
+	    /* cache the data needed by post mac and post enc */
+	    trans->dsw_p = p;
+	    trans->dsw_eivlen = eivlen;
+	    trans->dsw_mac_size = mac_size;
+	    trans->dsw_create_empty_fragment = create_empty_fragment;
+	    trans->dsw_len = len;
+	    trans->dsw_buf = buf; /* Note: it doesn't really need
+	                           * to point at anything during
+	                           * post, it's only used to check
+	                           * that the user did retry with
+	                           * the same data, when retrying.
+	                           */
+	    trans->dsw_type = type;
+	    trans->dsw_prefix_len = prefix_len;
+	    trans->dsw_plen_offset = plen - wb->buf;
+	    }
+
 	/* we should still have the output to wr->data and the input
 	 * from wr->input.  Length should be wr->length.
 	 * wr->data still points in the wb->buf */
 
 	if (!SSL_USE_ETM(s) && mac_size != 0)
 		{
-		if (s->method->ssl3_enc->mac(s,&(p[wr->length + eivlen]),1) < 0)
+		if (trans)
+		    {
+		    trans->post = 0;
+		    ssl3_asynch_push_callback(trans, do_ssl3_write_post_mac);
+		    }
+		if (s->method->ssl3_enc->mac(s,&(p[wr->length + eivlen]),1, trans) < 0)
 			goto err;
-		wr->length+=mac_size;
+		if (trans)
+		    {
+		    s->rwstate=SSL_NOTHING;
+		    return len;
+		    }
 		}
+
+post_mac:
+	wr->length+=mac_size;
 
 	wr->input=p;
 	wr->data=p;
@@ -915,15 +1222,45 @@ static int do_ssl3_write(SSL *s, int type, const unsigned char *buf,
 		}
 
 	/* ssl3_enc can only have an error on read */
-	s->method->ssl3_enc->enc(s,1);
+	if (trans)
+	    {
+	    trans->post = 0;
+	    ssl3_asynch_push_callback(trans, do_ssl3_write_post_enc);
 
+	    /* cache the data needed by post enc */
+	    trans->dsw_create_empty_fragment = create_empty_fragment;
+	    trans->dsw_len = len;
+	    trans->dsw_buf = buf; /* Note: it doesn't really need to point
+	                           * at anything during post, it's only used
+	                           * to check that the user did retry with
+	                           * the same data, when retrying. */
+	    trans->dsw_type = type;
+	    trans->dsw_prefix_len = prefix_len;
+	    trans->dsw_plen_offset = plen - wb->buf;
+	    }
+
+	s->method->ssl3_enc->enc(s,1,trans);
+
+	if (trans)
+	    {
+	    if (post == 0)  /* We're in the application thread and need to
+	                       return the number of bytes written */
+	        return len;
+	    /* Otherwise, we're in a post-op thread, and need to return
+	       success */
+	    return 1;
+	    }
+	/* TODO I'm not sure how to handle this mac calculation I may need to create a
+	 * new transmission
+	 */
 	if (SSL_USE_ETM(s) && mac_size != 0)
 		{
-		if (s->method->ssl3_enc->mac(s,p + wr->length,1) < 0)
+		if (s->method->ssl3_enc->mac(s,p + wr->length,1,trans) < 0)
 			goto err;
 		wr->length+=mac_size;
 		}
 
+post_enc:
 	/* record length after mac and block padding */
 	s2n(wr->length,plen);
 
@@ -938,6 +1275,28 @@ static int do_ssl3_write(SSL *s, int type, const unsigned char *buf,
 
 	if (create_empty_fragment)
 		{
+		if (trans && trans->post)
+			{
+			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+			CRYPTO_w_lock(CRYPTO_LOCK_SSL);
+			if (s->references)
+				{
+				s->s3->outstanding_write_records--;
+
+				/* Move over the buffer and record. */
+				memcpy(&trans->dsw_sibling->dsw_ef_buf, &trans->buf, sizeof(SSL3_BUFFER));
+				memset(&trans->buf, 0, sizeof(SSL3_BUFFER));
+				memcpy(&trans->dsw_sibling->dsw_ef_rec, &trans->rec, sizeof(SSL3_BUFFER));
+				memset(&trans->rec, 0, sizeof(SSL3_RECORD));
+
+				/* now let's set up the sibling wb */
+				trans->dsw_sibling->dsw_ef_buf.left
+					= trans->dsw_sibling->dsw_ef_rec.length;
+				}
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+			return 1;
+			}
 		/* we are in a recursive call;
 		 * just return the length, don't write out anything here
 		 */
@@ -946,6 +1305,34 @@ static int do_ssl3_write(SSL *s, int type, const unsigned char *buf,
 
 	/* now let's set up wb */
 	wb->left = prefix_len + wr->length;
+
+	if (trans && trans->post)
+		{
+		CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+		CRYPTO_w_lock(CRYPTO_LOCK_SSL);
+		if (s->references)
+			{
+			/* Because this is done in a separate thread
+			 * and we currently assume there are no retries,
+			 * we need to save and restore the flags, so a
+			 * read that happens at the same doesn't get
+			 * confused, if the application uses the same.
+			 * bio for read and write. The read in question
+			 * needs to be protected with CRYPTO_LOCK_SSL_ASYNCH as well.
+			 */
+			int f = BIO_get_retry_flags(s->wbio);
+			if (trans->dsw_ef_buf.buf)
+				ssl3_write_pending2(s, &trans->dsw_ef_buf);
+			ssl3_write_pending2(s, wb);
+			s->s3->outstanding_write_records--;
+			BIO_flush(s->wbio);
+			BIO_clear_retry_flags(s->wbio);
+			BIO_set_flags(s->wbio, f);
+			}
+		CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
+		CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+		return 1;
+		}
 
 	/* memorize arguments so that ssl3_write_pending can detect bad write retries later */
 	s->s3->wpend_tot=len;
@@ -963,7 +1350,6 @@ err:
 int ssl3_write_pending(SSL *s, int type, const unsigned char *buf,
 	unsigned int len)
 	{
-	int i;
 	SSL3_BUFFER *wb=&(s->s3->wbuf);
 
 /* XXXX */
@@ -976,19 +1362,26 @@ int ssl3_write_pending(SSL *s, int type, const unsigned char *buf,
 		return(-1);
 		}
 
+	return ssl3_write_pending2(s, wb);
+	}
+
+static int ssl3_write_pending2(SSL *s, SSL3_BUFFER *wb)
+	{
+	int i;
 	for (;;)
 		{
 		clear_sys_error();
 		if (s->wbio != NULL)
 			{
-			s->rwstate=SSL_WRITING;
+			if(!(s->s3->flags & SSL3_FLAGS_ASYNCH))
+				s->rwstate=SSL_WRITING;
 			i=BIO_write(s->wbio,
 				(char *)&(wb->buf[wb->offset]),
 				(unsigned int)wb->left);
 			}
 		else
 			{
-			SSLerr(SSL_F_SSL3_WRITE_PENDING,SSL_R_BIO_NOT_SET);
+			SSLerr(SSL_F_SSL3_WRITE_PENDING2,SSL_R_BIO_NOT_SET);
 			i= -1;
 			}
 		if (i == wb->left)
@@ -998,6 +1391,8 @@ int ssl3_write_pending(SSL *s, int type, const unsigned char *buf,
 			if (s->mode & SSL_MODE_RELEASE_BUFFERS &&
 				!SSL_IS_DTLS(s))
 				ssl3_release_write_buffer(s);
+			if(!(s->s3->flags & SSL3_FLAGS_ASYNCH))
+			    s->rwstate=SSL_NOTHING;
 			s->rwstate=SSL_NOTHING;
 			return(s->s3->wpend_ret);
 			}
@@ -1007,11 +1402,16 @@ int ssl3_write_pending(SSL *s, int type, const unsigned char *buf,
 				/* For DTLS, just drop it. That's kind of the whole
 				   point in using a datagram service */
 				wb->left = 0;
+				return(i);
+				}
+			if(!(s->s3->flags & SSL3_FLAGS_ASYNCH) || !BIO_should_retry(s->wbio))
+				return(i);
 			}
-			return(i);
-		}
-		wb->offset+=i;
-		wb->left-=i;
+		else /* i > 0 */
+			{
+			wb->offset+=i;
+			wb->left-=i;
+			}
 		}
 	}
 
@@ -1198,8 +1598,10 @@ start:
 			/* Exit and notify application to read again */
 			rr->length = 0;
 			s->rwstate=SSL_READING;
+			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 			BIO_clear_retry_flags(SSL_get_rbio(s));
 			BIO_set_retry_read(SSL_get_rbio(s));
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 			return(-1);
 			}
 #endif
@@ -1271,9 +1673,11 @@ start:
 						 * the retry option set.  Otherwise renegotiation may
 						 * cause nasty problems in the blocking world */
 						s->rwstate=SSL_READING;
+						CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 						bio=SSL_get_rbio(s);
 						BIO_clear_retry_flags(bio);
 						BIO_set_retry_read(bio);
+						CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 						return(-1);
 						}
 					}
@@ -1449,9 +1853,11 @@ start:
 				 * the retry option set.  Otherwise renegotiation may
 				 * cause nasty problems in the blocking world */
 				s->rwstate=SSL_READING;
+				CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 				bio=SSL_get_rbio(s);
 				BIO_clear_retry_flags(bio);
 				BIO_set_retry_read(bio);
+				CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 				return(-1);
 				}
 			}
@@ -1607,7 +2013,11 @@ int ssl3_dispatch_alert(SSL *s)
 		 * If the message does not get sent due to non-blocking IO,
 		 * we will not worry too much. */
 		if (s->s3->send_alert[0] == SSL3_AL_FATAL)
+			{
+			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 			(void)BIO_flush(s->wbio);
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+			}
 
 		if (s->msg_callback)
 			s->msg_callback(1, s->version, SSL3_RT_ALERT, s->s3->send_alert, 2, s, s->msg_callback_arg);

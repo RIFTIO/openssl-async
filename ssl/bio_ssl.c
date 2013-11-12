@@ -124,7 +124,13 @@ static int ssl_free(BIO *a)
 
 	if (a == NULL) return(0);
 	bs=(BIO_SSL *)a->ptr;
-	if (bs->ssl != NULL) SSL_shutdown(bs->ssl);
+	if (bs->ssl != NULL)
+		{
+		SSL_shutdown(bs->ssl);
+		if (bs->ssl->s3 && bs->ssl->s3->flags & SSL3_FLAGS_ASYNCH)
+			while (bs->ssl->s3->outstanding_write_records > 0)
+				sleep(1);
+		}
 	if (a->shutdown)
 		{
 		if (a->init && (bs->ssl != NULL))
@@ -214,6 +220,13 @@ static int ssl_read(BIO *b, char *out, int outl)
 		BIO_set_retry_special(b);
 		retry_reason=BIO_RR_CONNECT;
 		break;
+
+		/* The following two need to simply break with no reason.
+		 * They do mean there's something to read, just not from the
+		 * underlying bio. */
+	case SSL_ERROR_WAIT_ASYNCH_READ:
+	case SSL_ERROR_WAIT_ASYNCH_WRITE:
+
 	case SSL_ERROR_SYSCALL:
 	case SSL_ERROR_SSL:
 	case SSL_ERROR_ZERO_RETURN:
@@ -283,6 +296,13 @@ static int ssl_write(BIO *b, const char *out, int outl)
 	case SSL_ERROR_WANT_CONNECT:
 		BIO_set_retry_special(b);
 		retry_reason=BIO_RR_CONNECT;
+
+		/* The following two need to simply break with no reason.
+		 * They do mean there's something to read, just not from the
+		 * underlying bio. */
+	case SSL_ERROR_WAIT_ASYNCH_READ:
+	case SSL_ERROR_WAIT_ASYNCH_WRITE:
+
 	case SSL_ERROR_SYSCALL:
 	case SSL_ERROR_SSL:
 	default:
@@ -391,6 +411,13 @@ static long ssl_ctrl(BIO *b, int cmd, long num, void *ptr)
 		break;
 	case BIO_CTRL_FLUSH:
 		BIO_clear_retry_flags(b);
+		if (ssl->s3->flags & SSL3_FLAGS_ASYNCH
+			&& ssl->s3->outstanding_write_records > 0)
+			{
+			BIO_set_retry_write(b);
+			ret = -1;
+			break;
+			}
 		ret=BIO_ctrl(ssl->wbio,cmd,num,ptr);
 		BIO_copy_next_retry(b);
 		break;

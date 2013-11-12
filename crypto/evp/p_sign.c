@@ -75,7 +75,7 @@ void EVP_SignUpdate(EVP_MD_CTX *ctx, unsigned char *data,
 	}
 #endif
 
-int EVP_SignFinal(EVP_MD_CTX *ctx, unsigned char *sigret, unsigned int *siglen,
+static int _evp_SignFinal(EVP_MD_CTX *ctx, unsigned char *sigret, unsigned int *siglen,
 	     EVP_PKEY *pkey)
 	{
 	unsigned char m[EVP_MAX_MD_SIZE];
@@ -124,16 +124,25 @@ int EVP_SignFinal(EVP_MD_CTX *ctx, unsigned char *sigret, unsigned int *siglen,
 		}
 	if (!ok)
 		{
-		EVPerr(EVP_F_EVP_SIGNFINAL,EVP_R_WRONG_PUBLIC_KEY_TYPE);
+		EVPerr(EVP_F__EVP_SIGNFINAL,EVP_R_WRONG_PUBLIC_KEY_TYPE);
 		return(0);
 		}
 
-	if (ctx->digest->sign == NULL)
+	if (ctx->digest->sign.synch == NULL)
 		{
-		EVPerr(EVP_F_EVP_SIGNFINAL,EVP_R_NO_SIGN_FUNCTION_CONFIGURED);
+		EVPerr(EVP_F__EVP_SIGNFINAL,EVP_R_NO_SIGN_FUNCTION_CONFIGURED);
 		return(0);
 		}
-	return(ctx->digest->sign(ctx->digest->type,m,m_len,sigret,siglen,
+	return(ctx->digest->sign.synch(ctx->digest->type,m,m_len,sigret,siglen,
 		pkey->pkey.ptr));
 	}
 
+int EVP_SignFinal(EVP_MD_CTX *ctx, unsigned char *sigret, unsigned int *siglen,
+	     EVP_PKEY *pkey)
+	{
+#if 0
+	if (ctx->digest->flags & EVP_MD_FLAG_ASYNCH)
+		return _evp_SignFinal_asynch(ctx, sigret, siglen, pkey);
+#endif
+	return _evp_SignFinal(ctx, sigret, siglen, pkey);
+	}

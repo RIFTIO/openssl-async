@@ -325,3 +325,6 @@ SSL_CTX_set_not_resumbl_sess_cb         363	EXIST:VMS:FUNCTION:
 SSL_set_not_resumable_session_callback  364	EXIST:!VMS:FUNCTION:
 SSL_set_not_resumbl_sess_cb             364	EXIST:VMS:FUNCTION:
 SSL_get_sigalgs                         365	EXIST::FUNCTION:TLSEXT
+SSL_set_asynch_completion_callback      366     EXIST::FUNCTION:
+SSL_CTX_set_asynch_completion_callback  367     EXIST::FUNCTION:
+

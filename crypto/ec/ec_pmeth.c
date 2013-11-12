@@ -542,21 +542,21 @@ const EVP_PKEY_METHOD ec_pkey_meth =
 	pkey_ec_keygen,
 
 	0,
-	pkey_ec_sign,
+	{ pkey_ec_sign, 0 },
 
 	0,
-	pkey_ec_verify,
+	{ pkey_ec_verify, 0 },
 
-	0,0,
+	0, { 0, 0 },
 
-	0,0,0,0,
+	0,{ 0, 0 },0,{ 0, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
 	0,
-	pkey_ec_kdf_derive,
+	{ pkey_ec_kdf_derive, 0 },
 
 	pkey_ec_ctrl,
 	pkey_ec_ctrl_str

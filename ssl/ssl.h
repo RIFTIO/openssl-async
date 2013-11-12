@@ -759,6 +759,10 @@ struct ssl_session_st
 #define SSL_MODE_SEND_CLIENTHELLO_TIME 0x00000020L
 #define SSL_MODE_SEND_SERVERHELLO_TIME 0x00000040L
 
+/* Use asynchronous mode if the cipher implementationhas support for it. (SSL3 
+ * and TLS only) */
+#define SSL_MODE_ASYNCHRONOUS 0x00000080L
+
 /* Cert related flags */
 /* Many implementations ignore some aspects of the TLS standards such as
  * enforcing certifcate chain algorithms. When this is set we enforce them.
@@ -867,6 +871,10 @@ void SSL_CTX_set_msg_callback(SSL_CTX *ctx, void (*cb)(int write_p, int version,
 void SSL_set_msg_callback(SSL *ssl, void (*cb)(int write_p, int version, int content_type, const void *buf, size_t len, SSL *ssl, void *arg));
 #define SSL_CTX_set_msg_callback_arg(ctx, arg) SSL_CTX_ctrl((ctx), SSL_CTRL_SET_MSG_CALLBACK_ARG, 0, (arg))
 #define SSL_set_msg_callback_arg(ssl, arg) SSL_ctrl((ssl), SSL_CTRL_SET_MSG_CALLBACK_ARG, 0, (arg))
+void SSL_CTX_set_asynch_completion_callback(SSL_CTX *ctx, int (*cb)(int write_p, int status, const void *buf, size_t len, SSL *ssl, void *arg));
+void SSL_set_asynch_completion_callback(SSL *ssl, int (*cb)(int write_p, int status, const void *buf, size_t len, SSL *ssl, void *arg));
+#define SSL_CTX_set_asynch_completion_callback_arg(ctx, arg) SSL_CTX_ctrl((ctx), SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK_ARG, 0, (arg))
+#define SSL_set_asynch_completion_callback_arg(ssl, arg) SSL_ctrl((ssl), SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK_ARG, 0, (arg))
 
 #ifndef OPENSSL_NO_SRP
 
@@ -1136,6 +1144,11 @@ struct ssl_ctx_st
 #ifndef OPENSSL_NO_SRP
 	SRP_CTX srp_ctx; /* ctx for SRP authentication */
 #endif
+
+	/* callback that allows applications a level of control on completion of
+	 * asynchronous operations */
+	int (*asynch_completion_callback)(int write_p, int status, const void *buf, size_t len, SSL *ssl, void *arg);
+	void *asynch_completion_callback_arg;
 
 #ifndef OPENSSL_NO_TLSEXT
 
@@ -1653,6 +1666,12 @@ struct ssl_st
 	/* Callback for disabling session caching and ticket support
 	 * on a session basis, depending on the chosen cipher. */
 	int (*not_resumable_session_cb)(SSL *ssl, int is_forward_secure);
+
+    /* callback that allows applications a level of control on completion of
+     * asynchronous operations */
+    int (*asynch_completion_callback)(int write_p, int status, const void *buf, size_t len, SSL *ssl, void *arg);
+    void *asynch_completion_callback_arg;
+
 	};
 
 #endif
@@ -1810,6 +1829,9 @@ DECLARE_PEM_rw(SSL_SESSION, SSL_SESSION)
 #define SSL_ERROR_ZERO_RETURN		6
 #define SSL_ERROR_WANT_CONNECT		7
 #define SSL_ERROR_WANT_ACCEPT		8
+#define SSL_ERROR_WAIT_ASYNCH_READ	9
+#define SSL_ERROR_WAIT_ASYNCH_WRITE	10
+#define SSL_ERROR_WAIT_ASYNCH		11
 
 #define SSL_CTRL_NEED_TMP_RSA			1
 #define SSL_CTRL_SET_TMP_RSA			2
@@ -1934,6 +1956,9 @@ DECLARE_PEM_rw(SSL_SESSION, SSL_SESSION)
 #define SSL_CTRL_GET_SERVER_TMP_KEY		109
 #define SSL_CTRL_GET_RAW_CIPHERLIST		110
 #define SSL_CTRL_GET_EC_POINT_FORMATS		111
+
+#define SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK               84
+#define SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK_ARG           85
 
 #define DTLSv1_get_timeout(ssl, arg) \
 	SSL_ctrl(ssl,DTLS_CTRL_GET_TIMEOUT,0, (void *)arg)
@@ -2105,6 +2130,7 @@ const char  * SSL_get_cipher_list(const SSL *s,int n);
 char *	SSL_get_shared_ciphers(const SSL *s, char *buf, int len);
 int	SSL_get_read_ahead(const SSL * s);
 int	SSL_pending(const SSL *s);
+int     SSL_crypto_pending(const SSL *s);
 #ifndef OPENSSL_NO_SOCK
 int	SSL_set_fd(SSL *s, int fd);
 int	SSL_set_rfd(SSL *s, int fd);
@@ -2604,6 +2630,7 @@ void ERR_load_SSL_strings(void);
 #define SSL_F_SSL3_DIGEST_CACHED_RECORDS		 293
 #define SSL_F_SSL3_DO_CHANGE_CIPHER_SPEC		 292
 #define SSL_F_SSL3_ENC					 134
+#define SSL_F_SSL3_ENC_INNER				 317
 #define SSL_F_SSL3_GENERATE_KEY_BLOCK			 238
 #define SSL_F_SSL3_GET_CERTIFICATE_REQUEST		 135
 #define SSL_F_SSL3_GET_CERT_STATUS			 289
@@ -2638,6 +2665,7 @@ void ERR_load_SSL_strings(void);
 #define SSL_F_SSL3_SETUP_WRITE_BUFFER			 291
 #define SSL_F_SSL3_WRITE_BYTES				 158
 #define SSL_F_SSL3_WRITE_PENDING			 159
+#define SSL_F_SSL3_WRITE_PENDING2			 321
 #define SSL_F_SSL_ADD_CERT_CHAIN			 316
 #define SSL_F_SSL_ADD_CERT_TO_BUF			 317
 #define SSL_F_SSL_ADD_CLIENTHELLO_RENEGOTIATE_EXT	 298
@@ -2751,6 +2779,7 @@ void ERR_load_SSL_strings(void);
 #define SSL_F_TLS1_CHANGE_CIPHER_STATE			 209
 #define SSL_F_TLS1_CHECK_SERVERHELLO_TLSEXT		 274
 #define SSL_F_TLS1_ENC					 210
+#define SSL_F_TLS1_ENC_INNER				 318
 #define SSL_F_TLS1_EXPORT_KEYING_MATERIAL		 314
 #define SSL_F_TLS1_GET_CLIENT_SUPPLEMENTAL_DATA		 335
 #define SSL_F_TLS1_GET_SERVER_SUPPLEMENTAL_DATA		 326

@@ -164,8 +164,8 @@ const char *SSL_version_str=OPENSSL_VERSION_TEXT;
 
 SSL3_ENC_METHOD ssl3_undef_enc_method={
 	/* evil casts, but these functions are only called if there's a library bug */
-	(int (*)(SSL *,int))ssl_undefined_function,
-	(int (*)(SSL *, unsigned char *, int))ssl_undefined_function,
+  (int (*)(SSL *,int,SSL3_TRANSMISSION *))ssl_undefined_function,
+	(int (*)(SSL *, unsigned char *, int, SSL3_TRANSMISSION *))ssl_undefined_function,
 	ssl_undefined_function,
 	(int (*)(SSL *, unsigned char *, unsigned char *, int))ssl_undefined_function,
 	(int (*)(SSL*, int))ssl_undefined_function,
@@ -321,6 +321,8 @@ SSL *SSL_new(SSL_CTX *ctx)
 	s->read_ahead=ctx->read_ahead;
 	s->msg_callback=ctx->msg_callback;
 	s->msg_callback_arg=ctx->msg_callback_arg;
+	s->asynch_completion_callback=ctx->asynch_completion_callback;
+	s->asynch_completion_callback_arg=ctx->asynch_completion_callback_arg;
 	s->verify_mode=ctx->verify_mode;
 	s->not_resumable_session_cb=ctx->not_resumable_session_cb;
 #if 0
@@ -864,6 +866,15 @@ int SSL_pending(const SSL *s)
 	return(s->method->ssl_pending(s));
 	}
 
+int SSL_crypto_pending(const SSL *s)
+        {
+        if(s->s3->flags & SSL3_FLAGS_ASYNCH)
+                {
+                return (s->s3->outstanding_write_records || s->s3->outstanding_read_records);
+                }
+        return 0;
+        }
+
 X509 *SSL_get_peer_certificate(const SSL *s)
 	{
 	X509 *r;
@@ -1105,6 +1116,12 @@ long SSL_ctrl(SSL *s,int cmd,long larg,void *parg)
 		s->msg_callback_arg = parg;
 		return 1;
 
+	case SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK_ARG:
+		if(!(s->mode & SSL_MODE_ASYNCHRONOUS))
+			return 0;
+		s->asynch_completion_callback_arg = parg;
+		return 1;
+
 	case SSL_CTRL_OPTIONS:
 		return(s->options|=larg);
 	case SSL_CTRL_CLEAR_OPTIONS:
@@ -1168,6 +1185,12 @@ long SSL_callback_ctrl(SSL *s, int cmd, void (*fp)(void))
 		s->msg_callback = (void (*)(int write_p, int version, int content_type, const void *buf, size_t len, SSL *ssl, void *arg))(fp);
 		return 1;
 		
+	case SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK:
+		if(!(s->mode & SSL_MODE_ASYNCHRONOUS))
+			return 0;
+		s->asynch_completion_callback = (int (*)(int write_p, int status, const void *buf, size_t len, SSL *ssl, void *arg))(fp);
+		return 1;
+
 	default:
 		return(s->method->ssl_callback_ctrl(s,cmd,fp));
 		}
@@ -1209,6 +1232,12 @@ long SSL_CTX_ctrl(SSL_CTX *ctx,int cmd,long larg,void *parg)
 		
 	case SSL_CTRL_SET_MSG_CALLBACK_ARG:
 		ctx->msg_callback_arg = parg;
+		return 1;
+
+	case SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK_ARG:
+		if(!(ctx->mode & SSL_MODE_ASYNCHRONOUS))
+			return 0;
+		ctx->asynch_completion_callback_arg = parg;
 		return 1;
 
 	case SSL_CTRL_GET_MAX_CERT_LIST:
@@ -1283,6 +1312,12 @@ long SSL_CTX_callback_ctrl(SSL_CTX *ctx, int cmd, void (*fp)(void))
 		{
 	case SSL_CTRL_SET_MSG_CALLBACK:
 		ctx->msg_callback = (void (*)(int write_p, int version, int content_type, const void *buf, size_t len, SSL *ssl, void *arg))(fp);
+		return 1;
+
+	case SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK:
+		if(!(ctx->mode & SSL_MODE_ASYNCHRONOUS))
+			return 0;
+		ctx->asynch_completion_callback = (int (*)(int write_p, int status, const void *buf, size_t len, SSL *ssl, void *arg))(fp);
 		return 1;
 
 	default:
@@ -2813,8 +2848,22 @@ int SSL_get_error(const SSL *s,int i)
 				return(SSL_ERROR_WANT_CONNECT);
 			else if (reason == BIO_RR_ACCEPT)
 				return(SSL_ERROR_WANT_ACCEPT);
+			else if (s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH)
+				{
+				if (s->s3->outstanding_read_crypto)
+					return(SSL_ERROR_WAIT_ASYNCH_READ);
+				else if (s->s3->outstanding_read_records)
+					return(SSL_ERROR_WANT_READ);
+				}
 			else
 				return(SSL_ERROR_SYSCALL); /* unknown */
+			}
+		else if (s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH)
+			{
+			if (s->s3->outstanding_read_crypto)
+				return(SSL_ERROR_WAIT_ASYNCH_READ);
+			else if (s->s3->outstanding_read_records)
+				return(SSL_ERROR_WANT_READ);
 			}
 		}
 
@@ -2833,13 +2882,32 @@ int SSL_get_error(const SSL *s,int i)
 				return(SSL_ERROR_WANT_CONNECT);
 			else if (reason == BIO_RR_ACCEPT)
 				return(SSL_ERROR_WANT_ACCEPT);
+			else if (s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH)
+				{
+				if (s->s3->outstanding_write_crypto)
+					return(SSL_ERROR_WAIT_ASYNCH_WRITE);
+				else if (s->s3->outstanding_write_records)
+					return(SSL_ERROR_WANT_WRITE);
+				}
 			else
 				return(SSL_ERROR_SYSCALL);
+			}
+		else if (s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH)
+			{
+			if (s->s3->outstanding_write_crypto)
+				return(SSL_ERROR_WAIT_ASYNCH_WRITE);
+			else if (s->s3->outstanding_write_records)
+				return(SSL_ERROR_WANT_WRITE);
 			}
 		}
 	if ((i < 0) && SSL_want_x509_lookup(s))
 		{
 		return(SSL_ERROR_WANT_X509_LOOKUP);
+		}
+	if ((i < 0) && s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH
+		&& s->s3->pkeystate != 0)
+		{
+		return(SSL_ERROR_WAIT_ASYNCH);
 		}
 
 	if (i == 0)
@@ -3156,6 +3224,7 @@ const COMP_METHOD *SSL_get_current_expansion(SSL *s)
 int ssl_init_wbio_buffer(SSL *s,int push)
 	{
 	BIO *bbio;
+	int ret=1;
 
 	if (s->bbio == NULL)
 		{
@@ -3167,12 +3236,18 @@ int ssl_init_wbio_buffer(SSL *s,int push)
 		{
 		bbio=s->bbio;
 		if (s->bbio == s->wbio)
+			{
+			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 			s->wbio=BIO_pop(s->wbio);
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+			}
 		}
+	CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 	(void)BIO_reset(bbio);
 /*	if (!BIO_set_write_buffer_size(bbio,16*1024)) */
 	if (!BIO_set_read_buffer_size(bbio,1))
 		{
+		CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 		SSLerr(SSL_F_SSL_INIT_WBIO_BUFFER,ERR_R_BUF_LIB);
 		return(0);
 		}
@@ -3186,6 +3261,7 @@ int ssl_init_wbio_buffer(SSL *s,int push)
 		if (s->wbio == bbio)
 			s->wbio=BIO_pop(bbio);
 		}
+	CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 	return(1);
 	}
 
@@ -3196,7 +3272,9 @@ void ssl_free_wbio_buffer(SSL *s)
 	if (s->bbio == s->wbio)
 		{
 		/* remove buffering */
+		CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 		s->wbio=BIO_pop(s->wbio);
+		CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 #ifdef REF_CHECK /* not the usual REF_CHECK, but this avoids adding one more preprocessor symbol */
 		assert(s->wbio != NULL);
 #endif
@@ -3550,16 +3628,34 @@ void SSL_set_not_resumable_session_callback(SSL *ssl,
 		(void (*)(void))cb);
 	}
 
+void SSL_CTX_set_asynch_completion_callback(SSL_CTX *ctx, int (*cb)(int write_p, int status, const void *buf, size_t len, SSL *ssl, void *arg))
+	{
+	SSL_CTX_callback_ctrl(ctx, SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK, (void (*)(void))cb);
+	}
+void SSL_set_asynch_completion_callback(SSL *ssl, int (*cb)(int write_p, int status, const void *buf, size_t len, SSL *ssl, void *arg))
+	{
+	SSL_callback_ctrl(ssl, SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK, (void (*)(void))cb);
+	}
+
 /* Allocates new EVP_MD_CTX and sets pointer to it into given pointer
  * vairable, freeing  EVP_MD_CTX previously stored in that variable, if
  * any. If EVP_MD pointer is passed, initializes ctx with this md
  * Returns newly allocated ctx;
  */
 
-EVP_MD_CTX *ssl_replace_hash(EVP_MD_CTX **hash,const EVP_MD *md) 
+EVP_MD_CTX *ssl_replace_hash(EVP_MD_CTX **hash,const EVP_MD *md)
 {
 	ssl_clear_hash_ctx(hash);
 	*hash = EVP_MD_CTX_create();
+	if (md) EVP_DigestInit_ex(*hash,md,NULL);
+	return *hash;
+}
+EVP_MD_CTX *ssl_replace_hash_asynch(EVP_MD_CTX **hash,const EVP_MD *md)
+{
+	ssl_clear_hash_ctx(hash);
+	*hash = EVP_MD_CTX_create();
+	EVP_MD_CTX_ctrl_ex(*hash, EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK,
+		0, NULL, (void(*)(void))ssl3_asynch_handle_digest_callbacks);
 	if (md) EVP_DigestInit_ex(*hash,md,NULL);
 	return *hash;
 }

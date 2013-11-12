@@ -46,6 +46,10 @@ MD2TEST=	md2test
 MD4TEST=	md4test
 MD5TEST=	md5test
 HMACTEST=	hmactest
+# This is a test outside of the normal, and will only be executed when 'test_hmac2' is 
+# explicitely included in the TESTS variable.  It requires having the rsaref engine
+# (../demos/engines/rsaref) built.
+HMACTEST2=	hmactest2
 WPTEST=		wp_test
 RC2TEST=	rc2test
 RC4TEST=	rc4test
@@ -114,7 +118,7 @@ FIPSEXE=$(FIPS_SHATEST)$(EXE_EXT) $(FIPS_DESTEST)$(EXE_EXT) \
 
 OBJ=	$(BNTEST).o $(ECTEST).o  $(ECDSATEST).o $(ECDHTEST).o $(IDEATEST).o \
 	$(MD2TEST).o $(MD4TEST).o $(MD5TEST).o \
-	$(HMACTEST).o $(WPTEST).o \
+	$(HMACTEST).o $(HMACTEST2).o $(WPTEST).o \
 	$(RC2TEST).o $(RC4TEST).o $(RC5TEST).o \
 	$(DESTEST).o $(SHATEST).o $(SHA1TEST).o $(SHA256TEST).o $(SHA512TEST).o \
 	$(MDC2TEST).o $(RMDTEST).o \
@@ -130,7 +134,7 @@ OBJ=	$(BNTEST).o $(ECTEST).o  $(ECDSATEST).o $(ECDHTEST).o $(IDEATEST).o \
 	$(GOST2814789TEST).o
 SRC=	$(BNTEST).c $(ECTEST).c  $(ECDSATEST).c $(ECDHTEST).c $(IDEATEST).c \
 	$(MD2TEST).c  $(MD4TEST).c $(MD5TEST).c \
-	$(HMACTEST).c $(WPTEST).c \
+	$(HMACTEST).c $(HMACTEST2).c $(WPTEST).c \
 	$(RC2TEST).c $(RC4TEST).c $(RC5TEST).c \
 	$(DESTEST).c $(SHATEST).c $(SHA1TEST).c $(MDC2TEST).c $(RMDTEST).c \
 	$(RANDTEST).c $(DHTEST).c $(ENGINETEST).c $(CASTTEST).c \
@@ -218,6 +222,9 @@ test_md4: $(MD4TEST)
 
 test_hmac: $(HMACTEST)
 	../util/shlib_wrap.sh ./$(HMACTEST)
+
+test_hmac2:
+	../util/shlib_wrap.sh ./$(HMACTEST2)
 
 test_wp: $(WPTEST)
 	../util/shlib_wrap.sh ./$(WPTEST)
@@ -546,6 +553,9 @@ $(MD5TEST)$(EXE_EXT): $(MD5TEST).o $(DLIBCRYPTO)
 $(HMACTEST)$(EXE_EXT): $(HMACTEST).o $(DLIBCRYPTO)
 	@target=$(HMACTEST); $(BUILD_CMD)
 
+$(HMACTEST2)$(EXE_EXT): $(HMACTEST2).o $(DLIBCRYPTO)
+	@target=$(HMACTEST2); $(BUILD_CMD)
+
 $(WPTEST)$(EXE_EXT): $(WPTEST).o $(DLIBCRYPTO)
 	@target=$(WPTEST); $(BUILD_CMD)
 
@@ -790,13 +800,9 @@ fips_hmactest.o: ../include/openssl/objects.h ../include/openssl/opensslconf.h
 fips_hmactest.o: ../include/openssl/opensslv.h ../include/openssl/ossl_typ.h
 fips_hmactest.o: ../include/openssl/safestack.h ../include/openssl/stack.h
 fips_hmactest.o: ../include/openssl/symhacks.h fips_hmactest.c
-fips_randtest.o: ../e_os.h ../include/openssl/aes.h ../include/openssl/asn1.h
-fips_randtest.o: ../include/openssl/bio.h ../include/openssl/bn.h
+fips_randtest.o: ../e_os.h ../include/openssl/bio.h ../include/openssl/bn.h
 fips_randtest.o: ../include/openssl/crypto.h ../include/openssl/e_os2.h
-fips_randtest.o: ../include/openssl/ec.h ../include/openssl/err.h
-fips_randtest.o: ../include/openssl/evp.h ../include/openssl/fips_rand.h
-fips_randtest.o: ../include/openssl/hmac.h ../include/openssl/lhash.h
-fips_randtest.o: ../include/openssl/obj_mac.h ../include/openssl/objects.h
+fips_randtest.o: ../include/openssl/err.h ../include/openssl/lhash.h
 fips_randtest.o: ../include/openssl/opensslconf.h ../include/openssl/opensslv.h
 fips_randtest.o: ../include/openssl/ossl_typ.h ../include/openssl/rand.h
 fips_randtest.o: ../include/openssl/safestack.h ../include/openssl/stack.h
@@ -871,6 +877,20 @@ hmactest.o: ../include/openssl/objects.h ../include/openssl/opensslconf.h
 hmactest.o: ../include/openssl/opensslv.h ../include/openssl/ossl_typ.h
 hmactest.o: ../include/openssl/safestack.h ../include/openssl/stack.h
 hmactest.o: ../include/openssl/symhacks.h hmactest.c
+hmactest2.o: ../e_os.h ../include/openssl/asn1.h ../include/openssl/bio.h
+hmactest2.o: ../include/openssl/buffer.h ../include/openssl/crypto.h
+hmactest2.o: ../include/openssl/e_os2.h ../include/openssl/ec.h
+hmactest2.o: ../include/openssl/ecdh.h ../include/openssl/ecdsa.h
+hmactest2.o: ../include/openssl/engine.h ../include/openssl/err.h
+hmactest2.o: ../include/openssl/evp.h ../include/openssl/hmac.h
+hmactest2.o: ../include/openssl/lhash.h ../include/openssl/md5.h
+hmactest2.o: ../include/openssl/obj_mac.h ../include/openssl/objects.h
+hmactest2.o: ../include/openssl/opensslconf.h ../include/openssl/opensslv.h
+hmactest2.o: ../include/openssl/ossl_typ.h ../include/openssl/pkcs7.h
+hmactest2.o: ../include/openssl/safestack.h ../include/openssl/sha.h
+hmactest2.o: ../include/openssl/stack.h ../include/openssl/symhacks.h
+hmactest2.o: ../include/openssl/x509.h ../include/openssl/x509_vfy.h
+hmactest2.o: hmactest2.c
 ideatest.o: ../e_os.h ../include/openssl/e_os2.h ../include/openssl/idea.h
 ideatest.o: ../include/openssl/opensslconf.h ideatest.c
 igetest.o: ../include/openssl/aes.h ../include/openssl/crypto.h

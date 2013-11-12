@@ -128,16 +128,37 @@ const EVP_CIPHER *ENGINE_get_cipher(ENGINE *e, int nid)
 		}
 	return ret;
 	}
+const EVP_CIPHER *ENGINE_get_cipher_asynch(ENGINE *e, int nid)
+	{
+	const EVP_CIPHER *ret;
+	ENGINE_CIPHERS_PTR fn = ENGINE_get_ciphers_asynch(e);
+	if(!fn || !fn(e, &ret, NULL, nid))
+		{
+		ENGINEerr(ENGINE_F_ENGINE_GET_CIPHER_ASYNCH,
+				ENGINE_R_UNIMPLEMENTED_CIPHER);
+		return NULL;
+		}
+	return ret;
+	}
 
 /* Gets the cipher callback from an ENGINE structure */
 ENGINE_CIPHERS_PTR ENGINE_get_ciphers(const ENGINE *e)
 	{
 	return e->ciphers;
 	}
+ENGINE_CIPHERS_PTR ENGINE_get_ciphers_asynch(const ENGINE *e)
+	{
+	return e->ciphers_asynch;
+	}
 
 /* Sets the cipher callback in an ENGINE structure */
 int ENGINE_set_ciphers(ENGINE *e, ENGINE_CIPHERS_PTR f)
 	{
 	e->ciphers = f;
+	return 1;
+	}
+int ENGINE_set_ciphers_asynch(ENGINE *e, ENGINE_CIPHERS_PTR f)
+	{
+	e->ciphers_asynch = f;
 	return 1;
 	}

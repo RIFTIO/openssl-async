@@ -686,8 +686,8 @@ struct tls_sigalgs_st
  * an opaque structure :-) */
 typedef struct ssl3_enc_method
 	{
-	int (*enc)(SSL *, int);
-	int (*mac)(SSL *, unsigned char *, int);
+	int (*enc)(SSL *, int, SSL3_TRANSMISSION *);
+	int (*mac)(SSL *, unsigned char *, int, SSL3_TRANSMISSION *);
 	int (*setup_key_block)(SSL *);
 	int (*generate_master_secret)(SSL *, unsigned char *, unsigned char *, int);
 	int (*change_cipher_state)(SSL *, int);
@@ -1075,8 +1075,8 @@ int ssl3_write_bytes(SSL *s, int type, const void *buf, int len);
 int ssl3_final_finish_mac(SSL *s, const char *sender, int slen,unsigned char *p);
 int ssl3_cert_verify_mac(SSL *s, int md_nid, unsigned char *p);
 void ssl3_finish_mac(SSL *s, const unsigned char *buf, int len);
-int ssl3_enc(SSL *s, int send_data);
-int n_ssl3_mac(SSL *ssl, unsigned char *md, int send_data);
+int ssl3_enc(SSL *s, int send_data, SSL3_TRANSMISSION *trans);
+int n_ssl3_mac(SSL *ssl, unsigned char *md, int send_data, SSL3_TRANSMISSION *trans);
 void ssl3_free_digest_list(SSL *s);
 unsigned long ssl3_output_cert_chain(SSL *s, CERT_PKEY *cpk);
 SSL_CIPHER *ssl3_choose_cipher(SSL *ssl,STACK_OF(SSL_CIPHER) *clnt,
@@ -1086,6 +1086,7 @@ int	ssl3_setup_read_buffer(SSL *s);
 int	ssl3_setup_write_buffer(SSL *s);
 int	ssl3_release_read_buffer(SSL *s);
 int	ssl3_release_write_buffer(SSL *s);
+int	ssl3_release_buffer(SSL *s, SSL3_BUFFER *b, int write_p);
 int	ssl3_digest_cached_records(SSL *s);
 int	ssl3_new(SSL *s);
 void	ssl3_free(SSL *s);
@@ -1129,6 +1130,105 @@ int ssl3_write_pending(SSL *s, int type, const unsigned char *buf,
 unsigned char *dtls1_set_message_header(SSL *s, 
 	unsigned char *p, unsigned char mt,	unsigned long len, 
 	unsigned long frag_off, unsigned long frag_len);
+
+/* SSL3 asynch */
+struct ssl3_read_record_st
+	{
+	/* The following are simply copied from the SSL and
+	 * SSL3_STATE structures. */
+	SSL3_BUFFER buf;
+	SSL3_RECORD rec;
+	unsigned char *packet;
+	unsigned int packet_length;
+
+	/* All other lengths are potentially changed by the encrypt/decrypt
+	 * process, and we need this one to keep track for SSL_pending.
+	 */
+	unsigned int origlen;
+
+	/* cached values that we need to check the mac */
+	unsigned char md[EVP_MAX_MD_SIZE];
+	int mac_size;
+	unsigned char *mac;
+
+	int status;
+	SSL *s;
+	};
+int ssl3_get_record_asynch_cb(SSL3_TRANSMISSION *trans, int status);
+SSL3_READ_RECORD *ssl3_extract_read_record(const SSL *s);
+void ssl3_release_read_record(SSL3_READ_RECORD *rec);
+void ssl3_cleanup_read_record_pool(SSL *s);
+
+typedef struct ssl3_asynch_callback_list_st SSL3_ASYNCH_CALLBACK_LIST;
+struct ssl3_asynch_callback_list_st
+	{
+	int (*cb)(SSL3_TRANSMISSION *trans, int status);
+	void *cb_data;
+	SSL3_ASYNCH_CALLBACK_LIST *next;
+	};
+struct ssl3_transmission_st
+	{
+	SSL *s;
+	/* Copied from SSL and SSL3_STATE */
+	SSL3_BUFFER buf;
+	SSL3_RECORD rec;
+	unsigned char *packet;
+	unsigned int packet_length;
+
+	int post;		/* Flag that indicates if we're in asynch post */
+	SSL3_ASYNCH_CALLBACK_LIST callback_list[10]; /* Arbitrary max */
+	unsigned int callback_list_top;
+
+	unsigned int flags;
+	int status;
+
+	void *orig; size_t origlen;
+
+	/* used by ssl3_get_record_inner */
+	unsigned char _md[EVP_MAX_MD_SIZE];
+	int clear_enc;
+	int clear_mac;
+	int mac_size;
+	unsigned char *mac;
+
+	/* for do_ssl3_write */
+	int dsw_type;
+	int dsw_create_empty_fragment;
+	int dsw_prefix_len;
+	unsigned int dsw_plen_offset;
+	const unsigned char *dsw_buf;
+	unsigned int dsw_len;
+	SSL3_TRANSMISSION *dsw_sibling;
+	unsigned char *dsw_p;
+	int dsw_eivlen;
+	int dsw_mac_size;
+	SSL3_BUFFER dsw_ef_buf;
+	SSL3_RECORD dsw_ef_rec;
+
+	/* used by n_ssl3_mac_inner */
+	unsigned char *md;
+	unsigned char seq_cache[8];
+	EVP_MD_CTX md_ctx;
+
+	/* for tls1_enc */
+	const EVP_CIPHER *te_enc;
+	int te_pad;
+};
+int ssl3_asynch_push_callback(SSL3_TRANSMISSION *trans,
+	int (*cb)(SSL3_TRANSMISSION *trans, int status));
+int ssl3_asynch_handle_cipher_callbacks(unsigned char *data, int datalen,
+	void *userdata, int status);
+int ssl3_asynch_handle_digest_callbacks(unsigned char *md, unsigned int size,
+	void *userdata, int status);
+SSL3_TRANSMISSION *ssl3_get_transmission_before(SSL *s, SSL3_TRANSMISSION *t);
+SSL3_TRANSMISSION *ssl3_get_transmission(SSL *s);
+void ssl3_release_transmission(SSL3_TRANSMISSION *trans);
+void ssl3_cleanup_transmission_pool(SSL *s);
+int ssl3_asynch_read_pending(const SSL *s);
+
+#define SSL3_TRANS_FLAGS_SEND	0x01
+#define SSL3_TRANS_FLAGS_FINAL	0x02
+
 
 int dtls1_write_app_data_bytes(SSL *s, int type, const void *buf, int len);
 int dtls1_write_bytes(SSL *s, int type, const void *buf, int len);
@@ -1220,18 +1320,18 @@ int dtls1_get_record(SSL *s);
 int do_dtls1_write(SSL *s, int type, const unsigned char *buf,
 	unsigned int len, int create_empty_fragement);
 int dtls1_dispatch_alert(SSL *s);
-int dtls1_enc(SSL *s, int snd);
+int dtls1_enc(SSL *s, int snd, SSL3_TRANSMISSION *);
 
 int ssl_init_wbio_buffer(SSL *s, int push);
 void ssl_free_wbio_buffer(SSL *s);
 
 int tls1_change_cipher_state(SSL *s, int which);
 int tls1_setup_key_block(SSL *s);
-int tls1_enc(SSL *s, int snd);
+int tls1_enc(SSL *s, int snd, SSL3_TRANSMISSION *);
 int tls1_final_finish_mac(SSL *s,
 	const char *str, int slen, unsigned char *p);
 int tls1_cert_verify_mac(SSL *s, int md_nid, unsigned char *p);
-int tls1_mac(SSL *ssl, unsigned char *md, int snd);
+int tls1_mac(SSL *ssl, unsigned char *md, int snd, SSL3_TRANSMISSION *trans);
 int tls1_generate_master_secret(SSL *s, unsigned char *out,
 	unsigned char *p, int len);
 int tls1_export_keying_material(SSL *s, unsigned char *out, size_t olen,
@@ -1307,6 +1407,7 @@ void tls1_set_cert_validity(SSL *s);
 
 #endif
 EVP_MD_CTX* ssl_replace_hash(EVP_MD_CTX **hash,const EVP_MD *md) ;
+EVP_MD_CTX* ssl_replace_hash_asynch(EVP_MD_CTX **hash,const EVP_MD *md) ;
 void ssl_clear_hash_ctx(EVP_MD_CTX **hash);
 int ssl_add_serverhello_renegotiate_ext(SSL *s, unsigned char *p, int *len,
 					int maxlen);

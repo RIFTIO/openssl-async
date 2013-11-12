@@ -117,9 +117,98 @@
 #include <openssl/engine.h>
 #endif
 
+typedef struct evp_asynch_ctx_st EVP_ASYNCH_CTX;
+typedef int (*asynch_cb_t)(unsigned char *md, unsigned int size,
+	void *ctx, int status);
+typedef int (*internal_asynch_cb_t)(unsigned char *md, unsigned int size,
+	EVP_ASYNCH_CTX *actx, int status);
+
+struct evp_md_ctx_internal_st
+	{
+	/* For asynch operations */
+	int (*cb)(unsigned char *md, unsigned int size,
+		void *userdata, int status);
+	void *cb_data;
+	/* Internal cache */
+	int (*internal_cb)(unsigned char *md, unsigned int size,
+		EVP_MD_CTX *ctx, int status);
+	};
+
+/* Asynch requires to have a per-call context.  To avoid memory fragmentation,
+ * we use a big pool that gets allocated once. */
+struct evp_asynch_ctx_st
+	{
+	EVP_MD_CTX *ctx;
+	internal_asynch_cb_t internal_cb;
+	asynch_cb_t user_cb;	/* Cache of ctx->internal->cb */
+	void *user_cb_data;	/* Cache of ctx->internal->cb_data */
+	EVP_ASYNCH_CTX *next_free;
+	};
+static EVP_ASYNCH_CTX *asynch_ctx_pool = NULL;
+static EVP_ASYNCH_CTX *asynch_ctx_next_free = NULL;
+static int asynch_ctx_break = 0;
+static int asynch_ctx_items = 0;
+static EVP_ASYNCH_CTX *alloc_asynch_ctx()
+	{
+	EVP_ASYNCH_CTX *ret = NULL;
+	CRYPTO_w_lock(CRYPTO_LOCK_ASYNCH);
+	if (asynch_ctx_pool == NULL)
+		{
+		asynch_ctx_items = 1024;
+		asynch_ctx_break = 0;
+		asynch_ctx_next_free = NULL;
+		asynch_ctx_pool =
+			(EVP_ASYNCH_CTX *)OPENSSL_malloc(sizeof(EVP_ASYNCH_CTX) * asynch_ctx_items);
+		if (asynch_ctx_pool == NULL)
+			{
+			CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
+			return NULL;
+			}
+		}
+	if (asynch_ctx_next_free)
+		{
+		ret = asynch_ctx_next_free;
+		asynch_ctx_next_free = asynch_ctx_next_free->next_free;
+		}
+	else if (asynch_ctx_break < asynch_ctx_items)
+		ret = &asynch_ctx_pool[asynch_ctx_break++];
+	else
+		ret = NULL;
+	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
+	return ret;
+	}
+static void free_asynch_ctx(EVP_ASYNCH_CTX *item)
+	{
+	CRYPTO_w_lock(CRYPTO_LOCK_ASYNCH);
+	item->next_free = asynch_ctx_next_free;
+	asynch_ctx_next_free = item;
+	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
+	}
+
 void EVP_MD_CTX_init(EVP_MD_CTX *ctx)
 	{
-	memset(ctx,'\0',sizeof *ctx);
+	ctx->digest = NULL;
+	ctx->engine = NULL;
+
+	ctx->flags = 0;
+	ctx->md_data = NULL;
+	ctx->pctx = NULL;
+	ctx->update.synch = NULL;
+	}
+
+static int evp_MD_CTX_expand(EVP_MD_CTX *ctx)
+	{
+	ctx->internal = OPENSSL_malloc(sizeof(struct evp_md_ctx_internal_st));
+	if (!ctx->internal) return 0;
+	memset(ctx->internal,0,sizeof(struct evp_md_ctx_internal_st));
+	ctx->flags = EVP_MD_CTX_FLAG_EXPANDED;
+	return 1;
+	}
+
+void EVP_MD_CTX_init_ex(EVP_MD_CTX *ctx)
+	{
+	EVP_MD_CTX_init(ctx);
+	evp_MD_CTX_expand(ctx);
 	}
 
 EVP_MD_CTX *EVP_MD_CTX_create(void)
@@ -138,6 +227,13 @@ int EVP_DigestInit(EVP_MD_CTX *ctx, const EVP_MD *type)
 	return EVP_DigestInit_ex(ctx, type, NULL);
 	}
 
+static int _evp_digest_cb(unsigned char *md, unsigned int size,
+	EVP_ASYNCH_CTX *actx, int status)
+	{
+	/* Everything of value is handled by the internal callback,
+	   this function only acts as a conduit. */
+	return actx->internal_cb(md, size, actx, status);
+	}
 int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl)
 	{
 	EVP_MD_CTX_clear_flags(ctx,EVP_MD_CTX_FLAG_CLEANED);
@@ -170,7 +266,22 @@ int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl)
 		if(impl)
 			{
 			/* There's an ENGINE for this job ... (apparently) */
-			const EVP_MD *d = ENGINE_get_digest(impl, type->type);
+			const EVP_MD *d;
+			if ((ctx->flags & EVP_MD_CTX_FLAG_EXPANDED)
+				&& ctx->internal->cb)
+				{
+				d = ENGINE_get_digest_asynch(impl, type->type);
+
+				if(!d)
+					{
+					EVPerr(EVP_F_EVP_DIGESTINIT_EX, EVP_R_NO_ASYNCH_SUPPORT);
+					ERR_add_error_data(1,EVP_MD_name(type));
+					return 0;
+					}
+				}
+			else
+				d = ENGINE_get_digest(impl, type->type);
+
 			if(!d)
 				{
 				/* Same comment from evp_enc.c */
@@ -186,7 +297,33 @@ int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl)
 			ctx->engine = impl;
 			}
 		else
+			{
 			ctx->engine = NULL;
+			}
+
+		if (type->flags & EVP_MD_FLAG_ASYNCH)
+			{
+#ifdef OPENSSL_FIPS
+			EVPerr(EVP_F_EVP_DIGESTINIT_EX, EVP_R_NO_ASYNCH_SUPPORT_IN_FIPS);
+			ERR_add_error_data(1,EVP_MD_name(type));
+			return 0;
+#else
+			if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED)
+				|| ctx->internal->cb == NULL)
+				{
+				EVPerr(EVP_F_EVP_DIGESTINIT_EX, EVP_R_NO_CALLBACK_SET);
+				return 0;
+				}
+#endif
+			}
+		else
+			if ((ctx->flags & EVP_MD_CTX_FLAG_EXPANDED)
+				&& ctx->internal->cb != NULL)
+				{
+				EVPerr(EVP_F_EVP_DIGESTINIT_EX, EVP_R_NO_ASYNCH_SUPPORT);
+				ERR_add_error_data(1,EVP_MD_name(type));
+				return 0;
+				}
 		}
 	else
 	if(!ctx->digest)
@@ -202,7 +339,10 @@ int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl)
 		ctx->digest=type;
 		if (!(ctx->flags & EVP_MD_CTX_FLAG_NO_INIT) && type->ctx_size)
 			{
-			ctx->update = type->update;
+			if (ctx->digest->flags & EVP_MD_FLAG_ASYNCH)
+				ctx->update.asynch = type->update.asynch;
+			else
+				ctx->update.synch = type->update.synch;
 			ctx->md_data=OPENSSL_malloc(type->ctx_size);
 			if (ctx->md_data == NULL)
 				{
@@ -210,6 +350,7 @@ int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl)
 							ERR_R_MALLOC_FAILURE);
 				return 0;
 				}
+			memset(ctx->md_data, 0, type->ctx_size);
 			}
 		}
 #ifndef OPENSSL_NO_ENGINE
@@ -223,14 +364,82 @@ skip_to_init:
 		if (r <= 0 && (r != -2))
 			return 0;
 		}
+	{
+	int rc;
+
 	if (ctx->flags & EVP_MD_CTX_FLAG_NO_INIT)
-		return 1;
-	return ctx->digest->init(ctx);
+		rc = 1;
+	else
+	    {
+		if(ctx->digest->flags & EVP_MD_FLAG_ASYNCH)
+			{
+			ctx->internal->internal_cb = NULL;
+			rc = ctx->digest->init.asynch(ctx, (asynch_cb_t)_evp_digest_cb);
+			}
+		else
+			rc = ctx->digest->init.synch(ctx);
+		}
+
+	if (ctx->digest->flags & EVP_MD_FLAG_ASYNCH)
+		ctx->internal->cb(NULL, 0, ctx->internal->cb_data, rc);
+	return rc;
+	}
+    }
+
+static int _evp_DigestUpdate_post(unsigned char *md, unsigned int size,
+	EVP_ASYNCH_CTX *actx, int status)
+	{
+	int ret = actx->user_cb(NULL, 0, actx->user_cb_data, status);
+	if (status >= 0)
+		free_asynch_ctx(actx);
+	return ret;
 	}
 
 int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *data, size_t count)
 	{
-	return ctx->update(ctx,data,count);
+	if (ctx->digest->flags & EVP_MD_FLAG_ASYNCH)
+		{
+		EVP_ASYNCH_CTX *actx = NULL;
+		int ret = 0;
+		actx = alloc_asynch_ctx();
+		if (actx == NULL)
+			{
+			EVPerr(EVP_F_EVP_DIGESTUPDATE,ERR_R_MALLOC_FAILURE);
+			return 0;
+			}
+		actx->ctx = ctx;
+		actx->user_cb = ctx->internal->cb;
+		actx->user_cb_data = ctx->internal->cb_data;
+		actx->internal_cb = _evp_DigestUpdate_post;
+		ret = ctx->update.asynch(ctx,data,count,actx);
+		if (!ret)
+			free_asynch_ctx(actx);
+		return ret;
+		}
+	return ctx->update.synch(ctx,data,count);
+	}
+
+static int _evp_DigestFinal_post(unsigned char *md, unsigned int size,
+	EVP_ASYNCH_CTX *actx, int status)
+	{
+	EVP_MD_CTX *ctx = actx->ctx;
+	int ret;
+	if (status < 0)
+		{
+		ret = actx->user_cb(md, size, actx->user_cb_data, status);
+		}
+	else
+		{
+		if (ctx->digest->cleanup)
+			{
+			ctx->digest->cleanup(ctx);
+			EVP_MD_CTX_set_flags(ctx,EVP_MD_CTX_FLAG_CLEANED);
+			}
+		memset(ctx->md_data,0,ctx->digest->ctx_size);
+		ret = actx->user_cb(md, size, actx->user_cb_data, status);
+		free_asynch_ctx(actx);
+		}
+	return ret;
 	}
 
 /* The caller can assume that this removes any secret data from the context */
@@ -248,7 +457,25 @@ int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, unsigned int *size)
 	int ret;
 
 	OPENSSL_assert(ctx->digest->md_size <= EVP_MAX_MD_SIZE);
-	ret=ctx->digest->final(ctx,md);
+	if (ctx->digest->flags & EVP_MD_FLAG_ASYNCH)
+		{
+		EVP_ASYNCH_CTX *actx = NULL;
+		actx = alloc_asynch_ctx();
+		if (actx == NULL)
+			{
+			EVPerr(EVP_F_EVP_DIGESTFINAL_EX,ERR_R_MALLOC_FAILURE);
+			return 0;
+			}
+		actx->ctx = ctx;
+		actx->user_cb = ctx->internal->cb;
+		actx->user_cb_data = ctx->internal->cb_data;
+		actx->internal_cb = _evp_DigestFinal_post;
+		ret = ctx->digest->final.asynch(ctx, md, actx);
+		if (!ret)
+			free_asynch_ctx(actx);
+		return ret;
+		}
+	ret=ctx->digest->final.synch(ctx,md);
 	if (size != NULL)
 		*size=ctx->digest->md_size;
 	if (ctx->digest->cleanup)
@@ -290,7 +517,11 @@ int EVP_MD_CTX_copy_ex(EVP_MD_CTX *out, const EVP_MD_CTX *in)
 		}
 	else tmp_buf = NULL;
 	EVP_MD_CTX_cleanup(out);
-	memcpy(out,in,sizeof *out);
+	out->digest = in->digest;
+	out->engine = in->engine;
+
+	out->flags = in->flags;
+	out->update.synch = in->update.synch;
 
 	if (in->md_data && out->digest->ctx_size)
 		{
@@ -308,7 +539,7 @@ int EVP_MD_CTX_copy_ex(EVP_MD_CTX *out, const EVP_MD_CTX *in)
 		memcpy(out->md_data,in->md_data,out->digest->ctx_size);
 		}
 
-	out->update = in->update;
+	out->update.synch = in->update.synch;
 
 	if (in->pctx)
 		{
@@ -318,6 +549,17 @@ int EVP_MD_CTX_copy_ex(EVP_MD_CTX *out, const EVP_MD_CTX *in)
 			EVP_MD_CTX_cleanup(out);
 			return 0;
 			}
+		}
+
+	if (out->flags & EVP_MD_CTX_FLAG_EXPANDED)
+		{
+		if (!evp_MD_CTX_expand(out))
+			{
+			EVPerr(EVP_F_EVP_MD_CTX_COPY_EX,ERR_R_MALLOC_FAILURE);
+			return 0;
+			}
+		out->internal->cb = in->internal->cb;
+		out->internal->cb_data = in->internal->cb_data;
 		}
 
 	if (out->digest->copy)
@@ -341,6 +583,109 @@ int EVP_Digest(const void *data, size_t count,
 
 	return ret;
 	}
+
+int EVP_MD_CTX_ctrl_ex(EVP_MD_CTX *ctx, int type, int arg, void *ptr,
+	void (*fn_ptr)(void))
+{
+	int ret;
+
+	/* Intercept any pre-init EVP level commands before trying to hand them
+	 * on to algorithm specific ctrl() handlers. */
+	switch(type)
+		{
+	case EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK:
+		if (ctx->digest)
+			{
+			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_SET_AFTER_DIGESTINIT);
+			return 0;
+			}
+		if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
+			if (!evp_MD_CTX_expand(ctx))
+				{
+				EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX,ERR_R_MALLOC_FAILURE);
+				return 0;
+				}
+		ctx->internal->cb = (int (*)(unsigned char *md, unsigned int size,
+				void *userdata, int status))fn_ptr;
+		ctx->internal->cb_data = ptr;
+		return 1;
+	case EVP_MD_CTRL_UPDATE_ASYNCH_CALLBACK:
+		if (!ctx->digest)
+			{
+			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
+			{
+			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		ctx->internal->cb = (int (*)(unsigned char *md, unsigned int size,
+				void *userdata, int status))fn_ptr;
+		ctx->internal->cb_data = ptr;
+		return 1;
+	case EVP_MD_CTRL_UPDATE_ASYNCH_CALLBACK_DATA:
+		if (!ctx->digest)
+			{
+			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
+			{
+			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		ctx->internal->cb_data = ptr;
+		return 1;
+	case EVP_MD_CTRL_GET_ASYNCH_CALLBACK_FN:
+		if (!ctx->digest)
+			{
+			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
+			{
+			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		*(int (**)(unsigned char *md, unsigned int size,
+			   void *userdata, int status))ptr =
+			ctx->internal->cb;
+		return 1;
+	case EVP_MD_CTRL_GET_ASYNCH_CALLBACK_DATA:
+		if (!ctx->digest)
+			{
+			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
+			{
+			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		*(void **)ptr = ctx->internal->cb_data;
+		return 1;
+	default:
+		break;
+		}
+
+	if(!ctx->digest) {
+		EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_NO_DIGEST_SET);
+		return 0;
+	}
+
+	if(!ctx->digest->md_ctrl) {
+		EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_CTRL_NOT_IMPLEMENTED);
+		return 0;
+	}
+
+	ret = ctx->digest->md_ctrl(ctx, type, arg, ptr);
+	if(ret == -1) {
+		EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_CTRL_OPERATION_NOT_IMPLEMENTED);
+		return 0;
+	}
+	return ret;
+}
 
 void EVP_MD_CTX_destroy(EVP_MD_CTX *ctx)
 	{
@@ -371,7 +716,12 @@ int EVP_MD_CTX_cleanup(EVP_MD_CTX *ctx)
 		 * functional reference we held for this reason. */
 		ENGINE_finish(ctx->engine);
 #endif
-	memset(ctx,'\0',sizeof *ctx);
+	if (ctx->flags & EVP_MD_CTX_FLAG_EXPANDED)
+		{
+		OPENSSL_free(ctx->internal);
+		ctx->internal = NULL;
+		}
+	EVP_MD_CTX_init(ctx);
 
 	return 1;
 	}
