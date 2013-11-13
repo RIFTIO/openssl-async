@@ -281,6 +281,7 @@ static SSL_CTX *ctx=NULL;
 #ifndef OPENSSL_NO_TLSEXT
 static SSL_CTX *ctx2=NULL;
 #endif
+static int ssl_mode=0;
 static int www=0;
 
 static BIO *bio_s_out=NULL;
@@ -562,6 +563,7 @@ static void sv_usage(void)
 #endif
 	BIO_printf(bio_err," -keymatexport label   - Export keying material using label\n");
 	BIO_printf(bio_err," -keymatexportlen len  - Export len bytes of keying material (default 20)\n");
+	BIO_printf(bio_err," -asynch       - Run in asynchronous mode (currently only on write\n");
 	}
 
 static int local_argc=0;
@@ -979,6 +981,7 @@ int MAIN(int argc, char *argv[])
 	local_argv=argv;
 
 	apps_startup();
+	thread_setup();
 #ifdef MONOLITH
 	s_server_init();
 #endif
@@ -1341,6 +1344,10 @@ int MAIN(int argc, char *argv[])
 			keymatexportlen=atoi(*(++argv));
 			if (keymatexportlen == 0) goto bad;
 			}
+		else if (strcmp(*argv,"-asynch") == 0)
+			{
+			ssl_mode = SSL_MODE_ASYNCHRONOUS;
+			}
 		else
 			{
 			BIO_printf(bio_err,"unknown option %s\n",*argv);
@@ -1544,6 +1551,20 @@ bad:
 	if (bugs) SSL_CTX_set_options(ctx,SSL_OP_ALL);
 	if (hack) SSL_CTX_set_options(ctx,SSL_OP_NETSCAPE_DEMO_CIPHER_CHANGE_BUG);
 	SSL_CTX_set_options(ctx,off);
+	if (ssl_mode)
+		{
+		SSL_CTX_set_mode(ctx,ssl_mode);
+		if (s_debug)
+			{
+			SSL_CTX_set_asynch_completion_callback(ctx, ssl_asynch_callback);
+			SSL_CTX_set_asynch_completion_callback_arg(ctx, bio_s_out);
+			}
+		
+		if (!s_nbio)
+			BIO_printf(bio_err,
+				"Warning: asynch mode works best with non-blocking I/O, you may see some odd delays.\n"
+				"Warning: please consider using the flag -nbio\n");
+		}
 	/* DTLS: partial reads end up discarding unread UDP bytes :-( 
 	 * Setting read ahead solves this problem.
 	 */
@@ -1920,6 +1941,7 @@ end:
         BIO_free(bio_s_out);
 		bio_s_out=NULL;
 		}
+	thread_cleanup();
 	apps_shutdown();
 	OPENSSL_EXIT(ret);
 	}
@@ -2266,6 +2288,11 @@ static int sv_body(char *hostname, int s, unsigned char *context)
 					{
 				case SSL_ERROR_NONE:
 					break;
+				case SSL_ERROR_WAIT_ASYNCH:
+				case SSL_ERROR_WAIT_ASYNCH_WRITE:
+				case SSL_ERROR_WAIT_ASYNCH_READ:
+					BIO_printf(bio_s_out,"Write asynch BLOCK\n");
+					break;
 				case SSL_ERROR_WANT_WRITE:
 				case SSL_ERROR_WANT_READ:
 				case SSL_ERROR_WANT_X509_LOOKUP:
@@ -2330,6 +2357,13 @@ again:
 					raw_write_stdout(buf,
 						(unsigned int)i);
 					if (SSL_pending(con)) goto again;
+					break;
+				case SSL_ERROR_WAIT_ASYNCH_WRITE:
+					BIO_printf(bio_s_out,"Read asynch BLOCK\n");
+					break;
+				case SSL_ERROR_WAIT_ASYNCH:
+				case SSL_ERROR_WAIT_ASYNCH_READ:
+					goto again;
 					break;
 				case SSL_ERROR_WANT_WRITE:
 				case SSL_ERROR_WANT_READ:
@@ -2412,7 +2446,7 @@ static int init_ssl_connection(SSL *con)
 #endif
 	if (i <= 0)
 		{
-		if (BIO_sock_should_retry(i))
+		if (SSL_pending(con) || BIO_sock_should_retry(i))
 			{
 			BIO_printf(bio_s_out,"DELAY\n");
 			return(1);
@@ -2656,6 +2690,9 @@ static int www_body(char *hostname, int s, unsigned char *context)
 				{
 			case SSL_ERROR_NONE:
 				break;
+			case SSL_ERROR_WAIT_ASYNCH:
+			case SSL_ERROR_WAIT_ASYNCH_WRITE:
+			case SSL_ERROR_WAIT_ASYNCH_READ:
 			case SSL_ERROR_WANT_WRITE:
 			case SSL_ERROR_WANT_READ:
 			case SSL_ERROR_WANT_X509_LOOKUP:
@@ -2675,7 +2712,7 @@ static int www_body(char *hostname, int s, unsigned char *context)
 		i=BIO_gets(io,buf,bufsize-1);
 		if (i < 0) /* error */
 			{
-			if (!BIO_should_retry(io))
+			if (!BIO_pending(io) && !BIO_should_retry(io))
 				{
 				if (!s_quiet)
 					ERR_print_errors(bio_err);

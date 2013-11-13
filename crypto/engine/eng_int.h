@@ -165,12 +165,16 @@ struct engine_st
 	const STORE_METHOD *store_meth;
 	/* Cipher handling is via this callback */
 	ENGINE_CIPHERS_PTR ciphers;
+	ENGINE_CIPHERS_PTR ciphers_asynch;
 	/* Digest handling is via this callback */
 	ENGINE_DIGESTS_PTR digests;
+	ENGINE_DIGESTS_PTR digests_asynch;
 	/* Public key handling via this callback */
 	ENGINE_PKEY_METHS_PTR pkey_meths;
+	ENGINE_PKEY_METHS_PTR pkey_meths_asynch;
 	/* ASN1 public key handling via this callback */
 	ENGINE_PKEY_ASN1_METHS_PTR pkey_asn1_meths;
+	ENGINE_PKEY_ASN1_METHS_PTR pkey_asn1_meths_asynch;
 
 	ENGINE_GEN_INT_FUNC_PTR	destroy;
 

@@ -71,17 +71,115 @@
 
 #ifdef OPENSSL_FIPS
 #define M_do_cipher(ctx, out, in, inl) FIPS_cipher(ctx, out, in, inl)
+#define M_do_cipher_asynch(ctx, out, in, inl, cb_data) cb->internal->cb(out, FIPS_cipher(ctx, out, in, inl), cb_data)
 #else
-#define M_do_cipher(ctx, out, in, inl) ctx->cipher->do_cipher(ctx, out, in, inl)
+#define M_do_cipher(ctx, out, in, inl) ctx->cipher->do_cipher.synch(ctx, out, in, inl)
+#define M_do_cipher_asynch(ctx, out, in, inl, cb_data) ctx->cipher->do_cipher.asynch(ctx, out, in, inl, cb_data)
 #endif
 
+typedef struct evp_asynch_ctx_st EVP_ASYNCH_CTX;
+typedef int (*internal_asynch_cb_t)(unsigned char *out, int outl,
+	EVP_ASYNCH_CTX *ctx, int status);
+typedef int (*asynch_cb_t)(unsigned char *out, int outl, void *ctx, int status);
 
 const char EVP_version[]="EVP" OPENSSL_VERSION_PTEXT;
 
+/* Asynch requires to have a per-call context.  To avoid memory fragmentation,
+ * we use a big pool that gets allocated once. */
+struct evp_asynch_ctx_st
+	{
+	EVP_CIPHER_CTX *ctx;
+	internal_asynch_cb_t internal_cb;
+	asynch_cb_t user_cb;	/* Cache of ctx->internal->cb */
+	void *user_cb_data;	/* Cache of ctx->internal->cb_data */
+	unsigned char *out;
+	unsigned int outl;
+	char *in;
+	int inl;
+	int final;		/* Used to flag that we're running a Final */
+	/* Specific for encryption */
+	int enc_buffered;
+	/* Specific for decryption */
+	int dec_buffered;
+	unsigned char final_out[EVP_MAX_BLOCK_LENGTH];/* possible final block */
+
+	EVP_ASYNCH_CTX *next_free;
+	};
+static EVP_ASYNCH_CTX *asynch_ctx_pool = NULL;
+static EVP_ASYNCH_CTX *asynch_ctx_next_free = NULL;
+static int asynch_ctx_break = 0;
+static int asynch_ctx_items = 0;
+static EVP_ASYNCH_CTX *alloc_asynch_ctx()
+	{
+	EVP_ASYNCH_CTX *ret = NULL;
+	CRYPTO_w_lock(CRYPTO_LOCK_ASYNCH);
+	if (asynch_ctx_pool == NULL)
+		{
+		asynch_ctx_items = 1024;
+		asynch_ctx_break = 0;
+		asynch_ctx_next_free = NULL;
+		asynch_ctx_pool =
+			(EVP_ASYNCH_CTX *)OPENSSL_malloc(sizeof(EVP_ASYNCH_CTX) * asynch_ctx_items);
+		if (asynch_ctx_pool == NULL)
+			{
+			CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
+			return NULL;
+			}
+		}
+	if (asynch_ctx_next_free)
+		{
+		ret = asynch_ctx_next_free;
+		asynch_ctx_next_free = asynch_ctx_next_free->next_free;
+		}
+	else if (asynch_ctx_break < asynch_ctx_items)
+		ret = &asynch_ctx_pool[asynch_ctx_break++];
+	else
+		ret = NULL;
+	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
+	return ret;
+	}
+static void free_asynch_ctx(EVP_ASYNCH_CTX *item)
+	{
+	CRYPTO_w_lock(CRYPTO_LOCK_ASYNCH);
+	item->next_free = asynch_ctx_next_free;
+	asynch_ctx_next_free = item;
+	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
+	}
+
 void EVP_CIPHER_CTX_init(EVP_CIPHER_CTX *ctx)
 	{
-	memset(ctx,0,sizeof(EVP_CIPHER_CTX));
-	/* ctx->cipher=NULL; */
+	ctx->cipher = NULL;
+	ctx->engine = NULL;
+	ctx->encrypt = 0;
+	ctx->buf_len = 0;
+
+	memset(ctx->oiv,0,EVP_MAX_IV_LENGTH);
+	memset(ctx->iv,0,EVP_MAX_IV_LENGTH);
+	memset(ctx->buf,0,EVP_MAX_BLOCK_LENGTH);
+	ctx->num = 0;
+
+	ctx->app_data = NULL;
+	ctx->key_len = 0;
+	ctx->flags = 0;
+	ctx->cipher_data = NULL;
+	ctx->final_used = 0;
+	ctx->block_mask = 0;
+	memset(ctx->final,0,EVP_MAX_BLOCK_LENGTH);
+	}
+
+static int evp_CIPHER_CTX_expand(EVP_CIPHER_CTX *ctx)
+	{
+	ctx->internal = OPENSSL_malloc(sizeof(struct evp_cipher_ctx_internal_st));
+	if (!ctx->internal) return 0;
+	memset(ctx->internal,0,sizeof(struct evp_cipher_ctx_internal_st));
+	ctx->flags = EVP_CIPH_CTX_FLAG_EXPANDED;
+	return 1;
+	}
+
+void EVP_CIPHER_CTX_init_ex(EVP_CIPHER_CTX *ctx)
+	{
+	EVP_CIPHER_CTX_init(ctx);
+	evp_CIPHER_CTX_expand(ctx);
 	}
 
 EVP_CIPHER_CTX *EVP_CIPHER_CTX_new(void)
@@ -100,9 +198,17 @@ int EVP_CipherInit(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
 	return EVP_CipherInit_ex(ctx,cipher,NULL,key,iv,enc);
 	}
 
+static int _evp_cipher_cb(unsigned char *out, int outl,
+	EVP_ASYNCH_CTX *actx, int status)
+	{
+	/* Everything of value is handled by the internal callback,
+	   this function only acts as a conduit. */
+	return actx->internal_cb(out, outl, actx, status);
+	}
 int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *impl,
 	     const unsigned char *key, const unsigned char *iv, int enc)
 	{
+	int call_asynch_cb_at_end = 0;
 	if (enc == -1)
 		enc = ctx->encrypt;
 	else
@@ -128,10 +234,22 @@ int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *imp
 		if (ctx->cipher)
 			{
 			unsigned long flags = ctx->flags;
+			int (*cb)(unsigned char *out, int outl,
+				void *userdata, int status) =
+				flags & EVP_CIPH_CTX_FLAG_EXPANDED ?
+				ctx->internal->cb : NULL;
+			void *cb_data =
+				flags & EVP_CIPH_CTX_FLAG_EXPANDED ?
+				ctx->internal->cb_data : NULL;
 			EVP_CIPHER_CTX_cleanup(ctx);
 			/* Restore encrypt and flags */
 			ctx->encrypt = enc;
 			ctx->flags = flags;
+			if (flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+				{
+				ctx->internal->cb = cb;
+				ctx->internal->cb_data = cb_data;
+				}
 			}
 #ifndef OPENSSL_NO_ENGINE
 		if(impl)
@@ -148,7 +266,23 @@ int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *imp
 		if(impl)
 			{
 			/* There's an ENGINE for this job ... (apparently) */
-			const EVP_CIPHER *c = ENGINE_get_cipher(impl, cipher->nid);
+			const EVP_CIPHER *c = NULL;
+
+			if ((ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+				&& ctx->internal->cb)
+				{
+				c = ENGINE_get_cipher_asynch(impl, cipher->nid);
+
+				if (!c)
+					{
+					EVPerr(EVP_F_EVP_CIPHERINIT_EX, EVP_R_NO_ASYNCH_SUPPORT);
+					ERR_add_error_data(1,EVP_CIPHER_name(cipher));
+					return 0;
+					}
+				}
+			else
+				c = ENGINE_get_cipher(impl, cipher->nid);
+
 			if(!c)
 				{
 				/* One positive side-effect of US's export
@@ -166,7 +300,9 @@ int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *imp
 			ctx->engine = impl;
 			}
 		else
+			{
 			ctx->engine = NULL;
+			}
 #endif
 
 #ifdef OPENSSL_FIPS
@@ -182,13 +318,14 @@ int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *imp
 				EVPerr(EVP_F_EVP_CIPHERINIT_EX, ERR_R_MALLOC_FAILURE);
 				return 0;
 				}
+			memset(ctx->cipher_data, 0, ctx->cipher->ctx_size);
 			}
 		else
 			{
 			ctx->cipher_data = NULL;
 			}
 		ctx->key_len = cipher->key_len;
-		ctx->flags = 0;
+		ctx->flags &= EVP_CIPH_CTX_FLAG_EXPANDED;
 		if(ctx->cipher->flags & EVP_CIPH_CTRL_INIT)
 			{
 			if(!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_INIT, 0, NULL))
@@ -197,6 +334,30 @@ int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *imp
 				return 0;
 				}
 			}
+
+		if (cipher->flags & EVP_CIPH_FLAG_ASYNCH)
+			{
+#ifdef OPENSSL_FIPS
+			EVPerr(EVP_F_EVP_CIPHERINIT_EX, EVP_R_NO_ASYNCH_SUPPORT_IN_FIPS);
+			ERR_add_error_data(1,EVP_CIPHER_name(cipher));
+			return 0;
+#else
+			if (!(ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+				|| ctx->internal->cb == NULL)
+				{
+				EVPerr(EVP_F_EVP_CIPHERINIT_EX, EVP_R_NO_CALLBACK_SET);
+				return 0;
+				}
+#endif
+			}
+		else
+			if ((ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+				&& ctx->internal->cb != NULL)
+				{
+				EVPerr(EVP_F_EVP_CIPHERINIT_EX, EVP_R_NO_ASYNCH_SUPPORT);
+				ERR_add_error_data(1,EVP_CIPHER_name(cipher));
+				return 0;
+				}
 		}
 	else if(!ctx->cipher)
 		{
@@ -250,11 +411,28 @@ skip_to_init:
 	}
 
 	if(key || (ctx->cipher->flags & EVP_CIPH_ALWAYS_CALL_INIT)) {
-		if(!ctx->cipher->init(ctx,key,iv,enc)) return 0;
+		if(ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
+			{
+			if(!ctx->cipher->init.asynch(ctx,key,iv,enc,
+					(asynch_cb_t)_evp_cipher_cb))
+				{
+				return 0;
+				}
+			call_asynch_cb_at_end = 1;
+			}
+		else
+			{
+			if(!ctx->cipher->init.synch(ctx,key,iv,enc))
+				{
+				return 0;
+				}
+			}
 	}
 	ctx->buf_len=0;
 	ctx->final_used=0;
 	ctx->block_mask=ctx->cipher->block_size-1;
+	if (call_asynch_cb_at_end)
+		ctx->internal->cb(NULL, 0, ctx->internal->cb_data, 1);
 	return 1;
 	}
 
@@ -304,7 +482,7 @@ int EVP_DecryptInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *im
 	return EVP_CipherInit_ex(ctx, cipher, impl, key, iv, 0);
 	}
 
-int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
+static int _evp_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
 	     const unsigned char *in, int inl)
 	{
 	int i,j,bl;
@@ -377,6 +555,164 @@ int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
 	return 1;
 	}
 
+static int _evp_EncryptDecrypt_post(unsigned char *out, int outl,
+	EVP_ASYNCH_CTX *actx, int status)
+	{
+	int used_bytes;
+	if (status > 0)
+		{
+		actx->outl += outl;
+		}
+
+	used_bytes = actx->outl + actx->enc_buffered + actx->dec_buffered;
+	/* Only call the callback specified by the application when the
+	   status is -1 or 0 or when the whole update has been encrypted. */
+	if (status <= 0
+		|| used_bytes > actx->inl
+	        || used_bytes == actx->inl)
+//		|| ((actx->ctx->flags & EVP_CIPH_NO_PADDING)
+//				|| !actx->final)
+//			&& used_bytes == actx->inl))
+		{
+		int ret = actx->user_cb(actx->out, actx->outl,
+			actx->user_cb_data, status);
+		if (status >= 0)
+			free_asynch_ctx(actx);
+		return ret;
+		}
+	return status;		/*  */
+	}
+
+static int _evp_EncryptUpdate_asynch(EVP_ASYNCH_CTX *actx, unsigned char *out, int *outl,
+	const unsigned char *in, int inl)
+	{
+	int i,j,bl;
+	EVP_CIPHER_CTX *ctx;
+	int end_call_cb = 1;
+
+	if (actx == NULL)
+		return 0;
+
+	ctx = actx->ctx;
+	actx->internal_cb = _evp_EncryptDecrypt_post;
+
+	if (actx->ctx->cipher->flags & EVP_CIPH_FLAG_CUSTOM_CIPHER)
+		{
+		i = M_do_cipher_asynch(actx->ctx, out, in, inl, actx);
+		if (i < 0)
+			return 0;
+		else
+			*outl = i;
+		return 1;
+		}
+
+	if (inl <= 0)
+		{
+		*outl = 0;
+		if (inl == 0)
+			_evp_cipher_cb(out, *outl, actx, 1);
+		return inl == 0;
+		}
+
+	if(ctx->buf_len == 0 && (inl&(ctx->block_mask)) == 0)
+		{
+		if(M_do_cipher_asynch(actx->ctx,out,in,inl, actx))
+			{
+			*outl=inl;
+			return 1;
+			}
+		else
+			{
+			*outl=0;
+			return 0;
+			}
+		}
+	i=ctx->buf_len;
+	bl=ctx->cipher->block_size;
+	OPENSSL_assert(bl <= (int)sizeof(ctx->buf));
+	if (i != 0)
+		{
+		if (i+inl < bl)
+			{
+			memcpy(&(ctx->buf[i]),in,inl);
+			ctx->buf_len+=inl;
+			actx->enc_buffered += inl;
+			_evp_cipher_cb(out, *outl, actx, 1);
+			return 1;
+			}
+		else
+			{
+			j=bl-i;
+			memcpy(&(ctx->buf[i]),in,j);
+			actx->enc_buffered -= i;
+			inl-=j;
+			in+=j;
+			end_call_cb = 0;
+			if(!M_do_cipher_asynch(ctx,out,ctx->buf,bl, actx))
+				return 0;
+			out+=bl;
+			*outl=bl;
+			}
+		}
+	else
+		*outl = 0;
+	i=inl&(bl-1);
+	inl-=i;
+
+	if (i != 0)
+		{
+		actx->enc_buffered += i;
+		memcpy(ctx->buf,&(in[inl]),i);
+		}
+	ctx->buf_len=i;
+
+	if (inl > 0)
+		{
+		end_call_cb = 0;
+		if(!M_do_cipher_asynch(ctx,out,in,inl, actx)) return 0;
+		*outl+=inl;
+		}
+
+	if (end_call_cb)
+		{
+		_evp_cipher_cb(out, *outl, actx, 1);
+		}
+	return 1;
+	}
+
+/* In asynch mode, *out is used as an output buffer, so it needs to be
+   kept alive by the user until the final callback is called.  *outl is
+   used BEST EFFORT to indicate how much space the output will eventually
+   take up (this is not the case for custome ciphers).  */
+int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
+	     const unsigned char *in, int inl)
+	{
+	if (ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
+		{
+		EVP_ASYNCH_CTX *actx = alloc_asynch_ctx();
+		int ret = 0;
+		if (actx == NULL)
+			{
+			EVPerr(EVP_F_EVP_ENCRYPTUPDATE,ERR_R_MALLOC_FAILURE);
+			return 0;
+			}
+		actx->ctx = ctx;
+		actx->user_cb = ctx->internal->cb;
+		actx->user_cb_data = ctx->internal->cb_data;
+		actx->final = 0;
+		actx->inl = inl;
+		actx->out = out;
+		actx->outl = 0;	/* It gets updated by _evp_EncryptDecrypt_post */
+		actx->enc_buffered = 0;
+		actx->dec_buffered = 0;
+		ret = _evp_EncryptUpdate_asynch(actx, out, outl, in, inl);
+		if (!ret)
+			free_asynch_ctx(actx);
+		return ret;
+		}
+	return _evp_EncryptUpdate(ctx, out, outl, in, inl);
+	}
+
 int EVP_EncryptFinal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 	{
 	int ret;
@@ -388,10 +724,40 @@ int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 	{
 	int n,ret;
 	unsigned int i, b, bl;
+	EVP_ASYNCH_CTX *actx = NULL;
+
+	if (ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
+		{
+		actx = alloc_asynch_ctx();
+		if (actx == NULL)
+			{
+			EVPerr(EVP_F_EVP_ENCRYPTFINAL_EX,ERR_R_MALLOC_FAILURE);
+			return 0;
+			}
+		actx->ctx = ctx;
+		actx->user_cb = ctx->internal->cb;
+		actx->user_cb_data = ctx->internal->cb_data;
+		actx->inl = 0;
+		actx->out = out;
+		actx->outl = 0;
+		actx->final = 1;
+		actx->enc_buffered = 0;
+		actx->dec_buffered = 0;
+		actx->internal_cb = _evp_EncryptDecrypt_post;
+		}
 
 	if (ctx->cipher->flags & EVP_CIPH_FLAG_CUSTOM_CIPHER)
 		{
-		ret = M_do_cipher(ctx, out, NULL, 0);
+		if (ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
+			{
+			ret = M_do_cipher_asynch(ctx, out, NULL, 0, ctx);
+			if (ret < 0)
+				free_asynch_ctx(actx);
+			}
+		else
+			{
+			ret = M_do_cipher(ctx, out, NULL, 0);
+			}
 		if (ret < 0)
 			return 0;
 		else 
@@ -404,6 +770,10 @@ int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 	if (b == 1)
 		{
 		*outl=0;
+		if (ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
+			{
+			actx->internal_cb(out, *outl, actx, 1);
+			}
 		return 1;
 		}
 	bl=ctx->buf_len;
@@ -412,16 +782,28 @@ int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 		if(bl)
 			{
 			EVPerr(EVP_F_EVP_ENCRYPTFINAL_EX,EVP_R_DATA_NOT_MULTIPLE_OF_BLOCK_LENGTH);
+			if (ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
+				free_asynch_ctx(actx);
 			return 0;
 			}
 		*outl = 0;
+		if (ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
+			{
+			actx->internal_cb(out, *outl, actx, 1);
+			}
 		return 1;
 		}
 
 	n=b-bl;
 	for (i=bl; i<b; i++)
 		ctx->buf[i]=n;
-	ret=M_do_cipher(ctx,out,ctx->buf,b);
+	if (ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
+		{
+		ret=M_do_cipher_asynch(ctx, out, ctx->buf, b, actx);
+		if (ret <= 0)
+			free_asynch_ctx(actx); 
+		}
+	else ret=M_do_cipher(ctx,out,ctx->buf,b);
 
 
 	if(ret)
@@ -430,7 +812,7 @@ int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 	return ret;
 	}
 
-int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
+static int _evp_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
 	     const unsigned char *in, int inl)
 	{
 	int fix_len;
@@ -491,6 +873,100 @@ int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
 	return 1;
 	}
 
+static int _evp_DecryptUpdate_asynch(EVP_ASYNCH_CTX *actx, unsigned char *out, int *outl,
+	const unsigned char *in, int inl)
+	{
+	int fix_len;
+	unsigned int b;
+	EVP_CIPHER_CTX *ctx;
+
+	if (actx == NULL)
+		return 0;
+	ctx = actx->ctx;
+	actx->internal_cb = _evp_EncryptDecrypt_post;
+
+	if (ctx->cipher->flags & EVP_CIPH_FLAG_CUSTOM_CIPHER)
+		{
+		fix_len = M_do_cipher_asynch(ctx, out, in, inl, actx);
+		if (fix_len < 0)
+			{
+			*outl = 0;
+			return 0;
+			}
+		else
+			*outl = fix_len;
+		return 1;
+		}
+
+	if (inl <= 0)
+		{
+		*outl = 0;
+		if (inl == 0)
+			actx->internal_cb(out, *outl, actx, 1);
+		return inl == 0;
+		}
+
+	if (ctx->flags & EVP_CIPH_NO_PADDING)
+		{
+		return _evp_EncryptUpdate_asynch(actx, out, outl, in, inl);
+		}
+
+	b=ctx->cipher->block_size;
+	OPENSSL_assert(b <= sizeof ctx->final);
+
+	if(ctx->final_used)
+		{
+		int dummy;
+		if (!_evp_EncryptUpdate_asynch(actx, out, &dummy, ctx->final, b))
+			return 0;
+		out += dummy;
+		*outl += dummy;
+		}
+
+	/* if we're about to 'decrypt' a multiple of block size, make sure
+	 * we have a copy of this last input block, and don't 'decrypt' it. */
+	if (b > 1 && inl > 0 && ((ctx->buf_len + inl) & (ctx->block_mask)) == 0)
+		{
+		ctx->final_used=1;
+		inl -= b;
+		actx->dec_buffered += b;
+		memcpy(ctx->final,&in[inl],b);
+		}
+	else
+		ctx->final_used = 0;
+
+	return _evp_EncryptUpdate_asynch(actx,out,outl,in,inl);
+	}
+
+int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
+	     const unsigned char *in, int inl)
+	{
+	if (ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
+		{
+		EVP_ASYNCH_CTX *actx = alloc_asynch_ctx();
+		int ret = 0;
+		if (actx == NULL)
+			{
+			EVPerr(EVP_F_EVP_DECRYPTUPDATE,ERR_R_MALLOC_FAILURE);
+			return 0;
+			}
+		actx->ctx = ctx;
+		actx->user_cb = ctx->internal->cb;
+		actx->user_cb_data = ctx->internal->cb_data;
+		actx->inl = inl;
+		actx->out = out;
+		actx->outl = 0;
+		actx->final = 0;
+		actx->enc_buffered = 0;
+		actx->dec_buffered = 0;
+		ret = _evp_DecryptUpdate_asynch(actx, out, outl, in, inl);
+		if (!ret)
+			free_asynch_ctx(actx);
+		return ret;
+		}
+	return _evp_DecryptUpdate(ctx, out, outl, in, inl);
+	}
+
 int EVP_DecryptFinal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 	{
 	int ret;
@@ -498,7 +974,7 @@ int EVP_DecryptFinal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 	return ret;
 	}
 
-int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
+int _evp_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 	{
 	int i,n;
 	unsigned int b;
@@ -519,7 +995,7 @@ int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 		{
 		if(ctx->buf_len)
 			{
-			EVPerr(EVP_F_EVP_DECRYPTFINAL_EX,EVP_R_DATA_NOT_MULTIPLE_OF_BLOCK_LENGTH);
+			EVPerr(EVP_F__EVP_DECRYPTFINAL_EX,EVP_R_DATA_NOT_MULTIPLE_OF_BLOCK_LENGTH);
 			return 0;
 			}
 		*outl = 0;
@@ -529,21 +1005,21 @@ int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 		{
 		if (ctx->buf_len || !ctx->final_used)
 			{
-			EVPerr(EVP_F_EVP_DECRYPTFINAL_EX,EVP_R_WRONG_FINAL_BLOCK_LENGTH);
+			EVPerr(EVP_F__EVP_DECRYPTFINAL_EX,EVP_R_WRONG_FINAL_BLOCK_LENGTH);
 			return(0);
 			}
 		OPENSSL_assert(b <= sizeof ctx->final);
 		n=ctx->final[b-1];
 		if (n == 0 || n > (int)b)
 			{
-			EVPerr(EVP_F_EVP_DECRYPTFINAL_EX,EVP_R_BAD_DECRYPT);
+			EVPerr(EVP_F__EVP_DECRYPTFINAL_EX,EVP_R_BAD_DECRYPT);
 			return(0);
 			}
 		for (i=0; i<n; i++)
 			{
 			if (ctx->final[--b] != n)
 				{
-				EVPerr(EVP_F_EVP_DECRYPTFINAL_EX,EVP_R_BAD_DECRYPT);
+				EVPerr(EVP_F__EVP_DECRYPTFINAL_EX,EVP_R_BAD_DECRYPT);
 				return(0);
 				}
 			}
@@ -555,6 +1031,129 @@ int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 	else
 		*outl=0;
 	return(1);
+	}
+
+static int _evp_DecryptFinal_post(unsigned char *out, int outl,
+	EVP_ASYNCH_CTX *actx, int status);
+int _evp_DecryptFinal_ex_asynch(EVP_ASYNCH_CTX *actx, unsigned char *out, int *outl)
+	{
+	int i;
+	unsigned int b;
+	EVP_CIPHER_CTX *ctx = NULL;
+	*outl=0;
+
+	if (actx == NULL)
+		return 0;
+	ctx = actx->ctx;
+	actx->internal_cb = _evp_EncryptDecrypt_post;
+
+	if (ctx->cipher->flags & EVP_CIPH_FLAG_CUSTOM_CIPHER)
+		{
+		i = M_do_cipher_asynch(ctx, out, NULL, 0, actx);
+		if (i < 0)
+			return 0;
+		else
+			*outl = i;
+		return 1;
+		}
+
+	b=ctx->cipher->block_size;
+	if (ctx->flags & EVP_CIPH_NO_PADDING)
+		{
+		if(ctx->buf_len)
+			{
+			EVPerr(EVP_F__EVP_DECRYPTFINAL_EX_ASYNCH,EVP_R_DATA_NOT_MULTIPLE_OF_BLOCK_LENGTH);
+			return 0;
+			}
+		*outl = 0;
+		_evp_cipher_cb(out, *outl, actx, 1);
+		return 1;
+		}
+	if (b > 1)
+		{
+		if (ctx->buf_len || !ctx->final_used)
+			{
+			EVPerr(EVP_F__EVP_DECRYPTFINAL_EX_ASYNCH,EVP_R_WRONG_FINAL_BLOCK_LENGTH);
+			return(0);
+			}
+		OPENSSL_assert(b <= sizeof ctx->final);
+		actx->internal_cb = _evp_DecryptFinal_post;
+		actx->out = out;
+		actx->outl = *outl;
+		*outl += b;	/* It's a lie, the message is shorter.
+				   The callback will have the right amount,
+				   though. */
+		return M_do_cipher_asynch(ctx,
+			actx->final_out, ctx->final, b, actx);
+		}
+	else
+		*outl=0;
+	if (ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
+		_evp_cipher_cb(out, *outl, actx, 1);
+	return(1);
+	}
+static int _evp_DecryptFinal_post(unsigned char *out, int outl,
+	EVP_ASYNCH_CTX *actx, int status)
+	{
+	if (status > 0)
+		{
+		int b=actx->ctx->cipher->block_size;
+		int n=out[b-1];
+		if (n == 0 || n > (int)b)
+			{
+			EVPerr(EVP_F__EVP_DECRYPTFINAL_POST,EVP_R_BAD_DECRYPT);
+			status = 0;
+			}
+		else
+			{
+			int i;
+			for (i=0; i<n; i++)
+				{
+				if (out[--b] != n)
+					{
+					EVPerr(EVP_F__EVP_DECRYPTFINAL_POST,EVP_R_BAD_DECRYPT);
+					status = 0;
+					break;
+					}
+				}
+			if (status > 0)
+				{
+				n=actx->ctx->cipher->block_size-n;
+				for (i=0; i<n; i++)
+					actx->out[i]=out[i];
+				outl=n;
+				}
+			out = actx->out;
+			}
+		}
+	return _evp_EncryptDecrypt_post(out, outl, actx, status);
+	}
+
+int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
+	{
+	if (ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
+		{
+		EVP_ASYNCH_CTX *actx = alloc_asynch_ctx();
+		int ret = 0;
+		if (actx == NULL)
+			{
+			EVPerr(EVP_F_EVP_DECRYPTFINAL_EX,ERR_R_MALLOC_FAILURE);
+			return 0;
+			}
+		actx->ctx = ctx;
+		actx->user_cb = ctx->internal->cb;
+		actx->user_cb_data = ctx->internal->cb_data;
+		actx->inl = 0;
+		actx->out = out;
+		actx->outl = 0;
+		actx->final = 1;
+		actx->enc_buffered = 0;
+		ret = _evp_DecryptFinal_ex_asynch(actx, out, outl);
+		if (!ret)
+			free_asynch_ctx(actx);
+		return ret;
+		}
+	return _evp_DecryptFinal_ex(ctx, out, outl);
 	}
 
 void EVP_CIPHER_CTX_free(EVP_CIPHER_CTX *ctx)
@@ -589,7 +1188,12 @@ int EVP_CIPHER_CTX_cleanup(EVP_CIPHER_CTX *c)
 #ifdef OPENSSL_FIPS
 	FIPS_cipher_ctx_cleanup(c);
 #endif
-	memset(c,0,sizeof(EVP_CIPHER_CTX));
+	if (c->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+		{
+		OPENSSL_free(c->internal);
+		c->internal = NULL;
+		}
+	EVP_CIPHER_CTX_init(c);
 	return 1;
 	}
 
@@ -616,20 +1220,105 @@ int EVP_CIPHER_CTX_set_padding(EVP_CIPHER_CTX *ctx, int pad)
 
 int EVP_CIPHER_CTX_ctrl(EVP_CIPHER_CTX *ctx, int type, int arg, void *ptr)
 {
+	return EVP_CIPHER_CTX_ctrl_ex(ctx, type, arg, ptr, NULL);
+	}
+int EVP_CIPHER_CTX_ctrl_ex(EVP_CIPHER_CTX *ctx, int type, int arg, void *ptr,
+	void (*fn_ptr)(void))
+	{
 	int ret;
+
+	/* Intercept any pre-init EVP level commands before trying to hand them
+	 * on to algorithm specific ctrl() handlers. */
+	switch(type)
+		{
+	case EVP_CTRL_SETUP_ASYNCH_CALLBACK:
+		if (ctx->cipher)
+			{
+			EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_SET_AFTER_CIPHERINIT);
+			return 0;
+			}
+		if (!(ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED))
+			if (!evp_CIPHER_CTX_expand(ctx))
+				{
+				EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL_EX,ERR_R_MALLOC_FAILURE);
+				return 0;
+				}
+		ctx->internal->cb = (int (*)(unsigned char *data, int datalen,
+				void *userdata, int status))fn_ptr;
+		ctx->internal->cb_data = ptr;
+		return 1;
+	case EVP_CTRL_UPDATE_ASYNCH_CALLBACK:
+		if (!ctx->cipher)
+			{
+			EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		if (!(ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED))
+			{
+			EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		ctx->internal->cb = (int (*)(unsigned char *data, int datalen,
+				void *userdata, int status))fn_ptr;
+		ctx->internal->cb_data = ptr;
+		return 1;
+	case EVP_CTRL_UPDATE_ASYNCH_CALLBACK_DATA:
+		if (!ctx->cipher)
+			{
+			EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		if (!(ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED))
+			{
+			EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		ctx->internal->cb_data = ptr;
+		return 1;
+	case EVP_CTRL_GET_ASYNCH_CALLBACK_FN:
+		if (!ctx->cipher)
+			{
+			EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		if (!(ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED))
+			{
+			EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		*(int (**)(unsigned char *data, int datalen,
+				void *userdata, int status))ptr = ctx->internal->cb;
+		return 1;
+	case EVP_CTRL_GET_ASYNCH_CALLBACK_DATA:
+		if (!ctx->cipher)
+			{
+			EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		if (!(ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED))
+			{
+			EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			return 0;
+			}
+		*(void **)ptr = ctx->internal->cb_data;
+		return 1;
+	default:
+		break;
+		}
+
 	if(!ctx->cipher) {
-		EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL, EVP_R_NO_CIPHER_SET);
+		EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL_EX, EVP_R_NO_CIPHER_SET);
 		return 0;
 	}
 
 	if(!ctx->cipher->ctrl) {
-		EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL, EVP_R_CTRL_NOT_IMPLEMENTED);
+		EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL_EX, EVP_R_CTRL_NOT_IMPLEMENTED);
 		return 0;
 	}
 
 	ret = ctx->cipher->ctrl(ctx, type, arg, ptr);
 	if(ret == -1) {
-		EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL, EVP_R_CTRL_OPERATION_NOT_IMPLEMENTED);
+		EVPerr(EVP_F_EVP_CIPHER_CTX_CTRL_EX, EVP_R_CTRL_OPERATION_NOT_IMPLEMENTED);
 		return 0;
 	}
 	return ret;
@@ -661,7 +1350,34 @@ int EVP_CIPHER_CTX_copy(EVP_CIPHER_CTX *out, const EVP_CIPHER_CTX *in)
 #endif
 
 	EVP_CIPHER_CTX_cleanup(out);
-	memcpy(out,in,sizeof *out);
+	out->cipher = in->cipher;
+	out->engine = in->engine;
+	out->encrypt = in->encrypt;
+	out->buf_len = in->buf_len;
+
+	memcpy(out->oiv,in->oiv,EVP_MAX_IV_LENGTH);
+	memcpy(out->iv,in->iv,EVP_MAX_IV_LENGTH);
+	memcpy(out->buf,in->buf,EVP_MAX_BLOCK_LENGTH);
+	out->num = in->num;
+
+	out->app_data = in->app_data;
+	out->key_len = in->key_len;
+	out->flags = in->flags;
+	out->cipher_data = in->cipher_data;
+	out->final_used = in->final_used;
+	out->block_mask = in->block_mask;
+	memcpy(out->final,in->final,EVP_MAX_BLOCK_LENGTH);
+
+	if (out->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+		{
+		if (!evp_CIPHER_CTX_expand(out))
+			{
+			EVPerr(EVP_F_EVP_CIPHER_CTX_COPY,ERR_R_MALLOC_FAILURE);
+			return 0;
+			}
+		out->internal->cb = in->internal->cb;
+		out->internal->cb_data = in->internal->cb_data;
+		}
 
 	if (in->cipher_data && in->cipher->ctx_size)
 		{

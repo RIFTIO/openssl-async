@@ -50,15 +50,31 @@ static const ENGINE_CMD_DEFN rsaref_cmd_defns[] = {
  **/
 static int rsaref_private_decrypt(int len, const unsigned char *from,
 	unsigned char *to, RSA *rsa, int padding);
+static int rsaref_private_decrypt_asynch(int len, const unsigned char *from,
+	unsigned char *to, RSA *rsa, int padding,
+	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	void *cb_data);
 static int rsaref_private_encrypt(int len, const unsigned char *from,
 	unsigned char *to, RSA *rsa, int padding);
+static int rsaref_private_encrypt_asynch(int len, const unsigned char *from,
+	unsigned char *to, RSA *rsa, int padding,
+	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	void *cb_data);
 static int rsaref_public_encrypt(int len, const unsigned char *from,
 	unsigned char *to, RSA *rsa, int padding);
+static int rsaref_public_encrypt_asynch(int len, const unsigned char *from,
+	unsigned char *to, RSA *rsa, int padding,
+	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	void *cb_data);
 static int rsaref_public_decrypt(int len, const unsigned char *from,
 	unsigned char *to, RSA *rsa, int padding);
+static int rsaref_public_decrypt_asynch(int len, const unsigned char *from,
+	unsigned char *to, RSA *rsa, int padding,
+	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	void *cb_data);
 static int bnref_mod_exp(BIGNUM *r,const BIGNUM *a,const BIGNUM *p,const BIGNUM *m,
 			  BN_CTX *ctx, BN_MONT_CTX *m_ctx);
-static int rsaref_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa);
+static int rsaref_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa,BN_CTX *ctx);
 
 /*****************************************************************************
  * Our RSA method
@@ -74,10 +90,15 @@ static RSA_METHOD rsaref_rsa =
   bnref_mod_exp,
   NULL,
   NULL,
-  0,
+  0 | RSA_FLAG_ASYNCH,
   NULL,
   NULL,
-  NULL
+  NULL,
+  NULL,
+  rsaref_public_encrypt_asynch,
+  rsaref_public_decrypt_asynch,
+  rsaref_private_encrypt_asynch,
+  rsaref_private_decrypt_asynch,
 };
 
 /*****************************************************************************
@@ -85,7 +106,11 @@ static RSA_METHOD rsaref_rsa =
  **/
 static int rsaref_ciphers(ENGINE *e, const EVP_CIPHER **cipher,
 	const int **nids, int nid);
+static int rsaref_ciphers_asynch(ENGINE *e, const EVP_CIPHER **cipher,
+	const int **nids, int nid);
 static int rsaref_digests(ENGINE *e, const EVP_MD **digest,
+	const int **nids, int nid);
+static int rsaref_digests_asynch(ENGINE *e, const EVP_MD **digest,
 	const int **nids, int nid);
 
 static int rsaref_cipher_nids[] =
@@ -98,32 +123,71 @@ static int rsaref_digest_nids[] =
  **/
 static int cipher_des_cbc_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
 	const unsigned char *iv, int enc);
+static int cipher_des_cbc_init_asynch(EVP_CIPHER_CTX *ctx, const unsigned char *key,
+	const unsigned char *iv, int enc,
+	int (*cb)(unsigned char *out, int outl, void *cb_data, int status));
 static int cipher_des_cbc_code(EVP_CIPHER_CTX *ctx, unsigned char *out,
 	const unsigned char *in, unsigned int inl);
+static int cipher_des_cbc_code_asynch(EVP_CIPHER_CTX *ctx, unsigned char *out,
+	const unsigned char *in, unsigned int inl,
+	void *cb_data);
 static int cipher_des_cbc_clean(EVP_CIPHER_CTX *);
 static int cipher_des_ede3_cbc_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
 	const unsigned char *iv, int enc);
+static int cipher_des_ede3_cbc_init_asynch(EVP_CIPHER_CTX *ctx, const unsigned char *key,
+	const unsigned char *iv, int enc,
+	int (*cb)(unsigned char *out, int outl, void *cb_data, int status));
 static int cipher_des_ede3_cbc_code(EVP_CIPHER_CTX *ctx, unsigned char *out,
 	const unsigned char *in, unsigned int inl);
+static int cipher_des_ede3_cbc_code_asynch(EVP_CIPHER_CTX *ctx, unsigned char *out,
+	const unsigned char *in, unsigned int inl,
+	void *cb_data);
 static int cipher_des_ede3_cbc_clean(EVP_CIPHER_CTX *);
 static int cipher_desx_cbc_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
 	const unsigned char *iv, int enc);
+static int cipher_desx_cbc_init_asynch(EVP_CIPHER_CTX *ctx, const unsigned char *key,
+	const unsigned char *iv, int enc,
+	int (*cb)(unsigned char *out, int outl, void *cb_data, int status));
 static int cipher_desx_cbc_code(EVP_CIPHER_CTX *ctx, unsigned char *out,
 	const unsigned char *in, unsigned int inl);
+static int cipher_desx_cbc_code_asynch(EVP_CIPHER_CTX *ctx, unsigned char *out,
+	const unsigned char *in, unsigned int inl,
+	void *cb_data);
 static int cipher_desx_cbc_clean(EVP_CIPHER_CTX *);
 
 /*****************************************************************************
  * Our DES ciphers
  **/
+
 static const EVP_CIPHER cipher_des_cbc =
 	{
 	NID_des_cbc,
 	8, 8, 8,
-	0 | EVP_CIPH_CBC_MODE,
-	cipher_des_cbc_init,
-	cipher_des_cbc_code,
+	0 | EVP_CIPH_FLAG_DEFAULT_ASN1 | EVP_CIPH_CBC_MODE,
+	{ cipher_des_cbc_init },
+	{ cipher_des_cbc_code },
 	cipher_des_cbc_clean,
 	sizeof(DES_CBC_CTX),
+	NULL,
+	NULL,
+	NULL,
+	NULL
+	};
+
+struct cipher_des_cbc_asynch_data
+	{
+	DES_CBC_CTX rsaref_ctx;
+	int (*cb)(unsigned char *out, int outl, void *cb_data, int status);
+	};
+static const EVP_CIPHER cipher_des_cbc_asynch =
+	{
+	NID_des_cbc,
+	8, 8, 8,
+	0 | EVP_CIPH_FLAG_DEFAULT_ASN1 | EVP_CIPH_CBC_MODE | EVP_CIPH_FLAG_ASYNCH,
+	{ .asynch = cipher_des_cbc_init_asynch },
+	{ .asynch = cipher_des_cbc_code_asynch },
+	cipher_des_cbc_clean,
+	sizeof(struct cipher_des_cbc_asynch_data),
 	NULL,
 	NULL,
 	NULL,
@@ -134,11 +198,31 @@ static const EVP_CIPHER cipher_des_ede3_cbc =
 	{
 	NID_des_ede3_cbc,
 	8, 24, 8,
-	0 | EVP_CIPH_CBC_MODE,
-	cipher_des_ede3_cbc_init,
-	cipher_des_ede3_cbc_code,
+	0 | EVP_CIPH_FLAG_DEFAULT_ASN1 | EVP_CIPH_CBC_MODE,
+	{ cipher_des_ede3_cbc_init },
+	{ cipher_des_ede3_cbc_code },
 	cipher_des_ede3_cbc_clean,
 	sizeof(DES3_CBC_CTX),
+	NULL,
+	NULL,
+	NULL,
+	NULL
+	};
+
+struct cipher_des_ede3_cbc_asynch_data
+	{
+	DES3_CBC_CTX rsaref_ctx;
+	int (*cb)(unsigned char *out, int outl, void *cb_data, int status);
+	};
+static const EVP_CIPHER cipher_des_ede3_cbc_asynch =
+	{
+	NID_des_ede3_cbc,
+	8, 24, 8,
+	0 | EVP_CIPH_FLAG_DEFAULT_ASN1 | EVP_CIPH_CBC_MODE | EVP_CIPH_FLAG_ASYNCH,
+	{ .asynch = cipher_des_ede3_cbc_init_asynch },
+	{ .asynch = cipher_des_ede3_cbc_code_asynch },
+	cipher_des_ede3_cbc_clean,
+	sizeof(struct cipher_des_ede3_cbc_asynch_data),
 	NULL,
 	NULL,
 	NULL,
@@ -149,11 +233,31 @@ static const EVP_CIPHER cipher_desx_cbc =
 	{
 	NID_desx_cbc,
 	8, 24, 8,
-	0 | EVP_CIPH_CBC_MODE,
-	cipher_desx_cbc_init,
-	cipher_desx_cbc_code,
+	0 | EVP_CIPH_FLAG_DEFAULT_ASN1 | EVP_CIPH_CBC_MODE,
+	{ cipher_desx_cbc_init },
+	{ cipher_desx_cbc_code },
 	cipher_desx_cbc_clean,
 	sizeof(DESX_CBC_CTX),
+	NULL,
+	NULL,
+	NULL,
+	NULL
+	};
+
+struct cipher_desx_cbc_asynch_data
+	{
+	DESX_CBC_CTX rsaref_ctx;
+	int (*cb)(unsigned char *out, int outl, void *cb_data, int status);
+	};
+static const EVP_CIPHER cipher_desx_cbc_asynch =
+	{
+	NID_desx_cbc,
+	8, 24, 8,
+	0 | EVP_CIPH_FLAG_DEFAULT_ASN1 | EVP_CIPH_CBC_MODE | EVP_CIPH_FLAG_ASYNCH,
+	{ .asynch = cipher_desx_cbc_init_asynch },
+	{ .asynch = cipher_desx_cbc_code_asynch },
+	cipher_desx_cbc_clean,
+	sizeof(struct cipher_desx_cbc_asynch_data),
 	NULL,
 	NULL,
 	NULL,
@@ -164,13 +268,27 @@ static const EVP_CIPHER cipher_desx_cbc =
  * MD functions
  **/
 static int digest_md2_init(EVP_MD_CTX *ctx);
+static int digest_md2_init_asynch(EVP_MD_CTX *ctx,
+	int (*cb)(unsigned char *md, unsigned size, void *cb_data, int status));
 static int digest_md2_update(EVP_MD_CTX *ctx,const void *data,
-	unsigned long count);
+	size_t count);
+static int digest_md2_update_asynch(EVP_MD_CTX *ctx,const void *data,
+	size_t count,
+	void *cb_data);
 static int digest_md2_final(EVP_MD_CTX *ctx,unsigned char *md);
+static int digest_md2_final_asynch(EVP_MD_CTX *ctx,unsigned char *md,
+	void *cb_data);
 static int digest_md5_init(EVP_MD_CTX *ctx);
+static int digest_md5_init_asynch(EVP_MD_CTX *ctx,
+	int (*cb)(unsigned char *md, unsigned size, void *cb_data, int status));
 static int digest_md5_update(EVP_MD_CTX *ctx,const void *data,
-	unsigned long count);
+	size_t count);
+static int digest_md5_update_asynch(EVP_MD_CTX *ctx,const void *data,
+	size_t count,
+	void *cb_data);
 static int digest_md5_final(EVP_MD_CTX *ctx,unsigned char *md);
+static int digest_md5_final_asynch(EVP_MD_CTX *ctx,unsigned char *md,
+	void *cb_data);
 
 /*****************************************************************************
  * Our MD digests
@@ -182,13 +300,34 @@ static const EVP_MD digest_md2 =
 	16,
 	0,
 	digest_md2_init,
-	digest_md2_update,
-	digest_md2_final,
+	{ digest_md2_update },
+	{ digest_md2_final },
 	NULL,
 	NULL,
 	EVP_PKEY_RSA_method,
 	16,
 	sizeof(MD2_CTX)
+	};
+
+struct digest_md2_data
+	{
+	MD2_CTX rsaref_ctx;
+	int (*cb)(unsigned char *md, unsigned size, void *cb_data, int status);
+	};
+static const EVP_MD digest_md2_asynch =
+	{
+	NID_md2,
+	NID_md2WithRSAEncryption,
+	16,
+	0 | EVP_MD_FLAG_ASYNCH,
+	{ .asynch = digest_md2_init_asynch },
+	{ .asynch = digest_md2_update_asynch },
+	{ .asynch = digest_md2_final_asynch },
+	NULL,
+	NULL,
+	EVP_PKEY_RSA_method,
+	16,
+	sizeof(struct digest_md2_data)
 	};
 
 static const EVP_MD digest_md5 =
@@ -198,13 +337,34 @@ static const EVP_MD digest_md5 =
 	16,
 	0,
 	digest_md5_init,
-	digest_md5_update,
-	digest_md5_final,
+	{ digest_md5_update },
+	{ digest_md5_final },
 	NULL,
 	NULL,
 	EVP_PKEY_RSA_method,
 	64,
 	sizeof(MD5_CTX)
+	};
+
+struct digest_md5_data
+	{
+	MD5_CTX rsaref_ctx;
+	int (*cb)(unsigned char *md, unsigned size, void *cb_data, int status);
+	};
+static const EVP_MD digest_md5_asynch =
+	{
+	NID_md5,
+	NID_md5WithRSAEncryption,
+	16,
+	0 | EVP_MD_FLAG_ASYNCH,
+	{ .asynch = digest_md5_init_asynch },
+	{ .asynch = digest_md5_update_asynch },
+	{ .asynch = digest_md5_final_asynch },
+	NULL,
+	NULL,
+	EVP_PKEY_RSA_method,
+	64,
+	sizeof(struct digest_md5_data)
 	};
 
 /*****************************************************************************
@@ -222,7 +382,9 @@ static int bind_rsaref(ENGINE *e)
 		|| !ENGINE_set_name(e, engine_rsaref_name)
 		|| !ENGINE_set_RSA(e, &rsaref_rsa)
 		|| !ENGINE_set_ciphers(e, rsaref_ciphers)
+		|| !ENGINE_set_ciphers_asynch(e, rsaref_ciphers_asynch)
 		|| !ENGINE_set_digests(e, rsaref_digests)
+		|| !ENGINE_set_digests_asynch(e, rsaref_digests_asynch)
 		|| !ENGINE_set_destroy_function(e, rsaref_destroy)
 		|| !ENGINE_set_init_function(e, rsaref_init)
 		|| !ENGINE_set_finish_function(e, rsaref_finish)
@@ -294,7 +456,7 @@ static int rsaref_destroy(ENGINE *e)
  * RSA functions
  **/
 
-static int rsaref_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa)
+static int rsaref_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa, BN_CTX *ctx)
 	{
 	RSAREFerr(RSAREF_F_RSAREF_MOD_EXP,ERR_R_SHOULD_NOT_HAVE_BEEN_CALLED);
 	return(0);
@@ -412,6 +574,15 @@ err:
 	memset(&RSAkey,0,sizeof(RSAkey));
 	return(outlen);
 	}
+static int rsaref_private_decrypt_asynch(int len, const unsigned char *from,
+	unsigned char *to, RSA *rsa, int padding,
+	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	void *cb_data)
+	{
+	int outlen = rsaref_private_decrypt(len, from, to, rsa, padding);
+	cb(to, outlen, cb_data, (outlen <= 0 ? outlen : 1));
+	return(1);
+	}
 
 static int rsaref_private_encrypt(int len, const unsigned char *from, unsigned char *to,
 	     RSA *rsa, int padding)
@@ -435,6 +606,15 @@ err:
 	memset(&RSAkey,0,sizeof(RSAkey));
 	return(outlen);
 	}
+static int rsaref_private_encrypt_asynch(int len, const unsigned char *from,
+	unsigned char *to, RSA *rsa, int padding,
+	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	void *cb_data)
+	{
+	int outlen = rsaref_private_encrypt(len, from, to, rsa, padding);
+	cb(to, outlen, cb_data, (outlen <= 0 ? outlen : 1));
+	return(1);
+	}
 
 static int rsaref_public_decrypt(int len, const unsigned char *from, unsigned char *to,
 	     RSA *rsa, int padding)
@@ -452,6 +632,15 @@ static int rsaref_public_decrypt(int len, const unsigned char *from, unsigned ch
 err:
 	memset(&RSAkey,0,sizeof(RSAkey));
 	return(outlen);
+	}
+static int rsaref_public_decrypt_asynch(int len, const unsigned char *from,
+	unsigned char *to, RSA *rsa, int padding,
+	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	void *cb_data)
+	{
+	int outlen = rsaref_public_decrypt(len, from, to, rsa, padding);
+	cb(to, outlen, cb_data, (outlen <= 0 ? outlen : 1));
+	return(1);
 	}
 
 static int rsaref_public_encrypt(int len, const unsigned char *from, unsigned char *to,
@@ -493,6 +682,15 @@ err:
 	memset(&rnd,0,sizeof(rnd));
 	return(outlen);
 	}
+static int rsaref_public_encrypt_asynch(int len, const unsigned char *from,
+	unsigned char *to, RSA *rsa, int padding,
+	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	void *cb_data)
+	{
+	int outlen = rsaref_public_encrypt(len, from, to, rsa, padding);
+	cb(to, outlen, cb_data, (outlen <= 0 ? outlen : 1));
+	return(1);
+	}
 
 /*****************************************************************************
  * Symetric cipher and digest function registrars
@@ -516,6 +714,32 @@ static int rsaref_ciphers(ENGINE *e, const EVP_CIPHER **cipher,
 		*cipher = &cipher_des_ede3_cbc; break;
 	case NID_desx_cbc:
 		*cipher = &cipher_desx_cbc; break;
+	default:
+		ok = 0;
+		*cipher = NULL;
+		break;
+		}
+	return ok;
+	}
+static int rsaref_ciphers_asynch(ENGINE *e, const EVP_CIPHER **cipher,
+	const int **nids, int nid)
+	{
+	int ok = 1;
+	if(!cipher)
+		{
+		/* We are returning a list of supported nids */
+		*nids = rsaref_cipher_nids;
+		return (sizeof(rsaref_cipher_nids)-1)/sizeof(rsaref_cipher_nids[0]);
+		}
+	/* We are being asked for a specific cipher */
+	switch (nid)
+		{
+	case NID_des_cbc:
+		*cipher = &cipher_des_cbc_asynch; break;
+	case NID_des_ede3_cbc:
+		*cipher = &cipher_des_ede3_cbc_asynch; break;
+	case NID_desx_cbc:
+		*cipher = &cipher_desx_cbc_asynch; break;
 	default:
 		ok = 0;
 		*cipher = NULL;
@@ -547,6 +771,30 @@ static int rsaref_digests(ENGINE *e, const EVP_MD **digest,
 		}
 	return ok;
 	}
+static int rsaref_digests_asynch(ENGINE *e, const EVP_MD **digest,
+	const int **nids, int nid)
+	{
+	int ok = 1;
+	if(!digest)
+		{
+		/* We are returning a list of supported nids */
+		*nids = rsaref_digest_nids;
+		return (sizeof(rsaref_digest_nids)-1)/sizeof(rsaref_digest_nids[0]);
+		}
+	/* We are being asked for a specific digest */
+	switch (nid)
+		{
+	case NID_md2:
+		*digest = &digest_md2_asynch; break;
+	case NID_md5:
+		*digest = &digest_md5_asynch; break;
+	default:
+		ok = 0;
+		*digest = NULL;
+		break;
+		}
+	return ok;
+	}
 
 /*****************************************************************************
  * DES functions
@@ -556,7 +804,7 @@ static int rsaref_digests(ENGINE *e, const EVP_MD **digest,
 static int cipher_des_cbc_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
 	const unsigned char *iv, int enc)
 	{
-	DES_CBCInit(data(ctx), (unsigned char *)key, (unsigned char *)iv, enc);
+	DES_CBCInit(data(ctx), (unsigned char *)key, (unsigned char *)ctx->iv, enc);
 	return 1;
 	}
 static int cipher_des_cbc_code(EVP_CIPHER_CTX *ctx, unsigned char *out,
@@ -575,6 +823,26 @@ static int cipher_des_cbc_code(EVP_CIPHER_CTX *ctx, unsigned char *out,
 		}
 	return !ret;
 	}
+/* In the _asynch code, we use the fact that the first field in the
+   cipher_data structure is a DES_CBC_CTX */
+#undef data
+#define data(ctx) ((struct cipher_des_cbc_asynch_data *)(ctx)->cipher_data)
+static int cipher_des_cbc_init_asynch(EVP_CIPHER_CTX *ctx, const unsigned char *key,
+	const unsigned char *iv, int enc,
+	int (*cb)(unsigned char *out, int outl, void *cb_data, int status))
+	{
+	cipher_des_cbc_init(ctx, key, iv, enc);
+	data(ctx)->cb = cb;
+	return 1;
+	}
+static int cipher_des_cbc_code_asynch(EVP_CIPHER_CTX *ctx, unsigned char *out,
+	const unsigned char *in, unsigned int inl,
+	void *cb_data)
+	{
+	int status = cipher_des_cbc_code(ctx, out, in, inl);
+	data(ctx)->cb(out, inl, cb_data, status);
+	return 1;
+	}
 static int cipher_des_cbc_clean(EVP_CIPHER_CTX *ctx)
 	{
 	memset(data(ctx), 0, ctx->cipher->ctx_size);
@@ -586,7 +854,7 @@ static int cipher_des_cbc_clean(EVP_CIPHER_CTX *ctx)
 static int cipher_des_ede3_cbc_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
 	const unsigned char *iv, int enc)
 	{
-	DES3_CBCInit(data(ctx), (unsigned char *)key, (unsigned char *)iv,
+	DES3_CBCInit(data(ctx), (unsigned char *)key, (unsigned char *)ctx->iv,
 		enc);
 	return 1;
 	}
@@ -606,9 +874,29 @@ static int cipher_des_ede3_cbc_code(EVP_CIPHER_CTX *ctx, unsigned char *out,
 		}
 	return !ret;
 	}
+/* In the _asynch code, we use the fact that the first field in the
+   cipher_data structure is a DES3_CBC_CTX */
+#undef data
+#define data(ctx) ((struct cipher_des_ede3_cbc_asynch_data *)(ctx)->cipher_data)
+static int cipher_des_ede3_cbc_init_asynch(EVP_CIPHER_CTX *ctx, const unsigned char *key,
+	const unsigned char *iv, int enc,
+	int (*cb)(unsigned char *out, int outl, void *cb_data, int status))
+	{
+	cipher_des_ede3_cbc_init(ctx, key, iv, enc);
+	data(ctx)->cb = cb;
+	return 1;
+	}
+static int cipher_des_ede3_cbc_code_asynch(EVP_CIPHER_CTX *ctx, unsigned char *out,
+	const unsigned char *in, unsigned int inl,
+	void *cb_data)
+	{
+	int status = cipher_des_ede3_cbc_code(ctx, out, in, inl);
+	data(ctx)->cb(out, inl, cb_data, status);
+	return 1;
+	}
 static int cipher_des_ede3_cbc_clean(EVP_CIPHER_CTX *ctx)
 	{
-	memset(data(ctx), 0, ctx->cipher->ctx_size);
+	memset(ctx->cipher_data, 0, ctx->cipher->ctx_size);
 	return 1;
 	}
 
@@ -617,7 +905,7 @@ static int cipher_des_ede3_cbc_clean(EVP_CIPHER_CTX *ctx)
 static int cipher_desx_cbc_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
 	const unsigned char *iv, int enc)
 	{
-	DESX_CBCInit(data(ctx), (unsigned char *)key, (unsigned char *)iv,
+	DESX_CBCInit(data(ctx), (unsigned char *)key, (unsigned char *)ctx->iv,
 		enc);
 	return 1;
 	}
@@ -637,9 +925,29 @@ static int cipher_desx_cbc_code(EVP_CIPHER_CTX *ctx, unsigned char *out,
 		}
 	return !ret;
 	}
+/* In the _asynch code, we use the fact that the first field in the
+   cipher_data structure is a DESX_CBC_CTX */
+#undef data
+#define data(ctx) ((struct cipher_desx_cbc_asynch_data *)(ctx)->cipher_data)
+static int cipher_desx_cbc_init_asynch(EVP_CIPHER_CTX *ctx, const unsigned char *key,
+	const unsigned char *iv, int enc,
+	int (*cb)(unsigned char *out, int outl, void *cb_data, int status))
+	{
+	cipher_desx_cbc_init(ctx, key, iv, enc);
+	data(ctx)->cb = cb;
+	return 1;
+	}
+static int cipher_desx_cbc_code_asynch(EVP_CIPHER_CTX *ctx, unsigned char *out,
+	const unsigned char *in, unsigned int inl,
+	void *cb_data)
+	{
+	int status = cipher_desx_cbc_code(ctx, out, in, inl);
+	data(ctx)->cb(out, inl, cb_data, status);
+	return 1;
+	}
 static int cipher_desx_cbc_clean(EVP_CIPHER_CTX *ctx)
 	{
-	memset(data(ctx), 0, ctx->cipher->ctx_size);
+	memset(ctx->cipher_data, 0, ctx->cipher->ctx_size);
 	return 1;
 	}
 
@@ -653,8 +961,7 @@ static int digest_md2_init(EVP_MD_CTX *ctx)
 	MD2Init(data(ctx));
 	return 1;
 	}
-static int digest_md2_update(EVP_MD_CTX *ctx,const void *data,
-	unsigned long count)
+static int digest_md2_update(EVP_MD_CTX *ctx,const void *data, size_t count)
 	{
 	MD2Update(data(ctx), (unsigned char *)data, (unsigned int)count);
 	return 1;
@@ -662,6 +969,29 @@ static int digest_md2_update(EVP_MD_CTX *ctx,const void *data,
 static int digest_md2_final(EVP_MD_CTX *ctx,unsigned char *md)
 	{
 	MD2Final(md, data(ctx));
+	return 1;
+	}
+#undef data
+#define data(ctx) ((struct digest_md2_data *)(ctx)->md_data)
+static int digest_md2_init_asynch(EVP_MD_CTX *ctx,
+	int (*cb)(unsigned char *md, unsigned int size, void *cb_data, int status))
+	{
+	digest_md2_init(ctx);
+	data(ctx)->cb = cb;
+	return 1;
+	}
+static int digest_md2_update_asynch(EVP_MD_CTX *ctx,const void *data, size_t count,
+	void *cb_data)
+	{
+	int status = digest_md2_update(ctx,data,count);
+	data(ctx)->cb(NULL,count,cb_data,status);
+	return 1;
+	}
+static int digest_md2_final_asynch(EVP_MD_CTX *ctx,unsigned char *md,
+	void *cb_data)
+	{
+	int status = digest_md2_final(ctx,md);
+	data(ctx)->cb(md,16,cb_data,status);
 	return 1;
 	}
 
@@ -672,8 +1002,7 @@ static int digest_md5_init(EVP_MD_CTX *ctx)
 	MD5Init(data(ctx));
 	return 1;
 	}
-static int digest_md5_update(EVP_MD_CTX *ctx,const void *data,
-	unsigned long count)
+static int digest_md5_update(EVP_MD_CTX *ctx,const void *data, size_t count)
 	{
 	MD5Update(data(ctx), (unsigned char *)data, (unsigned int)count);
 	return 1;
@@ -681,5 +1010,28 @@ static int digest_md5_update(EVP_MD_CTX *ctx,const void *data,
 static int digest_md5_final(EVP_MD_CTX *ctx,unsigned char *md)
 	{
 	MD5Final(md, data(ctx));
+	return 1;
+	}
+#undef data
+#define data(ctx) ((struct digest_md5_data *)(ctx)->md_data)
+static int digest_md5_init_asynch(EVP_MD_CTX *ctx,
+	int (*cb)(unsigned char *md, unsigned int size, void *cb_data, int status))
+	{
+	digest_md5_init(ctx);
+	data(ctx)->cb = cb;
+	return 1;
+	}
+static int digest_md5_update_asynch(EVP_MD_CTX *ctx,const void *data, size_t count,
+	void *cb_data)
+	{
+	int status = digest_md5_update(ctx,data,count);
+	data(ctx)->cb(NULL,count,cb_data,status);
+	return 1;
+	}
+static int digest_md5_final_asynch(EVP_MD_CTX *ctx,unsigned char *md,
+	void *cb_data)
+	{
+	int status = digest_md5_final(ctx,md);
+	data(ctx)->cb(md,16,cb_data,status);
 	return 1;
 	}

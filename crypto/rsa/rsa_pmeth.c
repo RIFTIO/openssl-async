@@ -699,24 +699,24 @@ const EVP_PKEY_METHOD rsa_pkey_meth =
 	pkey_rsa_keygen,
 
 	0,
-	pkey_rsa_sign,
+	{ pkey_rsa_sign, 0 },
 
 	0,
-	pkey_rsa_verify,
+	{ pkey_rsa_verify, 0 },
 
 	0,
-	pkey_rsa_verifyrecover,
+	{ pkey_rsa_verifyrecover, 0 },
 
 
-	0,0,0,0,
-
-	0,
-	pkey_rsa_encrypt,
+	0,{ 0, 0 },0,{ 0, 0 },
 
 	0,
-	pkey_rsa_decrypt,
+	{ pkey_rsa_encrypt, 0 },
 
-	0,0,
+	0,
+	{ pkey_rsa_decrypt, 0 },
+
+	0,{ 0, 0 },
 
 	pkey_rsa_ctrl,
 	pkey_rsa_ctrl_str

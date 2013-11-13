@@ -60,6 +60,7 @@
 #include "cryptlib.h"
 #include <openssl/evp.h>
 #include <openssl/objects.h>
+#include "evp_locl.h"
 
 int EVP_CIPHER_param_to_asn1(EVP_CIPHER_CTX *c, ASN1_TYPE *type)
 	{
@@ -188,9 +189,105 @@ int EVP_CIPHER_CTX_block_size(const EVP_CIPHER_CTX *ctx)
 	return ctx->cipher->block_size;
 	}
 
+struct evp_md_ctx_internal_st
+	{
+	/* For asynch operations */
+	int (*cb)(unsigned char *md, unsigned int size,
+		void *userdata, int status);
+	void *cb_data;
+	/* Internal cache */
+	int (*internal_cb)(unsigned char *md, unsigned int size,
+		EVP_MD_CTX *ctx, int status);
+	};
+
+typedef struct evp_asynch_ctx_st EVP_ASYNCH_CTX;
+typedef int (*internal_asynch_cb_t)(unsigned char *out, int outl,
+	EVP_ASYNCH_CTX *ctx, int status);
+typedef int (*asynch_cb_t)(unsigned char *out, int outl, void *ctx, int status);
+
+/* Asynch requires to have a per-call context.  To avoid memory fragmentation,
+ * we use a big pool that gets allocated once. */
+struct evp_asynch_ctx_st
+	{
+	EVP_CIPHER_CTX *ctx;
+	internal_asynch_cb_t internal_cb;
+	asynch_cb_t user_cb;	/* Cache of ctx->internal->cb */
+	void *user_cb_data;	/* Cache of ctx->internal->cb_data */
+	EVP_ASYNCH_CTX *next_free;
+	};
+static EVP_ASYNCH_CTX *asynch_ctx_pool = NULL;
+static EVP_ASYNCH_CTX *asynch_ctx_next_free = NULL;
+static int asynch_ctx_break;
+static int asynch_ctx_items;
+static EVP_ASYNCH_CTX *alloc_asynch_ctx()
+	{
+	EVP_ASYNCH_CTX *ret = NULL;
+	CRYPTO_w_lock(CRYPTO_LOCK_ASYNCH);
+	if (asynch_ctx_pool == NULL)
+		{
+		asynch_ctx_items = 1024;
+		asynch_ctx_break = 0;
+		asynch_ctx_next_free = NULL;
+		asynch_ctx_pool =
+			(EVP_ASYNCH_CTX *)OPENSSL_malloc(sizeof(EVP_ASYNCH_CTX) * asynch_ctx_items);
+		if (asynch_ctx_pool == NULL)
+			{
+			CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
+			return NULL;
+			}
+		}
+	if (asynch_ctx_next_free)
+		{
+		ret = asynch_ctx_next_free;
+		asynch_ctx_next_free = asynch_ctx_next_free->next_free;
+		}
+	else if (asynch_ctx_break < asynch_ctx_items)
+		ret = &asynch_ctx_pool[asynch_ctx_break++];
+	else
+		ret = NULL;
+	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
+	return ret;
+	}
+static void free_asynch_ctx(EVP_ASYNCH_CTX *item)
+	{
+	CRYPTO_w_lock(CRYPTO_LOCK_ASYNCH);
+	item->next_free = asynch_ctx_next_free;
+	asynch_ctx_next_free = item;
+	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
+	}
+
+static int _evp_Cipher_post(unsigned char *out, int outl,
+	EVP_ASYNCH_CTX *actx, int status)
+	{
+	int ret = actx->user_cb(out, outl, actx->user_cb_data, status);
+	if (status >= 0)
+		free_asynch_ctx(actx);
+	return ret;
+	}
 int EVP_Cipher(EVP_CIPHER_CTX *ctx, unsigned char *out, const unsigned char *in, unsigned int inl)
 	{
-	return ctx->cipher->do_cipher(ctx,out,in,inl);
+	if (ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
+		{
+		EVP_ASYNCH_CTX *actx = NULL;
+		int ret = 0;
+
+		if (!(ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH))
+			return 0;
+
+		actx = alloc_asynch_ctx();
+		if (actx == NULL)
+			return 0;
+		actx->ctx = ctx;
+		actx->user_cb = ctx->internal->cb;
+		actx->user_cb_data = ctx->internal->cb_data;
+		actx->internal_cb = _evp_Cipher_post;
+		ret = ctx->cipher->do_cipher.asynch(ctx,out,in,inl,actx);
+		if (!ret)
+			free_asynch_ctx(actx);
+		return ret;
+		}
+	else
+		return ctx->cipher->do_cipher.synch(ctx,out,in,inl);
 	}
 
 const EVP_CIPHER *EVP_CIPHER_CTX_cipher(const EVP_CIPHER_CTX *ctx)

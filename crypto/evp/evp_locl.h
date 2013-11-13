@@ -136,8 +136,8 @@ static int cname##_cfb##cbits##_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out, 
 static const EVP_CIPHER cname##_##mode = { \
 	nid##_##nmode, block_size, key_len, iv_len, \
 	flags | EVP_CIPH_##MODE##_MODE, \
-	init_key, \
-	cname##_##mode##_cipher, \
+	{ init_key },				\
+	{ cname##_##mode##_cipher },		\
 	cleanup, \
 	sizeof(kstruct), \
 	set_asn1, get_asn1,\
@@ -263,6 +263,14 @@ const EVP_CIPHER *EVP_##cname##_ecb(void) { return &cname##_ecb; }
 			     EVP_CIPHER_get_asn1_iv, \
 			     NULL)
 
+struct evp_cipher_ctx_internal_st
+	{
+	/* For asynch operations */
+	int (*cb)(unsigned char *data, int datalen,
+		void *userdata, int status);
+	void *cb_data;
+	};
+
 struct evp_pkey_ctx_st
 	{
 	/* Method associated with this operation */
@@ -281,6 +289,9 @@ struct evp_pkey_ctx_st
 	void *app_data;
 	/* Keygen callback */
 	EVP_PKEY_gen_cb *pkey_gencb;
+	/* Asynch callback */
+	EVP_PKEY_asynch_cb *asynchcb;
+	void *asynchcb_data;
 	/* implementation specific keygen data */
 	int *keygen_info;
 	int keygen_info_count;
@@ -304,37 +315,100 @@ struct evp_pkey_method_st
 	int (*keygen)(EVP_PKEY_CTX *ctx, EVP_PKEY *pkey);
 
 	int (*sign_init)(EVP_PKEY_CTX *ctx);
-	int (*sign)(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen,
-				const unsigned char *tbs, size_t tbslen);
+	struct
+		{
+		int (*synch)(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen,
+			const unsigned char *tbs, size_t tbslen);
+		int (*asynch)(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen,
+			const unsigned char *tbs, size_t tbslen,
+			int (*cb)(unsigned char *sig, size_t siglen,
+				void *cb_data, int status),
+			void *cb_data);
+		} sign;
 
 	int (*verify_init)(EVP_PKEY_CTX *ctx);
-	int (*verify)(EVP_PKEY_CTX *ctx,
-				const unsigned char *sig, size_t siglen,
-				const unsigned char *tbs, size_t tbslen);
+	struct
+		{
+		int (*synch)(EVP_PKEY_CTX *ctx,
+			const unsigned char *sig, size_t siglen,
+			const unsigned char *tbs, size_t tbslen);
+		int (*asynch)(EVP_PKEY_CTX *ctx,
+			const unsigned char *sig, size_t siglen,
+			const unsigned char *tbs, size_t tbslen,
+			int (*cb)(void *cb_data, int status),
+			void *cb_data);
+		} verify;
 
 	int (*verify_recover_init)(EVP_PKEY_CTX *ctx);
-	int (*verify_recover)(EVP_PKEY_CTX *ctx,
-				unsigned char *rout, size_t *routlen,
-				const unsigned char *sig, size_t siglen);
+	struct
+		{
+		int (*synch)(EVP_PKEY_CTX *ctx,
+			unsigned char *rout, size_t *routlen,
+			const unsigned char *sig, size_t siglen);
+		int (*asynch)(EVP_PKEY_CTX *ctx,
+			unsigned char *rout, size_t *routlen,
+			const unsigned char *sig, size_t siglen,
+			int (*cb)(unsigned char *rout, size_t routlen,
+				void *cb_data, int status),
+			void *cb_data);
+		} verify_recover;
 
 	int (*signctx_init)(EVP_PKEY_CTX *ctx, EVP_MD_CTX *mctx);
-	int (*signctx)(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen,
-					EVP_MD_CTX *mctx);
+	struct
+		{
+		int (*synch)(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen,
+			EVP_MD_CTX *mctx);
+		int (*asynch)(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen,
+			EVP_MD_CTX *mctx,
+			int (*cb)(unsigned char *sig, size_t siglen,
+				void *cb_data, int status),
+			void *cb_data);
+		} signctx;
 
 	int (*verifyctx_init)(EVP_PKEY_CTX *ctx, EVP_MD_CTX *mctx);
-	int (*verifyctx)(EVP_PKEY_CTX *ctx, const unsigned char *sig,int siglen,
-					EVP_MD_CTX *mctx);
+	struct
+		{
+		int (*synch)(EVP_PKEY_CTX *ctx, const unsigned char *sig,int siglen,
+			EVP_MD_CTX *mctx);
+		int (*asynch)(EVP_PKEY_CTX *ctx, const unsigned char *sig,int siglen,
+			EVP_MD_CTX *mctx,
+			int (*cb)(void *cb_data, int status),
+			void *cb_data);
+		} verifyctx;
 
 	int (*encrypt_init)(EVP_PKEY_CTX *ctx);
-	int (*encrypt)(EVP_PKEY_CTX *ctx, unsigned char *out, size_t *outlen,
-					const unsigned char *in, size_t inlen);
+	struct
+		{
+		int (*synch)(EVP_PKEY_CTX *ctx, unsigned char *out, size_t *outlen,
+			const unsigned char *in, size_t inlen);
+		int (*asynch)(EVP_PKEY_CTX *ctx, unsigned char *out, size_t *outlen,
+			const unsigned char *in, size_t inlen,
+			int (*cb)(unsigned char *out, size_t outlen,
+				void *cb_data, int status),
+			void *cb_data);
+		} encrypt;
 
 	int (*decrypt_init)(EVP_PKEY_CTX *ctx);
-	int (*decrypt)(EVP_PKEY_CTX *ctx, unsigned char *out, size_t *outlen,
-					const unsigned char *in, size_t inlen);
+	struct
+		{
+		int (*synch)(EVP_PKEY_CTX *ctx, unsigned char *out, size_t *outlen,
+			const unsigned char *in, size_t inlen);
+		int (*asynch)(EVP_PKEY_CTX *ctx, unsigned char *out, size_t *outlen,
+			const unsigned char *in, size_t inlen,
+			int (*cb)(unsigned char *out, size_t outlen,
+				void *cb_data, int status),
+			void *cb_data);
+		} decrypt;
 
 	int (*derive_init)(EVP_PKEY_CTX *ctx);
-	int (*derive)(EVP_PKEY_CTX *ctx, unsigned char *key, size_t *keylen);
+	struct
+		{
+		int (*synch)(EVP_PKEY_CTX *ctx, unsigned char *key, size_t *keylen);
+		int (*asynch)(EVP_PKEY_CTX *ctx, unsigned char *key, size_t *keylen,
+			int (*cb)(unsigned char *key, size_t keylen,
+				void *cb_data, int status),
+			void *cb_data);
+		} derive;
 
 	int (*ctrl)(EVP_PKEY_CTX *ctx, int type, int p1, void *p2);
 	int (*ctrl_str)(EVP_PKEY_CTX *ctx, const char *type, const char *value);

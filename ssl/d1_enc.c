@@ -134,13 +134,16 @@
  *   1: if the record's padding is valid / the encryption was successful.
  *   -1: if the record's padding/AEAD-authenticator is invalid or, if sending,
  *       an internal error occured. */
-int dtls1_enc(SSL *s, int send)
+int dtls1_enc(SSL *s, int send, SSL3_TRANSMISSION *trans)
 	{
 	SSL3_RECORD *rec;
 	EVP_CIPHER_CTX *ds;
 	unsigned long l;
 	int bs,i,j,k,mac_size=0;
 	const EVP_CIPHER *enc;
+
+	if (trans)
+		return 0;	/* Not supported */
 
 	if (send)
 		{

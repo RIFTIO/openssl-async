@@ -281,8 +281,8 @@ static EVP_CIPHER r4_hmac_md5_cipher=
 #endif
 	1,EVP_RC4_KEY_SIZE,0,
 	EVP_CIPH_STREAM_CIPHER|EVP_CIPH_VARIABLE_LENGTH|EVP_CIPH_FLAG_AEAD_CIPHER,
-	rc4_hmac_md5_init_key,
-	rc4_hmac_md5_cipher,
+	{ rc4_hmac_md5_init_key },
+	{ rc4_hmac_md5_cipher },
 	NULL,
 	sizeof(EVP_RC4_HMAC_MD5),
 	NULL,

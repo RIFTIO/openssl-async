@@ -22,12 +22,13 @@ all:
 		@echo 'hpux64:   64-bit HP/UX'
 		@echo 'aix:      AIX'
 		@echo 'gnu:      Generic GNU-based system (gcc and GNU ld)'
+		@echo 'gnu64:    Generic GNU-based system on x86_64(gcc and GNU ld)'
 		@echo ''
 
 FORCE.install:
 install:	FORCE.install
 		cd install; \
-			make -f unix/makefile CFLAGS='-I. -DPROTOTYPES=1 -O -c' RSAREFLIB=librsaref.a librsaref.a
+			make -f unix/makefile CFLAGS='$(PIC) -I. -DPROTOTYPES=1 -O -c' RSAREFLIB=librsaref.a librsaref.a
 
 FORCE.update:
 update:		FORCE.update
@@ -37,6 +38,7 @@ update:		FORCE.update
 darwin:		install $(SHLIB).darwin
 cygwin:		install $(SHLIB).cygwin
 gnu:		install $(SHLIB).gnu
+gnu64:		install $(SHLIB).gnu64
 alpha-osf1:	install $(SHLIB).alpha-osf1
 tru64:		install $(SHLIB).tru64
 solaris:	install $(SHLIB).solaris
@@ -70,6 +72,12 @@ $(SHLIB).cygwin:	$(LIB) install/librsaref.a
 $(SHLIB).gnu:	$(LIB) install/librsaref.a
 		ALLSYMSFLAGS='--whole-archive' \
 		SHAREDFLAGS='-shared -Wl,-soname=$(SHLIB)' \
+		SHAREDCMD='$(CC)'; \
+		$(LINK_SO)
+		touch $(SHLIB).gnu
+$(SHLIB).gnu64:	$(LIB) install/librsaref.a
+		ALLSYMSFLAGS='--whole-archive -m elf_x86_64' \
+		SHAREDFLAGS='-shared -Wl,-soname=$(SHLIB) -m64' \
 		SHAREDCMD='$(CC)'; \
 		$(LINK_SO)
 		touch $(SHLIB).gnu

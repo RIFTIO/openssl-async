@@ -282,11 +282,12 @@ rsa_sign.o: ../../include/openssl/err.h ../../include/openssl/evp.h
 rsa_sign.o: ../../include/openssl/lhash.h ../../include/openssl/obj_mac.h
 rsa_sign.o: ../../include/openssl/objects.h ../../include/openssl/opensslconf.h
 rsa_sign.o: ../../include/openssl/opensslv.h ../../include/openssl/ossl_typ.h
-rsa_sign.o: ../../include/openssl/pkcs7.h ../../include/openssl/rsa.h
-rsa_sign.o: ../../include/openssl/safestack.h ../../include/openssl/sha.h
-rsa_sign.o: ../../include/openssl/stack.h ../../include/openssl/symhacks.h
-rsa_sign.o: ../../include/openssl/x509.h ../../include/openssl/x509_vfy.h
-rsa_sign.o: ../cryptlib.h rsa_locl.h rsa_sign.c
+rsa_sign.o: ../../include/openssl/pkcs7.h ../../include/openssl/pool.h
+rsa_sign.o: ../../include/openssl/rsa.h ../../include/openssl/safestack.h
+rsa_sign.o: ../../include/openssl/sha.h ../../include/openssl/stack.h
+rsa_sign.o: ../../include/openssl/symhacks.h ../../include/openssl/x509.h
+rsa_sign.o: ../../include/openssl/x509_vfy.h ../cryptlib.h rsa_locl.h
+rsa_sign.o: rsa_sign.c
 rsa_ssl.o: ../../e_os.h ../../include/openssl/asn1.h
 rsa_ssl.o: ../../include/openssl/bio.h ../../include/openssl/bn.h
 rsa_ssl.o: ../../include/openssl/buffer.h ../../include/openssl/crypto.h

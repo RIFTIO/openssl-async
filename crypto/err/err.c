@@ -204,6 +204,7 @@ static ERR_STRING_DATA ERR_str_reasons[]=
 {ERR_R_OCSP_LIB				,"OCSP lib"},
 {ERR_R_TS_LIB				,"TS lib"},
 
+{ERR_R_RETRY				,"retry"},
 {ERR_R_NESTED_ASN1_ERROR		,"nested asn1 error"},
 {ERR_R_BAD_ASN1_OBJECT_HEADER		,"bad asn1 object header"},
 {ERR_R_BAD_GET_ASN1_OBJECT_CALL		,"bad get asn1 object call"},

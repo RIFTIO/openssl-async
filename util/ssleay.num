@@ -320,3 +320,5 @@ SSL_get_srtp_profiles                   360	EXIST::FUNCTION:
 SSL_CTX_set_next_proto_select_cb        361	EXIST:!VMS:FUNCTION:NEXTPROTONEG
 SSL_CTX_set_next_proto_sel_cb           361	EXIST:VMS:FUNCTION:NEXTPROTONEG
 SSL_SESSION_get_compress_id             362	EXIST::FUNCTION:
+SSL_set_asynch_completion_callback      363	EXIST::FUNCTION:
+SSL_CTX_set_asynch_completion_callback  364	EXIST::FUNCTION:

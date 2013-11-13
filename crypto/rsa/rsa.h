@@ -124,6 +124,48 @@ struct rsa_meth_st
  * it would be nice to assume there are no such things as "builtin software"
  * implementations. */
 	int (*rsa_keygen)(RSA *rsa, int bits, BIGNUM *e, BN_GENCB *cb);
+
+/* New asynch versions of most of the above functions here.  For this to be
+ * used, there are new variants of the library functions but with '_asynch'
+ * added to the name, for example RSA_public_encrypt_asynch().
+ * Note, for backward compatibility, this functionality is only enabled if
+ * the RSA_FLAG_ASYNCH option is set in 'flags'. */
+	int (*rsa_pub_enc_asynch)(int flen,const unsigned char *from,
+		unsigned char *to,
+		RSA *rsa,int padding,
+		int (*cb)(unsigned char *res, int reslen,
+			void *cb_data, int status),
+		void *cb_data);
+	int (*rsa_pub_dec_asynch)(int flen,const unsigned char *from,
+		unsigned char *to,
+		RSA *rsa,int padding,
+		int (*cb)(unsigned char *res, int reslen,
+			void *cb_data, int status),
+		void *cb_data);
+	int (*rsa_priv_enc_asynch)(int flen,const unsigned char *from,
+		unsigned char *to,
+		RSA *rsa,int padding,
+		int (*cb)(unsigned char *res, int reslen,
+			void *cb_data, int status),
+		void *cb_data);
+	int (*rsa_priv_dec_asynch)(int flen,const unsigned char *from,
+		unsigned char *to,
+		RSA *rsa,int padding,
+		int (*cb)(unsigned char *res, int reslen,
+			void *cb_data, int status),
+		void *cb_data);
+	int (*rsa_sign_asynch)(int type,
+		const unsigned char *m, unsigned int m_length,
+		unsigned char *sigret, unsigned int *siglen, const RSA *rsa,
+		int (*cb)(unsigned char *res, unsigned int reslen,
+			void *cb_data, int status),
+		void *cb_data);
+	int (*rsa_verify_asynch)(int dtype,
+		const unsigned char *m, unsigned int m_length,
+		const unsigned char *sigbuf, unsigned int siglen,
+								const RSA *rsa,
+		int (*cb)(void *cb_data, int status),
+		void *cb_data);
 	};
 
 struct rsa_st
@@ -217,6 +259,10 @@ struct rsa_st
                                                 */
 #endif
 
+/* This flag in the RSA_METHOD enables the asynch functions.
+ */
+#define RSA_FLAG_ASYNCH			0x0200
+
 
 #define EVP_PKEY_CTX_set_rsa_padding(ctx, pad) \
 	EVP_PKEY_CTX_ctrl(ctx, EVP_PKEY_RSA, -1, EVP_PKEY_CTRL_RSA_PADDING, \
@@ -295,12 +341,28 @@ int	RSA_check_key(const RSA *);
 	/* next 4 return -1 on error */
 int	RSA_public_encrypt(int flen, const unsigned char *from,
 		unsigned char *to, RSA *rsa,int padding);
+int	RSA_public_encrypt_asynch(int flen, const unsigned char *from,
+		unsigned char *to, RSA *rsa, int padding,
+		int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+		void *cb_data);
 int	RSA_private_encrypt(int flen, const unsigned char *from,
 		unsigned char *to, RSA *rsa,int padding);
+int	RSA_private_encrypt_asynch(int flen, const unsigned char *from,
+		unsigned char *to, RSA *rsa, int padding,
+		int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+		void *cb_data);
 int	RSA_public_decrypt(int flen, const unsigned char *from, 
 		unsigned char *to, RSA *rsa,int padding);
+int	RSA_public_decrypt_asynch(int flen, const unsigned char *from,
+		unsigned char *to, RSA *rsa, int padding,
+		int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+		void *cb_data);
 int	RSA_private_decrypt(int flen, const unsigned char *from, 
 		unsigned char *to, RSA *rsa,int padding);
+int	RSA_private_decrypt_asynch(int flen, const unsigned char *from,
+		unsigned char *to, RSA *rsa, int padding,
+		int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+		void *cb_data);
 void	RSA_free (RSA *r);
 /* "up" the RSA object's reference count */
 int	RSA_up_ref(RSA *r);
@@ -361,8 +423,17 @@ RSA *d2i_Netscape_RSA(RSA **a, const unsigned char **pp, long length,
  * inside PKCS#1 padded RSA encryption */
 int RSA_sign(int type, const unsigned char *m, unsigned int m_length,
 	unsigned char *sigret, unsigned int *siglen, RSA *rsa);
+int RSA_sign_asynch(int type, const unsigned char *m, unsigned int m_len,
+	unsigned char *sigret, unsigned int *siglen, RSA *rsa,
+	int (*cb)(unsigned char *res, unsigned int reslen, void *cb_data, int status),
+	void *cb_data);
 int RSA_verify(int type, const unsigned char *m, unsigned int m_length,
 	const unsigned char *sigbuf, unsigned int siglen, RSA *rsa);
+int RSA_verify_asynch(int dtype, const unsigned char *m, unsigned int m_len,
+	const unsigned char *sigbuf, unsigned int siglen,
+	RSA *rsa,
+	int (*cb)(void *cb_data, int status),
+	void *cb_data);
 
 /* The following 2 function sign and verify a ASN1_OCTET_STRING
  * object inside PKCS#1 padded RSA encryption */
@@ -460,6 +531,8 @@ void ERR_load_RSA_strings(void);
 #define RSA_F_CHECK_PADDING_MD				 140
 #define RSA_F_DO_RSA_PRINT				 146
 #define RSA_F_INT_RSA_VERIFY				 145
+#define RSA_F_INT_RSA_VERIFY_POST2			 161
+#define RSA_F_INT_RSA_VERIFY_PRE			 162
 #define RSA_F_MEMORY_LOCK				 100
 #define RSA_F_OLD_RSA_PRIV_DECODE			 147
 #define RSA_F_PKEY_RSA_CTRL				 143
@@ -501,15 +574,20 @@ void ERR_load_RSA_strings(void);
 #define RSA_F_RSA_PRINT					 115
 #define RSA_F_RSA_PRINT_FP				 116
 #define RSA_F_RSA_PRIVATE_DECRYPT			 150
+#define RSA_F_RSA_PRIVATE_DECRYPT_ASYNCH		 157
 #define RSA_F_RSA_PRIVATE_ENCRYPT			 151
+#define RSA_F_RSA_PRIVATE_ENCRYPT_ASYNCH		 158
 #define RSA_F_RSA_PRIV_DECODE				 137
 #define RSA_F_RSA_PRIV_ENCODE				 138
 #define RSA_F_RSA_PUBLIC_DECRYPT			 152
+#define RSA_F_RSA_PUBLIC_DECRYPT_ASYNCH			 159
 #define RSA_F_RSA_PUBLIC_ENCRYPT			 153
+#define RSA_F_RSA_PUBLIC_ENCRYPT_ASYNCH			 160
 #define RSA_F_RSA_PUB_DECODE				 139
 #define RSA_F_RSA_SETUP_BLINDING			 136
 #define RSA_F_RSA_SIGN					 117
 #define RSA_F_RSA_SIGN_ASN1_OCTET_STRING		 118
+#define RSA_F_RSA_SIGN_ASYNCH				 163
 #define RSA_F_RSA_VERIFY				 119
 #define RSA_F_RSA_VERIFY_ASN1_OCTET_STRING		 120
 #define RSA_F_RSA_VERIFY_PKCS1_PSS			 126
@@ -552,6 +630,8 @@ void ERR_load_RSA_strings(void);
 #define RSA_R_LAST_OCTET_INVALID			 134
 #define RSA_R_MODULUS_TOO_LARGE				 105
 #define RSA_R_NON_FIPS_RSA_METHOD			 157
+#define RSA_R_NO_ASYNCH_SUPPORT				 159
+#define RSA_R_NO_ASYNCH_SUPPORT_IN_FIPS			 160
 #define RSA_R_NO_PUBLIC_EXPONENT			 140
 #define RSA_R_NULL_BEFORE_BLOCK_MISSING			 113
 #define RSA_R_N_DOES_NOT_EQUAL_P_Q			 127

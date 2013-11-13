@@ -62,7 +62,7 @@
 #include <openssl/objects.h>
 #include <openssl/x509.h>
 
-int EVP_VerifyFinal(EVP_MD_CTX *ctx, const unsigned char *sigbuf,
+static int _evp_VerifyFinal(EVP_MD_CTX *ctx, const unsigned char *sigbuf,
 	     unsigned int siglen, EVP_PKEY *pkey)
 	{
 	unsigned char m[EVP_MAX_MD_SIZE];
@@ -106,16 +106,25 @@ int EVP_VerifyFinal(EVP_MD_CTX *ctx, const unsigned char *sigbuf,
 		}
 	if (!ok)
 		{
-		EVPerr(EVP_F_EVP_VERIFYFINAL,EVP_R_WRONG_PUBLIC_KEY_TYPE);
+		EVPerr(EVP_F__EVP_VERIFYFINAL,EVP_R_WRONG_PUBLIC_KEY_TYPE);
 		return(-1);
 		}
-        if (ctx->digest->verify == NULL)
+        if (ctx->digest->verify.synch == NULL)
                 {
-		EVPerr(EVP_F_EVP_VERIFYFINAL,EVP_R_NO_VERIFY_FUNCTION_CONFIGURED);
+		EVPerr(EVP_F__EVP_VERIFYFINAL,EVP_R_NO_VERIFY_FUNCTION_CONFIGURED);
 		return(0);
 		}
 
-	return(ctx->digest->verify(ctx->digest->type,m,m_len,
+	return(ctx->digest->verify.synch(ctx->digest->type,m,m_len,
 		sigbuf,siglen,pkey->pkey.ptr));
 	}
 
+int EVP_VerifyFinal(EVP_MD_CTX *ctx, const unsigned char *sigbuf,
+	     unsigned int siglen, EVP_PKEY *pkey)
+	{
+#if 0
+	if (ctx->digest->flags & EVP_MD_FLAG_ASYNCH)
+		return _evp_VerifyFinal_asynch(ctx, sigbuf, siglen, pkey);
+#endif
+	return _evp_VerifyFinal(ctx, sigbuf, siglen, pkey);
+	}

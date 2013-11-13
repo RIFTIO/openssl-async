@@ -703,8 +703,8 @@ static const EVP_CIPHER padlock_aes_##ksize##_##lmode = {	\
 	AES_KEY_SIZE_##ksize,		\
 	AES_BLOCK_SIZE,			\
 	0 | EVP_CIPH_##umode##_MODE,	\
-	padlock_aes_init_key,		\
-	padlock_aes_cipher,		\
+	{ padlock_aes_init_key },	\
+	{ padlock_aes_cipher },		\
 	NULL,				\
 	sizeof(struct padlock_cipher_data) + 16,	\
 	EVP_CIPHER_set_asn1_iv,		\

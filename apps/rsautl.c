@@ -74,13 +74,26 @@
 #define KEY_PUBKEY	2
 #define KEY_CERT	3
 
+#define OUTPUT_RAW	0
+#define OUTPUT_ASN1PARSE 1
+#define OUTPUT_HEXDUMP	2
+
 static void usage(void);
+static int write_results(unsigned char *buf, int buflen,
+			  void *cb_data, int status);
 
 #undef PROG
 
 #define PROG rsautl_main
 
 int MAIN(int argc, char **);
+
+struct output_data {
+	BIO *out;
+	BIO *err;
+	int done;
+	int output_mode;
+};
 
 int MAIN(int argc, char **argv)
 {
@@ -94,7 +107,7 @@ int MAIN(int argc, char **argv)
 	char rsa_mode = RSA_VERIFY, key_type = KEY_PRIVKEY;
 	int keyform = FORMAT_PEM;
 	char need_priv = 0, badarg = 0, rev = 0;
-	char hexdump = 0, asn1parse = 0;
+	char output_mode = OUTPUT_RAW;
 	X509 *x;
 	EVP_PKEY *pkey = NULL;
 	RSA *rsa = NULL;
@@ -102,8 +115,11 @@ int MAIN(int argc, char **argv)
 	char *passargin = NULL, *passin = NULL;
 	int rsa_inlen, rsa_outlen = 0;
 	int keysize;
+	int asynch = 0;
 
 	int ret = 1;
+
+	struct output_data actx;
 
 	argc--;
 	argv++;
@@ -155,8 +171,9 @@ int MAIN(int argc, char **argv)
 		} else if(!strcmp(*argv, "-certin")) {
 			key_type = KEY_CERT;
 		} 
-		else if(!strcmp(*argv, "-asn1parse")) asn1parse = 1;
-		else if(!strcmp(*argv, "-hexdump")) hexdump = 1;
+		else if(!strcmp(*argv, "-asn1parse")) output_mode = OUTPUT_ASN1PARSE;
+		else if(!strcmp(*argv, "-hexdump")) output_mode = OUTPUT_HEXDUMP;
+		else if(!strcmp(*argv, "-asynch")) asynch = 1;
 		else if(!strcmp(*argv, "-raw")) pad = RSA_NO_PADDING;
 		else if(!strcmp(*argv, "-oaep")) pad = RSA_PKCS1_OAEP_PADDING;
 		else if(!strcmp(*argv, "-ssl")) pad = RSA_SSLV23_PADDING;
@@ -275,24 +292,56 @@ int MAIN(int argc, char **argv)
 			rsa_in[rsa_inlen - 1 - i] = ctmp;
 		}
 	}
-	switch(rsa_mode) {
+
+	actx.out = out;
+	actx.err = bio_err;
+	actx.done = 0;
+	actx.output_mode = output_mode;
+	if (asynch) {
+		switch(rsa_mode) {
+
+		case RSA_VERIFY:
+			rsa_outlen  = RSA_public_decrypt_asynch(rsa_inlen, rsa_in, rsa_out, rsa, pad,
+							 write_results, &actx);
+			break;
+
+		case RSA_SIGN:
+			rsa_outlen  = RSA_private_encrypt_asynch(rsa_inlen, rsa_in, rsa_out, rsa, pad,
+							 write_results, &actx);
+			break;
+
+		case RSA_ENCRYPT:
+			rsa_outlen  = RSA_public_encrypt_asynch(rsa_inlen, rsa_in, rsa_out, rsa, pad,
+							 write_results, &actx);
+			break;
+
+		case RSA_DECRYPT:
+			rsa_outlen  = RSA_private_decrypt_asynch(rsa_inlen, rsa_in, rsa_out, rsa, pad,
+							 write_results, &actx);
+			break;
+
+		}
+	} else {
+		switch(rsa_mode) {
 
 		case RSA_VERIFY:
 			rsa_outlen  = RSA_public_decrypt(rsa_inlen, rsa_in, rsa_out, rsa, pad);
-		break;
+			break;
 
 		case RSA_SIGN:
 			rsa_outlen  = RSA_private_encrypt(rsa_inlen, rsa_in, rsa_out, rsa, pad);
-		break;
+			break;
 
 		case RSA_ENCRYPT:
 			rsa_outlen  = RSA_public_encrypt(rsa_inlen, rsa_in, rsa_out, rsa, pad);
-		break;
+			break;
 
 		case RSA_DECRYPT:
 			rsa_outlen  = RSA_private_decrypt(rsa_inlen, rsa_in, rsa_out, rsa, pad);
-		break;
+			break;
 
+		}
+		write_results(rsa_out, rsa_outlen, &actx, rsa_outlen > 0);
 	}
 
 	if(rsa_outlen <= 0) {
@@ -300,13 +349,10 @@ int MAIN(int argc, char **argv)
 		ERR_print_errors(bio_err);
 		goto end;
 	}
+	while(!actx.done) {
+		sleep(1);
+	}
 	ret = 0;
-	if(asn1parse) {
-		if(!ASN1_parse_dump(out, rsa_out, rsa_outlen, 1, -1)) {
-			ERR_print_errors(bio_err);
-		}
-	} else if(hexdump) BIO_dump(out, (char *)rsa_out, rsa_outlen);
-	else BIO_write(out, rsa_out, rsa_outlen);
 	end:
 	RSA_free(rsa);
 	BIO_free(in);
@@ -315,6 +361,24 @@ int MAIN(int argc, char **argv)
 	if(rsa_out) OPENSSL_free(rsa_out);
 	if(passin) OPENSSL_free(passin);
 	return ret;
+}
+
+static int write_results(unsigned char *buf, int buflen,
+			  void *cb_data, int status)
+{
+	struct output_data *actx = (struct output_data *)cb_data;
+	if (buflen <= 0)
+		return 0;
+	if(actx->output_mode == OUTPUT_ASN1PARSE) {
+		if(!ASN1_parse_dump(actx->out, buf, buflen, 1, -1)) {
+			ERR_print_errors(actx->err);
+		}
+	} else if(actx->output_mode == OUTPUT_HEXDUMP)
+		BIO_dump(actx->out, (char *)buf, buflen);
+	else
+		BIO_write(actx->out, buf, buflen);
+	actx->done = 1;
+	return 1;
 }
 
 static void usage()
@@ -337,7 +401,8 @@ static void usage()
 	BIO_printf(bio_err, "-hexdump        hex dump output\n");
 #ifndef OPENSSL_NO_ENGINE
 	BIO_printf(bio_err, "-engine e       use engine e, possibly a hardware device.\n");
-	BIO_printf (bio_err, "-passin arg    pass phrase source\n");
+	BIO_printf(bio_err, "-passin arg     pass phrase source\n");
+	BIO_printf(bio_err, "-asynch         run operations in asynch mode\n");
 #endif
 
 }

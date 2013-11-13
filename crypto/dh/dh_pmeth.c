@@ -232,21 +232,21 @@ const EVP_PKEY_METHOD dh_pkey_meth =
 	pkey_dh_keygen,
 
 	0,
-	0,
+	{ 0, 0 },
 
 	0,
+	{ 0, 0 },
+
+	0,{ 0, 0 },
+
+	0,{ 0, 0 },0,{ 0, 0 },
+
+	0,{ 0, 0 },
+
+	0,{ 0, 0 },
+
 	0,
-
-	0,0,
-
-	0,0,0,0,
-
-	0,0,
-
-	0,0,
-
-	0,
-	pkey_dh_derive,
+	{ pkey_dh_derive, 0 },
 
 	pkey_dh_ctrl,
 	pkey_dh_ctrl_str

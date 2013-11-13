@@ -128,16 +128,37 @@ const EVP_MD *ENGINE_get_digest(ENGINE *e, int nid)
 		}
 	return ret;
 	}
+const EVP_MD *ENGINE_get_digest_asynch(ENGINE *e, int nid)
+	{
+	const EVP_MD *ret;
+	ENGINE_DIGESTS_PTR fn = ENGINE_get_digests_asynch(e);
+	if(!fn || !fn(e, &ret, NULL, nid))
+		{
+		ENGINEerr(ENGINE_F_ENGINE_GET_DIGEST_ASYNCH,
+				ENGINE_R_UNIMPLEMENTED_DIGEST);
+		return NULL;
+		}
+	return ret;
+	}
 
 /* Gets the digest callback from an ENGINE structure */
 ENGINE_DIGESTS_PTR ENGINE_get_digests(const ENGINE *e)
 	{
 	return e->digests;
 	}
+ENGINE_DIGESTS_PTR ENGINE_get_digests_asynch(const ENGINE *e)
+	{
+	return e->digests_asynch;
+	}
 
 /* Sets the digest callback in an ENGINE structure */
 int ENGINE_set_digests(ENGINE *e, ENGINE_DIGESTS_PTR f)
 	{
 	e->digests = f;
+	return 1;
+	}
+int ENGINE_set_digests_asynch(ENGINE *e, ENGINE_DIGESTS_PTR f)
+	{
+	e->digests_asynch = f;
 	return 1;
 	}

@@ -296,20 +296,20 @@ const EVP_PKEY_METHOD dsa_pkey_meth =
 	pkey_dsa_keygen,
 
 	0,
-	pkey_dsa_sign,
+	{ pkey_dsa_sign, 0 },
 
 	0,
-	pkey_dsa_verify,
+	{ pkey_dsa_verify, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
-	0,0,0,0,
+	0,{ 0, 0 },0,{ 0, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
-	0,0,
+	0,{0,0},
 
 	pkey_dsa_ctrl,
 	pkey_dsa_ctrl_str

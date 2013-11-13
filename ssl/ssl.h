@@ -651,6 +651,10 @@ struct ssl_session_st
 #define SSL_MODE_SEND_CLIENTHELLO_TIME 0x00000020L
 #define SSL_MODE_SEND_SERVERHELLO_TIME 0x00000040L
 
+/* Use asynchronous mode if the cipher implementation has support for it. (SSL3 
+ * and TLS only) */
+#define SSL_MODE_ASYNCHRONOUS 0x00000080L
+
 /* Note: SSL[_CTX]_set_{options,mode} use |= op on the previous value,
  * they cannot be used to clear bits. */
 
@@ -694,6 +698,10 @@ void SSL_CTX_set_msg_callback(SSL_CTX *ctx, void (*cb)(int write_p, int version,
 void SSL_set_msg_callback(SSL *ssl, void (*cb)(int write_p, int version, int content_type, const void *buf, size_t len, SSL *ssl, void *arg));
 #define SSL_CTX_set_msg_callback_arg(ctx, arg) SSL_CTX_ctrl((ctx), SSL_CTRL_SET_MSG_CALLBACK_ARG, 0, (arg))
 #define SSL_set_msg_callback_arg(ssl, arg) SSL_ctrl((ssl), SSL_CTRL_SET_MSG_CALLBACK_ARG, 0, (arg))
+void SSL_CTX_set_asynch_completion_callback(SSL_CTX *ctx, int (*cb)(int write_p, int status, const void *buf, size_t len, SSL *ssl, void *arg));
+void SSL_set_asynch_completion_callback(SSL *ssl, int (*cb)(int write_p, int status, const void *buf, size_t len, SSL *ssl, void *arg));
+#define SSL_CTX_set_asynch_completion_callback_arg(ctx, arg) SSL_CTX_ctrl((ctx), SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK_ARG, 0, (arg))
+#define SSL_set_asynch_completion_callback_arg(ssl, arg) SSL_ctrl((ssl), SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK_ARG, 0, (arg))
 
 #ifndef OPENSSL_NO_SRP
 
@@ -987,6 +995,11 @@ struct ssl_ctx_st
         /* SRTP profiles we are willing to do from RFC 5764 */
         STACK_OF(SRTP_PROTECTION_PROFILE) *srtp_profiles;  
 #endif
+
+	/* callback that allows applications a level of control on completion of
+	 * asynchronous operations */
+	int (*asynch_completion_callback)(int write_p, int status, const void *buf, size_t len, SSL *ssl, void *arg);
+	void *asynch_completion_callback_arg;
 	};
 
 #endif
@@ -1361,6 +1374,11 @@ struct ssl_st
 #ifndef OPENSSL_NO_SRP
 	SRP_CTX srp_ctx; /* ctx for SRP authentication */
 #endif
+
+	/* callback that allows applications a level of control on completion of
+	 * asynchronous operations */
+	int (*asynch_completion_callback)(int write_p, int status, const void *buf, size_t len, SSL *ssl, void *arg);
+	void *asynch_completion_callback_arg;
 	};
 
 #endif
@@ -1518,6 +1536,9 @@ DECLARE_PEM_rw(SSL_SESSION, SSL_SESSION)
 #define SSL_ERROR_ZERO_RETURN		6
 #define SSL_ERROR_WANT_CONNECT		7
 #define SSL_ERROR_WANT_ACCEPT		8
+#define SSL_ERROR_WAIT_ASYNCH_READ	9
+#define SSL_ERROR_WAIT_ASYNCH_WRITE	10
+#define SSL_ERROR_WAIT_ASYNCH		11
 
 #define SSL_CTRL_NEED_TMP_RSA			1
 #define SSL_CTRL_SET_TMP_RSA			2
@@ -1618,6 +1639,9 @@ DECLARE_PEM_rw(SSL_SESSION, SSL_SESSION)
 #define SSL_CTRL_GET_EXTRA_CHAIN_CERTS		82
 #define SSL_CTRL_CLEAR_EXTRA_CHAIN_CERTS	83
 
+#define SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK               84
+#define SSL_CTRL_SET_ASYNCH_COMPLETION_CALLBACK_ARG           85
+
 #define DTLSv1_get_timeout(ssl, arg) \
 	SSL_ctrl(ssl,DTLS_CTRL_GET_TIMEOUT,0, (void *)arg)
 #define DTLSv1_handle_timeout(ssl) \
@@ -1694,6 +1718,7 @@ const char  * SSL_get_cipher_list(const SSL *s,int n);
 char *	SSL_get_shared_ciphers(const SSL *s, char *buf, int len);
 int	SSL_get_read_ahead(const SSL * s);
 int	SSL_pending(const SSL *s);
+int     SSL_crypto_pending(const SSL *s);
 #ifndef OPENSSL_NO_SOCK
 int	SSL_set_fd(SSL *s, int fd);
 int	SSL_set_rfd(SSL *s, int fd);
@@ -2069,6 +2094,7 @@ void ERR_load_SSL_strings(void);
 #define SSL_F_D2I_SSL_SESSION				 103
 #define SSL_F_DO_DTLS1_WRITE				 245
 #define SSL_F_DO_SSL3_WRITE				 104
+#define SSL_F_DO_SSL3_WRITE_INNER			 318
 #define SSL_F_DTLS1_ACCEPT				 246
 #define SSL_F_DTLS1_ADD_CERT_TO_BUF			 295
 #define SSL_F_DTLS1_BUFFER_RECORD			 247
@@ -2173,6 +2199,7 @@ void ERR_load_SSL_strings(void);
 #define SSL_F_SSL3_SETUP_WRITE_BUFFER			 291
 #define SSL_F_SSL3_WRITE_BYTES				 158
 #define SSL_F_SSL3_WRITE_PENDING			 159
+#define SSL_F_SSL3_WRITE_PENDING2			 319
 #define SSL_F_SSL_ADD_CLIENTHELLO_RENEGOTIATE_EXT	 298
 #define SSL_F_SSL_ADD_CLIENTHELLO_TLSEXT		 277
 #define SSL_F_SSL_ADD_CLIENTHELLO_USE_SRTP_EXT		 307

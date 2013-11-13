@@ -167,7 +167,9 @@ static const char* const lock_names[CRYPTO_NUM_LOCKS] =
 	"comp",
 	"fips",
 	"fips2",
-#if CRYPTO_NUM_LOCKS != 41
+	"asynch",
+	"ssl_asynch",
+#if CRYPTO_NUM_LOCKS != 43
 # error "Inconsistency between crypto.h and cryptlib.c"
 #endif
 	};
@@ -224,7 +226,7 @@ int CRYPTO_get_new_lockid(char *name)
 	if (!i)
 		OPENSSL_free(str);
 	else
-		i+=CRYPTO_NUM_LOCKS; /* gap of one :-) */
+		i+=CRYPTO_NUM_LOCKS-1;
 	return(i);
 	}
 
@@ -655,7 +657,7 @@ const char *CRYPTO_get_lock_name(int type)
 		return("dynamic");
 	else if (type < CRYPTO_NUM_LOCKS)
 		return(lock_names[type]);
-	else if (type-CRYPTO_NUM_LOCKS > sk_OPENSSL_STRING_num(app_locks))
+	else if (type >= CRYPTO_NUM_LOCKS+sk_OPENSSL_STRING_num(app_locks))
 		return("ERROR");
 	else
 		return(sk_OPENSSL_STRING_value(app_locks,type-CRYPTO_NUM_LOCKS));

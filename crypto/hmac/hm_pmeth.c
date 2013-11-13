@@ -152,7 +152,7 @@ static int hmac_signctx_init(EVP_PKEY_CTX *ctx, EVP_MD_CTX *mctx)
 	HMAC_PKEY_CTX *hctx = ctx->data;
 	HMAC_CTX_set_flags(&hctx->ctx, mctx->flags & ~EVP_MD_CTX_FLAG_NO_INIT);
 	EVP_MD_CTX_set_flags(mctx, EVP_MD_CTX_FLAG_NO_INIT);
-	mctx->update = int_update;
+	mctx->update.synch = int_update;
 	return 1;
 	}
 
@@ -248,22 +248,22 @@ const EVP_PKEY_METHOD hmac_pkey_meth =
 	0,
 	pkey_hmac_keygen,
 
-	0, 0,
+	0, { 0, 0 },
 
-	0, 0,
+	0, { 0, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
 	hmac_signctx_init,
-	hmac_signctx,
+	{ hmac_signctx, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
-	0,0,
+	0,{ 0, 0 },
 
 	pkey_hmac_ctrl,
 	pkey_hmac_ctrl_str

@@ -291,6 +291,7 @@ typedef struct err_state_st
 #define ERR_R_STORE_LIB ERR_LIB_STORE    /* 44 */
 #define ERR_R_TS_LIB	ERR_LIB_TS       /* 45 */
 
+#define ERR_R_RETRY				57
 #define ERR_R_NESTED_ASN1_ERROR			58
 #define ERR_R_BAD_ASN1_OBJECT_HEADER		59
 #define ERR_R_BAD_GET_ASN1_OBJECT_CALL		60

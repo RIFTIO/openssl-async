@@ -6,6 +6,7 @@ DIR=		apps
 TOP=		..
 CC=		cc
 INCLUDES=	-I$(TOP) -I../include $(KRB5_INCLUDES)
+
 CFLAG=		-g -static
 MAKEFILE=	Makefile
 PERL=		perl
@@ -20,7 +21,7 @@ EXE_EXT=
 
 SHLIB_TARGET=
 
-CFLAGS= -DMONOLITH $(INCLUDES) $(CFLAG)
+CFLAGS= -DMONOLITH -DPTHREADS $(INCLUDES) $(CFLAG)
 
 GENERAL=Makefile makeapps.com install.com
 
@@ -28,6 +29,7 @@ DLIBCRYPTO=../libcrypto.a
 DLIBSSL=../libssl.a
 LIBCRYPTO=-L.. -lcrypto
 LIBSSL=-L.. -lssl
+LIBPTHREAD=-lpthread
 
 PROGRAM= openssl
 
@@ -45,8 +47,8 @@ PROGS= $(PROGRAM).c
 
 A_OBJ=apps.o
 A_SRC=apps.c
-S_OBJ=	s_cb.o s_socket.o
-S_SRC=	s_cb.c s_socket.c
+S_OBJ=	s_cb.o s_socket.o s_threads.o
+S_SRC=	s_cb.c s_socket.c s_threads.c
 RAND_OBJ=app_rand.o
 RAND_SRC=app_rand.c
 
@@ -156,7 +158,7 @@ $(EXE): progs.h $(E_OBJ) $(PROGRAM).o $(DLIBCRYPTO) $(DLIBSSL)
 	elif [ -n "$(FIPSCANLIB)" ]; then \
 	  FIPSLD_CC="$(CC)"; CC=$(FIPSDIR)/bin/fipsld; export CC FIPSLD_CC; \
 	fi; \
-	LIBRARIES="$(LIBSSL) $(LIBKRB5) $(LIBCRYPTO)" ; \
+	LIBRARIES="$(LIBSSL) $(LIBKRB5) $(LIBCRYPTO) $(LIBPTHREAD)" ; \
 	$(MAKE) -f $(TOP)/Makefile.shared -e \
 		APPNAME=$(EXE) OBJECTS="$(PROGRAM).o $(E_OBJ)" \
 		LIBDEPS="$(PEX_LIBS) $$LIBRARIES $(EX_LIBS)" \
@@ -870,6 +872,11 @@ s_socket.o: ../include/openssl/stack.h ../include/openssl/symhacks.h
 s_socket.o: ../include/openssl/tls1.h ../include/openssl/txt_db.h
 s_socket.o: ../include/openssl/x509.h ../include/openssl/x509_vfy.h
 s_socket.o: ../include/openssl/x509v3.h apps.h s_apps.h s_socket.c
+s_threads.o: ../include/openssl/crypto.h ../include/openssl/e_os2.h
+s_threads.o: ../include/openssl/opensslconf.h ../include/openssl/opensslv.h
+s_threads.o: ../include/openssl/ossl_typ.h ../include/openssl/safestack.h
+s_threads.o: ../include/openssl/stack.h ../include/openssl/symhacks.h
+s_threads.o: s_threads.c
 s_time.o: ../e_os.h ../include/openssl/asn1.h ../include/openssl/bio.h
 s_time.o: ../include/openssl/buffer.h ../include/openssl/comp.h
 s_time.o: ../include/openssl/conf.h ../include/openssl/crypto.h

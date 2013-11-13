@@ -1,6 +1,6 @@
 /* crypto/engine/eng_err.c */
 /* ====================================================================
- * Copyright (c) 1999-2010 The OpenSSL Project.  All rights reserved.
+ * Copyright (c) 1999-2011 The OpenSSL Project.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -83,8 +83,10 @@ static ERR_STRING_DATA ENGINE_str_functs[]=
 {ERR_FUNC(ENGINE_F_ENGINE_FINISH),	"ENGINE_finish"},
 {ERR_FUNC(ENGINE_F_ENGINE_FREE_UTIL),	"ENGINE_FREE_UTIL"},
 {ERR_FUNC(ENGINE_F_ENGINE_GET_CIPHER),	"ENGINE_get_cipher"},
+{ERR_FUNC(ENGINE_F_ENGINE_GET_CIPHER_ASYNCH),	"ENGINE_get_cipher_asynch"},
 {ERR_FUNC(ENGINE_F_ENGINE_GET_DEFAULT_TYPE),	"ENGINE_GET_DEFAULT_TYPE"},
 {ERR_FUNC(ENGINE_F_ENGINE_GET_DIGEST),	"ENGINE_get_digest"},
+{ERR_FUNC(ENGINE_F_ENGINE_GET_DIGEST_ASYNCH),	"ENGINE_get_digest_asynch"},
 {ERR_FUNC(ENGINE_F_ENGINE_GET_NEXT),	"ENGINE_get_next"},
 {ERR_FUNC(ENGINE_F_ENGINE_GET_PKEY_ASN1_METH),	"ENGINE_get_pkey_asn1_meth"},
 {ERR_FUNC(ENGINE_F_ENGINE_GET_PKEY_METH),	"ENGINE_get_pkey_meth"},

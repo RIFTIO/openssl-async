@@ -362,7 +362,7 @@ int tls1_change_cipher_state(SSL *s, int which)
         int i;
         for (i=0; i<s->s3->tmp.key_block_length; i++)
 		printf("%02x", s->s3->tmp.key_block[i]);  printf("\n");
-        }
+    }
 #endif	/* KSSL_DEBUG */
 
 	if (which & SSL3_CC_READ)
@@ -537,6 +537,17 @@ printf("which = %04X\nmac key=",which);
 		}
 
 	s->session->key_arg_length=0;
+
+	if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+	    {
+	    if (!EVP_CIPHER_CTX_ctrl_ex(dd, EVP_CTRL_SETUP_ASYNCH_CALLBACK,
+	                    0, NULL, (void(*)(void))ssl3_asynch_handle_cipher_callbacks))
+	        goto err2;
+	    if (s->version == TLS1_1_VERSION
+	        && EVP_CIPHER_mode(c) == EVP_CIPH_CBC_MODE)
+	            EVP_CIPHER_CTX_set_flags(dd, EVP_CIPH_CTX_FLAG_CAN_IGNORE_IV);
+	    }
+
 #ifdef KSSL_DEBUG
 	{
         int i;
@@ -550,11 +561,13 @@ printf("which = %04X\nmac key=",which);
 
 	if (EVP_CIPHER_mode(c) == EVP_CIPH_GCM_MODE)
 		{
-		EVP_CipherInit_ex(dd,c,NULL,key,NULL,(which & SSL3_CC_WRITE));
+		if (!EVP_CipherInit_ex(dd,c,NULL,key,NULL,(which & SSL3_CC_WRITE)))
+		    goto err2;
 		EVP_CIPHER_CTX_ctrl(dd, EVP_CTRL_GCM_SET_IV_FIXED, k, iv);
 		}
 	else	
-		EVP_CipherInit_ex(dd,c,NULL,key,iv,(which & SSL3_CC_WRITE));
+        if (!EVP_CipherInit_ex(dd,c,NULL,key,iv,(which & SSL3_CC_WRITE)))
+            goto err2;
 
 	/* Needed for "composite" AEADs, such as RC4-HMAC-MD5 */
 	if ((EVP_CIPHER_flags(c)&EVP_CIPH_FLAG_AEAD_CIPHER) && *mac_secret_size)
@@ -672,6 +685,18 @@ err:
 	return(ret);
 	}
 
+static int tls1_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post);
+static int tls1_enc_post(SSL3_TRANSMISSION *trans, int status)
+    {
+    trans->status = status;
+    return tls1_enc_inner(trans->s, !!(trans->flags & SSL3_TRANS_FLAGS_SEND),
+                          trans, 1);
+    }
+int tls1_enc(SSL *s, int send, SSL3_TRANSMISSION *trans)
+    {
+    return tls1_enc_inner(s, send, trans, 0);
+    }
+
 /* tls1_enc encrypts/decrypts the record in |s->wrec| / |s->rrec|, respectively.
  *
  * Returns:
@@ -681,13 +706,14 @@ err:
  *   -1: if the record's padding/AEAD-authenticator is invalid or, if sending,
  *       an internal error occured.
  */
-int tls1_enc(SSL *s, int send)
-	{
+static int tls1_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post)
+    {
 	SSL3_RECORD *rec;
 	EVP_CIPHER_CTX *ds;
 	unsigned long l;
 	int bs,i,j,k,pad=0,ret,mac_size=0;
 	const EVP_CIPHER *enc;
+	int status;
 
 	if (send)
 		{
@@ -698,6 +724,10 @@ int tls1_enc(SSL *s, int send)
 			}
 		ds=s->enc_write_ctx;
 		rec= &(s->s3->wrec);
+
+		if (trans)
+		    rec = &(trans->rec);
+
 		if (s->enc_write_ctx == NULL)
 			enc=NULL;
 		else
@@ -710,7 +740,13 @@ int tls1_enc(SSL *s, int send)
 				ivlen = EVP_CIPHER_iv_length(enc);
 			else
 				ivlen = 0;
-			if (ivlen > 1)
+			/* Note: when running asynch and being in
+			 * post-encryption, it makes no sense to generate
+			 * a new IV.  However, maintaining the correct
+			 * ivlen could be important.
+			 */
+			if (!(trans && trans->post)
+			    && ivlen > 1)
 				{
 				if ( rec->data != rec->input)
 					/* we can't write into the input stream:
@@ -742,6 +778,22 @@ int tls1_enc(SSL *s, int send)
 #ifdef KSSL_DEBUG
 	printf("tls1_enc(%d)\n", send);
 #endif    /* KSSL_DEBUG */
+
+	if (trans)
+	    {
+	    rec = &(trans->rec);
+
+	    if (post)
+	        {
+	        l = rec->length;
+	        bs = EVP_CIPHER_block_size(ds->cipher);
+	        pad = trans->te_pad;
+	        enc = trans->te_enc;
+	        status = trans->status;
+
+	        goto post;
+	        }
+	    }
 
 	if ((s->session == NULL) || (ds == NULL) || (enc == NULL))
 		{
@@ -832,8 +884,30 @@ int tls1_enc(SSL *s, int send)
 			if (l == 0 || l%bs != 0)
 				return 0;
 			}
-		
-		i = EVP_Cipher(ds,rec->data,rec->input,l);
+
+		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+            {
+            OPENSSL_assert(trans != NULL);
+            trans->post = 0;
+            ssl3_asynch_push_callback(trans, tls1_enc_post);
+
+            trans->te_enc = enc;
+            trans->te_pad = pad;
+
+            EVP_CIPHER_CTX_ctrl_ex(ds,
+                                   EVP_CTRL_UPDATE_ASYNCH_CALLBACK_DATA,
+                                   0, trans, NULL);
+            if (!EVP_Cipher(ds, trans->rec.data, trans->rec.input, l))
+                return 0;
+            return -1; /* same kind of indication as no data
+                        * in non-blocking I/O */
+            }
+        else
+            {
+            i = EVP_Cipher(ds,rec->data,rec->input,l);
+            }
+
+post:
 		if ((EVP_CIPHER_flags(ds->cipher)&EVP_CIPH_FLAG_CUSTOM_CIPHER)
 						?(i<0)
 						:(i==0))
@@ -950,7 +1024,7 @@ int tls1_final_finish_mac(SSL *s,
 		return sizeof buf2;
 	}
 
-int tls1_mac(SSL *ssl, unsigned char *md, int send)
+int tls1_mac(SSL *ssl, unsigned char *md, int send, SSL3_TRANSMISSION *trans)
 	{
 	SSL3_RECORD *rec;
 	unsigned char *seq;
@@ -964,13 +1038,19 @@ int tls1_mac(SSL *ssl, unsigned char *md, int send)
 
 	if (send)
 		{
-		rec= &(ssl->s3->wrec);
+		if (trans)
+			rec= &(trans->rec);
+		else
+			rec= &(ssl->s3->wrec);
 		seq= &(ssl->s3->write_sequence[0]);
 		hash=ssl->write_hash;
 		}
 	else
 		{
-		rec= &(ssl->s3->rrec);
+		if (trans)
+			rec= &(trans->rec);
+		else
+			rec= &(ssl->s3->rrec);
 		seq= &(ssl->s3->read_sequence[0]);
 		hash=ssl->read_hash;
 		}
@@ -1069,6 +1149,14 @@ printf("rec=");
 #ifdef TLS_DEBUG
 {unsigned int z; for (z=0; z<md_size; z++) printf("%02X ",md[z]); printf("\n"); }
 #endif
+
+    /* We cheat until we've figured out how to do asynch for real */
+    if (trans)
+        {
+        ssl3_asynch_handle_digest_callbacks(md, md_size, trans, 1);
+        return 1;
+        }
+
 	return(md_size);
 	}
 
