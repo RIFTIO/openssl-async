@@ -67,6 +67,10 @@ struct ecdh_method
 	const char *name;
 	int (*compute_key)(void *key, size_t outlen, const EC_POINT *pub_key, EC_KEY *ecdh,
 	                   void *(*KDF)(const void *in, size_t inlen, void *out, size_t *outlen));
+	int (*compute_key_asynch)(void *key, size_t *outlen, const EC_POINT *pub_key, EC_KEY *ecdh,
+			void *(*KDF)(const void *in, size_t inlen, void *out, size_t *outlen),
+			int (*cb)(unsigned char *res, size_t reslen,void *cb_data, int status),
+			void *cb_data);
 #if 0
 	int (*init)(EC_KEY *eckey);
 	int (*finish)(EC_KEY *eckey);

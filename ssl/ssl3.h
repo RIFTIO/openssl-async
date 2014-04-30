@@ -575,6 +575,10 @@ typedef struct ssl3_state_st
 	int outstanding_read_crypto; /* Amount in engine */
 	int outstanding_read_records; /* Amount waiting to be written */
 	int outstanding_read_length;  /* Approximate total amount of appdata */
+	int read_retry_data_available; /* Flag if read data could not be 
+					  sent to the engine and is available
+					  to try again with. */
+	unsigned char backup_iv[EVP_MAX_IV_LENGTH];
 	SSL3_READ_RECORD_POOL *read_record_pool;
 
 	/* For synch key exchange, we expect only one, so we simply cache
@@ -583,13 +587,16 @@ typedef struct ssl3_state_st
 	int pkeystate;      /* 0 when not used
 	                     * -1 while crypto is being done
 	                     * 1 in post
+	                     * 2 not submitted due to RETRY
+	                     * 3 in pkey post
+	                     * 10 in md post
 	                     */
     struct
         {
         int status;
         int num;
         EVP_MD_CTX md_ctx;
-        unsigned char md_buf[EVP_MAX_MD_SIZE*2]; /* A duplicate */
+        unsigned char *md_buf;
         unsigned char *q;
         unsigned char *p;
         int i, j;
@@ -604,6 +611,8 @@ typedef struct ssl3_state_st
         EVP_PKEY *pkey;
         RSA *rsa;
         unsigned char *tmp_buf;
+        EC_KEY *clnt_ecdh;
+        const EC_GROUP *srvr_group;
         } send_client_key_exchange;
     struct
         {
@@ -619,6 +628,7 @@ typedef struct ssl3_state_st
         int i;
         int n;
         EVP_MD_CTX md_ctx;
+		EVP_PKEY *pkey;
         } send_server_key_exchange;
     struct
         {
@@ -627,6 +637,17 @@ typedef struct ssl3_state_st
         int n;
         EVP_PKEY *pkey;
         } get_client_key_exchange;
+    struct
+        {
+        int status;
+		unsigned char *d;
+		unsigned char *p;
+		unsigned int u;
+		int n;
+		int i;
+		int *j;
+		EVP_PKEY *pkey;
+		} send_client_verify;
     struct
         {
         int status;

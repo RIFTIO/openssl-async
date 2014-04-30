@@ -129,6 +129,25 @@ ECDSA_SIG *ECDSA_do_sign(const unsigned char *dgst,int dgst_len,EC_KEY *eckey);
  */
 ECDSA_SIG *ECDSA_do_sign_ex(const unsigned char *dgst, int dgstlen, 
 		const BIGNUM *kinv, const BIGNUM *rp, EC_KEY *eckey);
+/** Computes ECDSA signature of a given hash value using the supplied
+ *  private key (note: sig must point to ECDSA_size(eckey) bytes of memory).
+ *  \param  dgst     pointer to the hash value to sign
+ *  \param  dgstlen  length of the hash value
+ *  \param  kinv     BIGNUM with a pre-computed inverse k (optional)
+ *  \param  rp       BIGNUM with a pre-computed rp value (optioanl), 
+ *                   see ECDSA_sign_setup
+ *  \param  eckey    EC_KEY object containing a private EC key
+ *  \param  sig      signature
+ *  \paran  siglen   signature length
+ *  \param  cb       callback function
+ *  \param  cb_data  callback data
+ *  \return pointer to a ECDSA_SIG structure or NULL if an error occurred
+ */
+ECDSA_SIG *ECDSA_do_sign_asynch_ex(const unsigned char *dgst, int dgstlen, 
+		const BIGNUM *kinv, const BIGNUM *rp, EC_KEY *eckey,
+		unsigned char *sig, unsigned int *siglen,
+		int (*cb)(unsigned char *res,  size_t reslen, void *cb_data, int status),
+		void *cb_data);
 
 /** Verifies that the supplied signature is a valid ECDSA
  *  signature of the supplied hash value using the supplied public key.
@@ -141,6 +160,22 @@ ECDSA_SIG *ECDSA_do_sign_ex(const unsigned char *dgst, int dgstlen,
  */
 int	  ECDSA_do_verify(const unsigned char *dgst, int dgst_len,
 		const ECDSA_SIG *sig, EC_KEY* eckey);
+
+/** Verifies that the supplied signature is a valid ECDSA
+ *  signature of the supplied hash value using the supplied public key.
+ *  \param  dgst      pointer to the hash value
+ *  \param  dgst_len  length of the hash value
+ *  \param  sig       ECDSA_SIG structure
+ *  \param  eckey     EC_KEY object containing a public EC key
+ *  \param  cb        callback function
+ *  \param  cb_data   callback data
+ *  \return 1 if the signature is valid, 0 if the signature is invalid
+ *          and -1 on error
+ */
+int	  ECDSA_do_verify_asynch(const unsigned char *dgst, int dgst_len,
+		const ECDSA_SIG *sig, EC_KEY* eckey,
+		int (*cb)(void *cb_data, int status),
+		void *cb_data);
 
 const ECDSA_METHOD *ECDSA_OpenSSL(void);
 
@@ -190,6 +225,22 @@ int 	  ECDSA_sign_setup(EC_KEY *eckey, BN_CTX *ctx, BIGNUM **kinv,
 int	  ECDSA_sign(int type, const unsigned char *dgst, int dgstlen, 
 		unsigned char *sig, unsigned int *siglen, EC_KEY *eckey);
 
+/** Computes ECDSA signature of a given hash value using the supplied
+ *  private key (note: sig must point to ECDSA_size(eckey) bytes of memory).
+ *  \param  type     this parameter is ignored
+ *  \param  dgst     pointer to the hash value to sign
+ *  \param  dgstlen  length of the hash value
+ *  \param  sig      memory for the DER encoded created signature
+ *  \param  siglen   pointer to the length of the returned signature
+ *  \param  eckey    EC_KEY object containing a private EC key
+ *  \param  cb       callback function
+ *  \param  cb_data  callback data
+ *  \return 1 on success and 0 otherwise
+ */
+int	  ECDSA_sign_asynch(int type, const unsigned char *dgst, int dgstlen, 
+		unsigned char *sig, unsigned int *siglen, EC_KEY *eckey,
+		int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
+		void *cb_data);
 
 /** Computes ECDSA signature of a given hash value using the supplied
  *  private key (note: sig must point to ECDSA_size(eckey) bytes of memory).
@@ -208,6 +259,27 @@ int	  ECDSA_sign_ex(int type, const unsigned char *dgst, int dgstlen,
 		unsigned char *sig, unsigned int *siglen, const BIGNUM *kinv,
 		const BIGNUM *rp, EC_KEY *eckey);
 
+/** Computes ECDSA signature of a given hash value using the supplied
+ *  private key (note: sig must point to ECDSA_size(eckey) bytes of memory).
+ *  \param  type     this parameter is ignored
+ *  \param  dgst     pointer to the hash value to sign
+ *  \param  dgstlen  length of the hash value
+ *  \param  sig      buffer to hold the DER encoded signature
+ *  \param  siglen   pointer to the length of the returned signature
+ *  \param  kinv     BIGNUM with a pre-computed inverse k (optional)
+ *  \param  rp       BIGNUM with a pre-computed rp value (optioanl), 
+ *                   see ECDSA_sign_setup
+ *  \param  eckey    EC_KEY object containing a private EC key
+ *  \param  cb       callback function
+ *  \param  cb_data  callback data
+ *  \return 1 on success and 0 otherwise
+ */
+int	  ECDSA_sign_asynch_ex(int type, const unsigned char *dgst, int dgstlen, 
+		unsigned char *sig, unsigned int *siglen, const BIGNUM *kinv,
+		const BIGNUM *rp, EC_KEY *eckey,
+		int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
+		void *cb_data);
+
 /** Verifies that the given signature is valid ECDSA signature
  *  of the supplied hash value using the specified public key.
  *  \param  type     this parameter is ignored
@@ -221,6 +293,24 @@ int	  ECDSA_sign_ex(int type, const unsigned char *dgst, int dgstlen,
  */
 int 	  ECDSA_verify(int type, const unsigned char *dgst, int dgstlen, 
 		const unsigned char *sig, int siglen, EC_KEY *eckey);
+
+/** Verifies that the given signature is valid ECDSA signature
+ *  of the supplied hash value using the specified public key.
+ *  \param  type     this parameter is ignored
+ *  \param  dgst     pointer to the hash value 
+ *  \param  dgstlen  length of the hash value
+ *  \param  sig      pointer to the DER encoded signature
+ *  \param  siglen   length of the DER encoded signature
+ *  \param  eckey    EC_KEY object containing a public EC key
+ *  \param  cb       callback function 
+ *  \paran  cb_data  callback data
+ *  \return 1 if the signature is valid, 0 if the signature is invalid
+ *          and -1 on error
+ */
+int 	  ECDSA_verify_asynch(int type, const unsigned char *dgst, int dgstlen, 
+		const unsigned char *sig, int siglen, EC_KEY *eckey,
+		int (*cb)(void *cb_data, int status),
+		void *cb_data);
 
 /* the standard ex_data functions */
 int 	  ECDSA_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new 

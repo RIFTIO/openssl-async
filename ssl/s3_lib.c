@@ -4119,6 +4119,13 @@ int ssl3_shutdown(SSL *s)
 	{
 	int ret;
 
+	if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+		{
+		if (SSL_crypto_pending(s))
+			{
+			return(-1);
+			}
+		}               
 	/* Don't do anything much if we have not done the handshake or
 	 * we don't want to send messages :-) */
 	if ((s->quiet_shutdown) || (s->state == SSL_ST_BEFORE))
@@ -4164,8 +4171,16 @@ int ssl3_shutdown(SSL *s)
 		}
 
 	if ((s->shutdown == (SSL_SENT_SHUTDOWN|SSL_RECEIVED_SHUTDOWN)) &&
-		!s->s3->alert_dispatch)
+		!s->s3->alert_dispatch) {
+		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+		{
+			if (SSL_crypto_pending(s))
+			{
+			return(-1);
+			}
+		}	               
 		return(1);
+	}
 	else
 		return(0);
 	}
@@ -4202,8 +4217,10 @@ int ssl3_write(SSL *s, const void *buf, int len)
 			}
 
 		s->rwstate=SSL_WRITING;
+		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 		CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 		n=BIO_flush(s->wbio);
+		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 		CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 		if (n <= 0) return(n);
 		s->rwstate=SSL_NOTHING;

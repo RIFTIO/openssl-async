@@ -572,13 +572,16 @@ int ssl3_connect(SSL *s)
 
 		case SSL3_ST_CW_FLUSH:
 			s->rwstate=SSL_WRITING;
+			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 			if (BIO_flush(s->wbio) <= 0)
 				{
 				ret= -1;
+				if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 				CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 				goto end;
 				}
+			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 			s->rwstate=SSL_NOTHING;
 			s->state=s->s3->tmp.next_state;
@@ -629,8 +632,10 @@ int ssl3_connect(SSL *s)
 			{
 			if (s->debug)
 				{
+				if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 				CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 				ret=BIO_flush(s->wbio);
+				if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 				CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 				if (ret <= 0)
 					goto end;
@@ -1271,6 +1276,7 @@ static int ssl3_get_key_exchange_md_post(unsigned char *md, unsigned int size,
 	{
 	s->s3->key_exchange_cache.status = status;
 	s->s3->pkeystate = 10;
+	s->s3->key_exchange_cache.i = size;
 	return 1;
 	}
 static int ssl3_get_key_exchange_verify_post(SSL *s, int status)
@@ -1285,11 +1291,12 @@ int ssl3_get_key_exchange(SSL *s)
 	unsigned char *q,md_buf[EVP_MAX_MD_SIZE*2];
 #endif
 	EVP_MD_CTX md_ctx;
-	unsigned char *param,*p;
-	int al,i,j,param_len,ok;
-	long n,alg_k,alg_a;
+	unsigned char *param = NULL,*p = NULL;
+	int al=0,i=0,j=0,param_len=0,ok=0;
+	long n=0,alg_k=0,alg_a=0;
 	EVP_PKEY *pkey=NULL;
 	const EVP_MD *md = NULL;
+	md_ctx.pctx = NULL;
 #ifndef OPENSSL_NO_RSA
 	RSA *rsa=NULL;
 #endif
@@ -1310,6 +1317,7 @@ int ssl3_get_key_exchange(SSL *s)
 		case -1:		/* Ongoing */
 			return -1;	/* Simulate non-blocking I/O retry */
 		case 10:		/* In post for MD */
+			s->s3->pkeystate = 0; /* No longer needed, reset it */
 			pkey = s->s3->key_exchange_cache.pkey;
 			switch (pkey->type)
 				{
@@ -1331,21 +1339,11 @@ int ssl3_get_key_exchange(SSL *s)
 		case 1:			/* In post */
 			s->s3->pkeystate = 0; /* No longer needed, reset it */
 			pkey = s->s3->key_exchange_cache.pkey;
-			switch (pkey->type)
-				{
-#ifndef OPENSSL_NO_RSA
-			case EVP_PKEY_RSA:
+			OPENSSL_free(s->s3->key_exchange_cache.md_buf);
 				p = s->s3->key_exchange_cache.p;
 				i = s->s3->key_exchange_cache.status;
-				goto post_rsa;
-#endif
-			default:
-				break;
-				}
-			fprintf(stderr,"We should never end up here! %s:%d\n",
-				__FILE__, __LINE__);
-			abort();
-			goto err;
+				goto post_pkey;
+		
 		default:		/* In synch or pre */
 			break;
 			}
@@ -1843,10 +1841,10 @@ fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 				if (s->s3->key_exchange_cache.num > 0)
 					{
 					int num = s->s3->key_exchange_cache.num;
+					q = s->s3->key_exchange_cache.q;
 					EVP_MD_CTX *ctx =
 						&s->s3->key_exchange_cache.md_ctx;
 
-					q = s->s3->key_exchange_cache.q;
 					s->s3->pkeystate = -1;
 
 					EVP_MD_CTX_ctrl_ex(ctx, EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK,
@@ -1886,46 +1884,85 @@ fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 				{
 				s->s3->pkeystate = -1;
+				s->s3->key_exchange_cache.md_buf =
+					BUF_memdup(md_buf, sizeof(md_buf)); 
 				s->s3->key_exchange_cache.p = p;
 				s->s3->key_exchange_cache.pkey = pkey;
 				i=RSA_verify_asynch(NID_md5_sha1,
 					s->s3->key_exchange_cache.md_buf, j, p, n,
 					pkey->pkey.rsa,
 					(int (*)(void *, int))ssl3_get_key_exchange_verify_post, s);
-				if (!i)
+				if (i <= 0)
 					{
+					int error = 0;
 					s->s3->pkeystate = 0;
+					error = ERR_get_error();
+					if(ERR_R_RETRY == ERR_GET_REASON(error))
+						{
+						s->s3->pkeystate = 2;
+						s->s3->tmp.reuse_message = 1;
+						goto err;
+						}
+					else
+						{
 					SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE,ERR_LIB_RSA);
 					goto err;
+					}
 					}
 				EVP_MD_CTX_cleanup(&md_ctx);
 				return -1;
 				}
 			else
+				{
 				i=RSA_verify(NID_md5_sha1, md_buf, j, p, n,
 								pkey->pkey.rsa);
-		post_rsa:
-			if (i < 0)
-				{
-				al=SSL_AD_DECRYPT_ERROR;
-				SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE,SSL_R_BAD_RSA_DECRYPT);
-				goto f_err;
-				}
-			if (i == 0)
-				{
-				/* bad signature */
-				al=SSL_AD_DECRYPT_ERROR;
-				SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE,SSL_R_BAD_SIGNATURE);
-				goto f_err;
 				}
 			}
 		else
 #endif
 			{
+			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+				{
+				if (!EVP_MD_CTX_ctrl_ex(&md_ctx, EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK,
+					0, s, (void (*)(void))ssl3_get_key_exchange_verify_post))
+					{
+					SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE,ERR_LIB_EVP);
+					goto err;
+					}
+				EVP_MD_CTX_set_flags(&md_ctx,
+				EVP_MD_CTX_FLAG_DISABLE_ASYNCH_MD_ONLY);
+				}
 			EVP_VerifyInit_ex(&md_ctx, md, NULL);
 			EVP_VerifyUpdate(&md_ctx,&(s->s3->client_random[0]),SSL3_RANDOM_SIZE);
 			EVP_VerifyUpdate(&md_ctx,&(s->s3->server_random[0]),SSL3_RANDOM_SIZE);
 			EVP_VerifyUpdate(&md_ctx,param,param_len);
+			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+				{
+				s->s3->pkeystate = -1;
+				s->s3->key_exchange_cache.md_buf =
+					BUF_memdup(md_buf, sizeof(md_buf));
+				s->s3->key_exchange_cache.p = p;
+				s->s3->key_exchange_cache.pkey = pkey;
+				if(EVP_VerifyFinal(&md_ctx, p, (int)n, pkey) <= 0)
+					{
+					int error = 0;
+					s->s3->pkeystate = 0;
+					error = ERR_get_error();
+					if(ERR_R_RETRY == ERR_GET_REASON(error))
+						{
+						s->s3->tmp.reuse_message = 1;
+						s->s3->pkeystate = 2;
+						goto err;
+						}
+					SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE,
+						ERR_R_EVP_LIB);
+					goto f_err;
+					}
+				EVP_MD_CTX_cleanup(&md_ctx);
+				return -1;
+				}
+			else
+				{
 			if (EVP_VerifyFinal(&md_ctx,p,(int)n,pkey) <= 0)
 				{
 				/* bad signature */
@@ -1934,6 +1971,7 @@ fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 				goto f_err;
 				}
 			}
+		}
 		}
 	else
 		{
@@ -1951,6 +1989,24 @@ fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 			goto f_err;
 			}
 		}
+post_pkey:
+	if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+		{
+		if (i < 0)
+			{
+			al=SSL_AD_DECRYPT_ERROR;
+			SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE,SSL_R_BAD_RSA_DECRYPT);
+			goto f_err;
+			}
+		if (i == 0)
+			{
+			/* bad signature */
+			al=SSL_AD_DECRYPT_ERROR;
+			SSLerr(SSL_F_SSL3_GET_KEY_EXCHANGE,SSL_R_BAD_SIGNATURE);
+			goto f_err;
+			}
+		}
+		
 	EVP_PKEY_free(pkey);
 	EVP_MD_CTX_cleanup(&md_ctx);
 	return(1);
@@ -2333,12 +2389,11 @@ int ssl3_get_server_done(SSL *s)
 	return(ret);
 	}
 
-
-static int ssl3_send_client_key_exchange_post(unsigned char *res, int reslen, SSL *s, int status)
+static int ssl3_send_client_key_exchange_post(unsigned char *res, size_t reslen, SSL *s, int status)
 	{
 	s->s3->send_client_key_exchange.status = status;
 	s->s3->send_client_key_exchange.p = res;
-	s->s3->send_client_key_exchange.n = reslen;
+	s->s3->send_client_key_exchange.n = (int)reslen;
 	s->s3->pkeystate = 1;
 	return 1;
 	}
@@ -2348,7 +2403,7 @@ int ssl3_send_client_key_exchange(SSL *s)
 	int n;
 	unsigned long alg_k;
 #ifndef OPENSSL_NO_RSA
-	unsigned char *q;
+	unsigned char *q = NULL;
 	EVP_PKEY *pkey=NULL;
 #endif
 #ifndef OPENSSL_NO_KRB5
@@ -2435,14 +2490,24 @@ int ssl3_send_client_key_exchange(SSL *s)
 				s->s3->send_client_key_exchange.q = q;
 				n=RSA_public_encrypt_asynch(tmp_buf_size,
 					tmp_buf,p,rsa,RSA_PKCS1_PADDING,
-					(int (*)(unsigned char *, int,  void *, int))ssl3_send_client_key_exchange_post,
+					(int (*)(unsigned char *, size_t,  void *, int))ssl3_send_client_key_exchange_post,
 					s);
 				if (n <= 0)
 					{
+					int error = 0;
 					s->s3->pkeystate = 0;
+					error = ERR_get_error();
+					if(ERR_R_RETRY == ERR_GET_REASON(error))
+						{
+						s->s3->pkeystate = 2;
+						goto err;
+						}
+					else
+						{
 					SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
 						ERR_LIB_RSA);
 					goto err;
+					}
 					}
 				return -1;
 				}
@@ -2683,6 +2748,23 @@ int ssl3_send_client_key_exchange(SSL *s)
 			int ecdh_clnt_cert = 0;
 			int field_size = 0;
 
+			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+				switch (s->s3->pkeystate)
+					{
+					case -1: /* Ongoing */
+						return -1; /* Simulate non-blocking I/O retry */
+					case 1:
+						s->s3->pkeystate = 0; /* No longer needed, reset it */
+						clnt_ecdh = s->s3->send_client_key_exchange.clnt_ecdh;
+						srvr_group = s->s3->send_client_key_exchange.srvr_group;
+						p = s->s3->send_client_key_exchange.p;
+						q = s->s3->send_client_key_exchange.q;
+						n = s->s3->send_client_key_exchange.n;
+						goto post_ecdh;
+					default:
+						break;
+					}
+
 			/* Did we send out the client's
 			 * ECDH share for use in premaster
 			 * computation as part of client certificate?
@@ -2794,6 +2876,36 @@ int ssl3_send_client_key_exchange(SSL *s)
 				       ERR_R_ECDH_LIB);
 				goto err;
 				}
+			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+				{
+				s->s3->pkeystate = -1;
+				s->s3->send_client_key_exchange.clnt_ecdh = clnt_ecdh;
+				s->s3->send_client_key_exchange.srvr_group = srvr_group;
+				s->s3->send_client_key_exchange.q = q;
+				s->s3->send_client_key_exchange.p = p;
+				s->s3->send_client_key_exchange.n = (field_size+7)/8;
+				n = ECDH_compute_key_asynch(p, (size_t *) &s->s3->send_client_key_exchange.n, 
+					   srvr_ecpoint, clnt_ecdh, NULL,
+					   (int (*)(unsigned char *, size_t,  void *, int))
+					   ssl3_send_client_key_exchange_post, s); 
+				if (n <= 0)
+					{
+					int error = 0;
+					s->s3->pkeystate = 0;
+					error = ERR_get_error();
+					if(ERR_R_RETRY == ERR_GET_REASON(error))
+						{
+						s->s3->pkeystate = 2;
+						goto err;
+						}
+					else
+						{
+						SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,ERR_R_ECDH_LIB);
+						goto err;
+						}
+					}
+				return -1; 
+				}
 			n=ECDH_compute_key(p, (field_size+7)/8, srvr_ecpoint, clnt_ecdh, NULL);
 			if (n <= 0)
 				{
@@ -2802,6 +2914,7 @@ int ssl3_send_client_key_exchange(SSL *s)
 				goto err;
 				}
 
+post_ecdh:
 			/* generate master key from the result */
 			s->session->master_key_length = s->method->ssl3_enc \
 			    -> generate_master_secret(s, 
@@ -2817,6 +2930,12 @@ int ssl3_send_client_key_exchange(SSL *s)
 				}
 			else 
 				{
+				if (clnt_ecdh == NULL)
+					{
+					SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,ERR_R_INTERNAL_ERROR);
+					goto err;
+					}
+
 				/* First check the size of encoding and
 				 * allocate memory accordingly.
 				 */
@@ -2876,7 +2995,8 @@ int ssl3_send_client_key_exchange(SSL *s)
 			peer_cert=s->session->sess_cert->peer_pkeys[(keytype=SSL_PKEY_GOST01)].x509;
 			if (!peer_cert) 
 				peer_cert=s->session->sess_cert->peer_pkeys[(keytype=SSL_PKEY_GOST94)].x509;
-			if (!peer_cert)		{
+			if (!peer_cert)
+				{
 					SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,SSL_R_NO_GOST_CERTIFICATE_SENT_BY_PEER);
 					goto err;
 				}	
@@ -2894,8 +3014,10 @@ int ssl3_send_client_key_exchange(SSL *s)
 			  /* Generate session key */	
 		    RAND_bytes(premaster_secret,32);
 			/* If we have client certificate, use its secret as peer key */
-			if (s->s3->tmp.cert_req && s->cert->key->privatekey) {
-				if (EVP_PKEY_derive_set_peer(pkey_ctx,s->cert->key->privatekey) <=0) {
+			if (s->s3->tmp.cert_req && s->cert->key->privatekey) 
+				{
+				if (EVP_PKEY_derive_set_peer(pkey_ctx,s->cert->key->privatekey) <=0) 
+					{
 					/* If there was an error - just ignore it. Ephemeral key
 					* would be used
 					*/
@@ -2911,7 +3033,8 @@ int ssl3_send_client_key_exchange(SSL *s)
 			EVP_DigestFinal_ex(ukm_hash, shared_ukm, &md_len);
 			EVP_MD_CTX_destroy(ukm_hash);
 			if (EVP_PKEY_CTX_ctrl(pkey_ctx,-1,EVP_PKEY_OP_ENCRYPT,EVP_PKEY_CTRL_SET_IV,
-				8,shared_ukm)<0) {
+				8,shared_ukm)<0) 
+				{
 					SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
 						SSL_R_LIBRARY_BUG);
 					goto err;
@@ -2920,7 +3043,8 @@ int ssl3_send_client_key_exchange(SSL *s)
 			/*Encapsulate it into sequence */
 			*(p++)=V_ASN1_SEQUENCE | V_ASN1_CONSTRUCTED;
 			msglen=255;
-			if (EVP_PKEY_encrypt(pkey_ctx,tmp,&msglen,premaster_secret,32)<0) {
+			if (EVP_PKEY_encrypt(pkey_ctx,tmp,&msglen,premaster_secret,32)<0) 
+				{
 			SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
 					SSL_R_LIBRARY_BUG);
 				goto err;
@@ -3096,6 +3220,24 @@ err:
 	return(-1);
 	}
 
+static int ssl3_send_client_verify_ecdsa_post(unsigned char *res, size_t reslen, SSL *s, int status)
+	{
+	/*We are going to save off the verify data here*/
+	s->s3->send_client_verify.status = status;
+	s->s3->send_client_verify.u = (int)reslen;
+	s->s3->pkeystate = 3;
+	return 1;
+	}
+
+static int ssl3_send_client_verify_post(unsigned char *res, size_t reslen, SSL *s, int status)
+	{
+	/*We are going to save off the verify data here*/
+	s->s3->send_client_verify.status = status;
+	memcpy(s->s3->send_client_verify.p+2, res, reslen);
+	s->s3->pkeystate = 1;
+	return 1;
+	}
+
 int ssl3_send_client_verify(SSL *s)
 	{
 	unsigned char *p,*d;
@@ -3104,7 +3246,7 @@ int ssl3_send_client_verify(SSL *s)
 	EVP_PKEY_CTX *pctx=NULL;
 	EVP_MD_CTX mctx;
 	unsigned u=0;
-	unsigned long n;
+	unsigned long n=0;
 	int j;
 
 	EVP_MD_CTX_init(&mctx);
@@ -3114,6 +3256,32 @@ int ssl3_send_client_verify(SSL *s)
 		d=(unsigned char *)s->init_buf->data;
 		p= &(d[4]);
 		pkey=s->cert->key->privatekey;
+		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+			switch (s->s3->pkeystate)
+				{
+				case -1: /* Ongoing */
+					return -1; /* Simulate non-blocking I/O retry */
+				case 1:
+					s->s3->pkeystate = 0; /* No longer needed, reset it */
+					d = s->s3->send_client_verify.d;
+					p = s->s3->send_client_verify.p;
+					u = s->s3->send_client_verify.u;
+					pkey = s->s3->send_client_verify.pkey;
+					n = s->s3->send_client_verify.n;
+					pctx = EVP_PKEY_CTX_new(pkey,NULL);
+					EVP_PKEY_sign_init(pctx);
+					goto post_pkey;
+				case 3:
+					s->s3->pkeystate = 0; /* No longer needed, reset it */
+					p = s->s3->send_client_verify.p;
+					pkey = s->s3->send_client_verify.pkey;
+					j = *(s->s3->send_client_verify.j);
+					pctx = EVP_PKEY_CTX_new(pkey,NULL);
+					EVP_PKEY_sign_init(pctx);
+					goto post_ecdsa;
+				default:
+					break;
+				}
 /* Create context from key and test if sha1 is allowed as digest */
 		pctx = EVP_PKEY_CTX_new(pkey,NULL);
 		EVP_PKEY_sign_init(pctx);
@@ -3149,14 +3317,61 @@ int ssl3_send_client_verify(SSL *s)
 			fprintf(stderr, "Using TLS 1.2 with client alg %s\n",
 							EVP_MD_name(md));
 #endif
+			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+				{
+				if (!EVP_MD_CTX_ctrl_ex(&mctx, EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK,
+					0, s, (void (*)(void))ssl3_send_client_verify_post))
+					{
+					SSLerr(SSL_F_SSL3_SEND_CLIENT_VERIFY,ERR_LIB_EVP);
+					goto err;
+					}
+				EVP_MD_CTX_set_flags(&mctx,
+					EVP_MD_CTX_FLAG_DISABLE_ASYNCH_MD_ONLY);
+				}
 			if (!EVP_SignInit_ex(&mctx, md, NULL)
-				|| !EVP_SignUpdate(&mctx, hdata, hdatalen)
-				|| !EVP_SignFinal(&mctx, p + 2, &u, pkey))
+				|| !EVP_SignUpdate(&mctx, hdata, hdatalen))
 				{
 				SSLerr(SSL_F_SSL3_SEND_CLIENT_VERIFY,
 						ERR_R_EVP_LIB);
 				goto err;
 				}
+			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+				{
+				s->s3->pkeystate = -1;
+				s->s3->send_client_verify.d = d;
+				s->s3->send_client_verify.p = p;
+				s->s3->send_client_verify.u = u;
+				s->s3->send_client_verify.n = n;
+				s->s3->send_client_verify.pkey = pkey;
+				if(!EVP_SignFinal(&mctx, p + 2, &s->s3->send_client_verify.u, pkey))
+					{
+					int error = 0;
+					s->s3->pkeystate = 0;
+					error = ERR_get_error();
+					if(ERR_R_RETRY == ERR_GET_REASON(error))
+						{
+						s->s3->pkeystate = 2;
+						goto err;
+						}
+					SSLerr(SSL_F_SSL3_SEND_CLIENT_VERIFY,
+						ERR_R_EVP_LIB);
+					goto err;
+					}
+				EVP_MD_CTX_cleanup(&mctx);
+				EVP_PKEY_CTX_free(pctx);
+				return -1;
+				}
+			else
+				{
+				if(!EVP_SignFinal(&mctx, p + 2, &u, pkey))
+					{
+					s->s3->pkeystate = 0;
+					SSLerr(SSL_F_SSL3_SEND_CLIENT_VERIFY,
+						ERR_R_EVP_LIB);
+					goto err;
+					}
+				}
+post_pkey:
 			s2n(u,p);
 			n = u + 4;
 			if (!ssl3_digest_cached_records(s))
@@ -3200,6 +3415,33 @@ int ssl3_send_client_verify(SSL *s)
 #ifndef OPENSSL_NO_ECDSA
 			if (pkey->type == EVP_PKEY_EC)
 			{
+			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+				{
+				s->s3->pkeystate = -1;
+				s->s3->send_client_verify.p = p;
+				s->s3->send_client_verify.j = &j;
+				s->s3->send_client_verify.pkey = pkey;
+				if (!ECDSA_sign_asynch(pkey->save_type,
+					&(data[MD5_DIGEST_LENGTH]),
+					SHA_DIGEST_LENGTH,&(p[2]),
+					(unsigned int *)&j,pkey->pkey.ec,
+					(int (*)(unsigned char *, size_t,  void *, int))ssl3_send_client_verify_ecdsa_post, s))
+					{
+					int error = 0;
+					s->s3->pkeystate = 0;
+					if(ERR_R_RETRY == ERR_GET_REASON(error))
+						{
+						s->s3->pkeystate = 2;
+						goto err;
+						}
+					SSLerr(SSL_F_SSL3_SEND_CLIENT_VERIFY,
+							ERR_R_ECDSA_LIB);
+					goto err;
+					}
+				EVP_MD_CTX_cleanup(&mctx);
+				EVP_PKEY_CTX_free(pctx);
+				return -1;
+				}
 			if (!ECDSA_sign(pkey->save_type,
 				&(data[MD5_DIGEST_LENGTH]),
 				SHA_DIGEST_LENGTH,&(p[2]),
@@ -3209,6 +3451,7 @@ int ssl3_send_client_verify(SSL *s)
 				    ERR_R_ECDSA_LIB);
 				goto err;
 				}
+post_ecdsa:
 			s2n(j,p);
 			n=j+2;
 			}
@@ -3222,12 +3465,14 @@ int ssl3_send_client_verify(SSL *s)
 		s->method->ssl3_enc->cert_verify_mac(s,
 			NID_id_GostR3411_94,
 			data);
-		if (EVP_PKEY_sign(pctx, signbuf, &sigsize, data, 32) <= 0) {
+			if (EVP_PKEY_sign(pctx, signbuf, &sigsize, data, 32) <= 0) 
+				{
 			SSLerr(SSL_F_SSL3_SEND_CLIENT_VERIFY,
 			ERR_R_INTERNAL_ERROR);
 			goto err;
 		}
-		for (i=63,j=0; i>=0; j++, i--) {
+			for (i=63,j=0; i>=0; j++, i--) 
+				{
 			p[2+j]=signbuf[i];
 		}	
 		s2n(j,p);

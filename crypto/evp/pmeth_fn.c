@@ -116,6 +116,48 @@ int EVP_PKEY_sign(EVP_PKEY_CTX *ctx,
 	return ctx->pmeth->sign.synch(ctx, sig, siglen, tbs, tbslen);
 	}
 
+int EVP_PKEY_sign_asynch(EVP_PKEY_CTX *ctx,
+			unsigned char *sig, size_t *siglen,
+			const unsigned char *tbs, size_t tbslen,
+			int (*cb)(unsigned char *result, size_t resultlen,
+				void *cb_data, int status),
+			void *cb_data)
+	{
+	int ret=0;
+	if (!ctx || !ctx->pmeth || !cb || !cb_data)
+		{
+		EVPerr(EVP_F_EVP_PKEY_SIGN_ASYNCH,
+			EVP_R_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE);
+		return -2;
+		}
+	if (ctx->operation != EVP_PKEY_OP_SIGN)
+		{
+		EVPerr(EVP_F_EVP_PKEY_SIGN_ASYNCH, EVP_R_OPERATON_NOT_INITIALIZED);
+		return -1;
+		}
+	M_check_autoarg(ctx, sig, siglen, EVP_F_EVP_PKEY_SIGN_ASYNCH)
+	if (ctx->pmeth->sign.asynch)
+		{
+		return ctx->pmeth->sign.asynch(ctx, sig, siglen, tbs, tbslen,
+						cb, cb_data);
+		}
+	else
+		{
+		if (ctx->pmeth->sign.synch)
+			{
+			ret=ctx->pmeth->sign.synch(ctx, sig, siglen, tbs, tbslen);
+			cb(sig, *siglen, cb_data, ret);
+			return ret;
+			}
+		else
+			{
+			EVPerr(EVP_F_EVP_PKEY_SIGN_ASYNCH,
+				EVP_R_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE);
+			return -2;
+			}
+		}
+	}
+
 int EVP_PKEY_verify_init(EVP_PKEY_CTX *ctx)
 	{
 	int ret;
@@ -150,6 +192,47 @@ int EVP_PKEY_verify(EVP_PKEY_CTX *ctx,
 		return -1;
 		}
 	return ctx->pmeth->verify.synch(ctx, sig, siglen, tbs, tbslen);
+	}
+
+int EVP_PKEY_verify_asynch(EVP_PKEY_CTX *ctx,
+			const unsigned char *sig, size_t siglen,
+			const unsigned char *tbs, size_t tbslen,
+			int (*cb)(void *cb_data, int status),
+			void *cb_data)
+	{
+	int ret=0;
+	if (!ctx || !ctx->pmeth || !cb || !cb_data)
+		{
+		EVPerr(EVP_F_EVP_PKEY_VERIFY_ASYNCH,
+			EVP_R_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE);
+		return -2;
+		}
+	if (ctx->operation != EVP_PKEY_OP_VERIFY)
+		{
+		EVPerr(EVP_F_EVP_PKEY_VERIFY_ASYNCH, EVP_R_OPERATON_NOT_INITIALIZED);
+		return -1;
+		}
+
+	if (ctx->pmeth->verify.asynch)
+		{
+		return ctx->pmeth->verify.asynch(ctx, sig, siglen, tbs, tbslen,
+						cb, cb_data);
+		}
+	else
+		{
+		if (ctx->pmeth->verify.synch)
+			{
+			ret=ctx->pmeth->verify.synch(ctx, sig, siglen, tbs, tbslen);
+			cb(cb_data, ret);
+			return ret;
+			}
+		else
+			{
+			EVPerr(EVP_F_EVP_PKEY_VERIFY_ASYNCH,
+				EVP_R_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE);
+			return -2;
+			}
+		}
 	}
 
 int EVP_PKEY_verify_recover_init(EVP_PKEY_CTX *ctx)

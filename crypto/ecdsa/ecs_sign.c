@@ -104,3 +104,39 @@ int ECDSA_sign_setup(EC_KEY *eckey, BN_CTX *ctx_in, BIGNUM **kinvp,
 		return 0;
 	return ecdsa->meth->ecdsa_sign_setup(eckey, ctx_in, kinvp, rp); 
 }
+
+ECDSA_SIG *ECDSA_do_sign_asynch_ex(const unsigned char *dgst, int dlen,
+	const BIGNUM *kinv, const BIGNUM *rp, EC_KEY *eckey, unsigned char *sig, 
+	unsigned int *siglen, int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status), 
+	void *cb_data)
+{
+	ECDSA_DATA *ecdsa = ecdsa_check(eckey);
+	if (ecdsa == NULL || ecdsa->meth == NULL ||
+			ecdsa->meth->ecdsa_do_sign_asynch == NULL)
+		return NULL;
+	return ecdsa->meth->ecdsa_do_sign_asynch(dgst, dlen, kinv, rp, eckey, sig, siglen, cb, cb_data);
+}
+
+int ECDSA_sign_asynch(int type, const unsigned char *dgst, int dlen, unsigned char
+	*sig, unsigned int *siglen, EC_KEY *eckey,
+	int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
+	void *cb_data)
+{
+	return ECDSA_sign_asynch_ex(type, dgst, dlen, sig, siglen, NULL, NULL, eckey, cb, cb_data);
+}
+
+int ECDSA_sign_asynch_ex(int type, const unsigned char *dgst, int dlen, unsigned char
+	*sig, unsigned int *siglen, const BIGNUM *kinv, const BIGNUM *r, EC_KEY *eckey,
+	int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
+	void *cb_data)
+{
+	ECDSA_SIG *s;
+	RAND_seed(dgst, dlen);
+	s = ECDSA_do_sign_asynch_ex(dgst, dlen, kinv, r, eckey, sig, siglen, cb, cb_data);
+	if (s == NULL)
+		return 0;
+
+	ECDSA_SIG_free(s); 
+	return 1;
+}
+

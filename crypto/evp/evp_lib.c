@@ -192,8 +192,7 @@ int EVP_CIPHER_CTX_block_size(const EVP_CIPHER_CTX *ctx)
 struct evp_md_ctx_internal_st
 	{
 	/* For asynch operations */
-	int (*cb)(unsigned char *md, unsigned int size,
-		void *userdata, int status);
+	void (*cb)(void);
 	void *cb_data;
 	/* Internal cache */
 	int (*internal_cb)(unsigned char *md, unsigned int size,
@@ -233,6 +232,7 @@ static EVP_ASYNCH_CTX *alloc_asynch_ctx()
 		if (asynch_ctx_pool == NULL)
 			{
 			CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
+			EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_MALLOC_FAILURE);
 			return NULL;
 			}
 		}
@@ -244,7 +244,10 @@ static EVP_ASYNCH_CTX *alloc_asynch_ctx()
 	else if (asynch_ctx_break < asynch_ctx_items)
 		ret = &asynch_ctx_pool[asynch_ctx_break++];
 	else
+		{
 		ret = NULL;
+		EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_RETRY);
+		}
 	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
 	return ret;
 	}
@@ -266,13 +269,13 @@ static int _evp_Cipher_post(unsigned char *out, int outl,
 	}
 int EVP_Cipher(EVP_CIPHER_CTX *ctx, unsigned char *out, const unsigned char *in, unsigned int inl)
 	{
+	if ((ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+		&& ctx->internal->cb)
+		{
 	if (ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
 		{
 		EVP_ASYNCH_CTX *actx = NULL;
 		int ret = 0;
-
-		if (!(ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH))
-			return 0;
 
 		actx = alloc_asynch_ctx();
 		if (actx == NULL)
@@ -285,6 +288,15 @@ int EVP_Cipher(EVP_CIPHER_CTX *ctx, unsigned char *out, const unsigned char *in,
 		if (!ret)
 			free_asynch_ctx(actx);
 		return ret;
+		}
+	else
+			{
+			int ret = 0;
+			ret = ctx->cipher->do_cipher.synch(ctx,out,in,inl);
+			if (ret)
+				ctx->internal->cb(out, inl, ctx->internal->cb_data, ret);
+			return ret;
+			}
 		}
 	else
 		return ctx->cipher->do_cipher.synch(ctx,out,in,inl);

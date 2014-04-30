@@ -62,25 +62,36 @@
 #include <openssl/objects.h>
 #include <openssl/x509.h>
 
+struct evp_md_ctx_internal_st
+	{
+	/* For asynch operations */
+	void (*cb)(void);
+	void *cb_data;
+	/* Internal cache */
+	int (*internal_cb)(unsigned char *md, size_t size,
+		EVP_MD_CTX *ctx, int status);
+	};
+
 static int _evp_VerifyFinal(EVP_MD_CTX *ctx, const unsigned char *sigbuf,
 	     unsigned int siglen, EVP_PKEY *pkey)
 	{
 	unsigned char m[EVP_MAX_MD_SIZE];
 	unsigned int m_len;
-	int i = 0,ok = 0,v;
+	int i=0,ok=0,ret=-1,v;
 	EVP_MD_CTX tmp_ctx;
 	EVP_PKEY_CTX *pkctx = NULL;
 
+	if (NULL == m)
+		goto err;
 	EVP_MD_CTX_init(&tmp_ctx);
 	if (!EVP_MD_CTX_copy_ex(&tmp_ctx,ctx))
 		goto err;    
-	if (!EVP_DigestFinal_ex(&tmp_ctx,&(m[0]),&m_len))
+	if (!EVP_DigestFinal_ex(&tmp_ctx,m,&m_len))
 		goto err;
 	EVP_MD_CTX_cleanup(&tmp_ctx);
 
 	if (ctx->digest->flags & EVP_MD_FLAG_PKEY_METHOD_SIGNATURE)
 		{
-		i = -1;
 		pkctx = EVP_PKEY_CTX_new(pkey, NULL);
 		if (!pkctx)
 			goto err;
@@ -88,10 +99,10 @@ static int _evp_VerifyFinal(EVP_MD_CTX *ctx, const unsigned char *sigbuf,
 			goto err;
 		if (EVP_PKEY_CTX_set_signature_md(pkctx, ctx->digest) <= 0)
 			goto err;
-		i = EVP_PKEY_verify(pkctx, sigbuf, siglen, m, m_len);
+		ret = EVP_PKEY_verify(pkctx, sigbuf, siglen, m, m_len);
 		err:
 		EVP_PKEY_CTX_free(pkctx);
-		return i;
+		return ret;
 		}
 
 	for (i=0; i<4; i++)
@@ -107,24 +118,157 @@ static int _evp_VerifyFinal(EVP_MD_CTX *ctx, const unsigned char *sigbuf,
 	if (!ok)
 		{
 		EVPerr(EVP_F__EVP_VERIFYFINAL,EVP_R_WRONG_PUBLIC_KEY_TYPE);
-		return(-1);
+		return(ret);
 		}
+		
         if (ctx->digest->verify.synch == NULL)
                 {
 		EVPerr(EVP_F__EVP_VERIFYFINAL,EVP_R_NO_VERIFY_FUNCTION_CONFIGURED);
-		return(0);
+		return(ret);
 		}
 
-	return(ctx->digest->verify.synch(ctx->digest->type,m,m_len,
+	ret =(ctx->digest->verify.synch(ctx->digest->type,m,m_len,sigbuf,siglen,
+		pkey->pkey.ptr));
+	return(ret);
+	}
+	
+int _evp_VerifyFinal_asynch_post(void *cb_data, int status)
+	{
+	EVP_PKEY_CTX *pkctx;
+	EVP_PKEY_asynch_verify_cb *pkcb;
+	EVP_MD_CTX *md_ctx;
+	unsigned char* digest_buffer;
+	int ret=0;
+	if (cb_data)
+		{
+		pkctx=(EVP_PKEY_CTX*)cb_data;
+		if (pkctx)
+			{
+			md_ctx = (EVP_MD_CTX*)EVP_PKEY_CTX_get_asynch_cb_data(pkctx);
+			pkcb = (EVP_PKEY_asynch_verify_cb*)EVP_PKEY_CTX_get_asynch_cb(pkctx);
+			if (pkcb && md_ctx && md_ctx->internal)
+				{
+				pkcb(md_ctx->internal->cb_data, status);
+				ret=1;
+				}
+			if (md_ctx)
+				{
+				EVP_MD_CTX_cleanup(md_ctx);
+				OPENSSL_free(md_ctx);
+				}
+			digest_buffer = EVP_PKEY_CTX_get_digest_buffer(pkctx);
+			if (digest_buffer)
+				OPENSSL_free(digest_buffer);
+			EVP_PKEY_CTX_free(pkctx);
+			}
+		}
+	return ret;
+	}
+
+static int _evp_VerifyFinal_asynch(EVP_MD_CTX *ctx, const unsigned char *sigbuf, unsigned int siglen,
+	     EVP_PKEY *pkey)
+	{
+	unsigned char* m = OPENSSL_malloc(EVP_MAX_MD_SIZE);
+	unsigned int m_len;
+	int i=0, ok=0, ret=-1, v;
+	EVP_MD_CTX *tmp_ctx = NULL;
+	EVP_PKEY_CTX *pkctx = NULL;
+	/* FIXME: add asynch digest processing as a next step */
+	tmp_ctx = OPENSSL_malloc(sizeof(EVP_MD_CTX));
+	if (NULL == tmp_ctx || NULL == m)
+		goto err;
+	EVP_MD_CTX_init(tmp_ctx);
+	if (!EVP_MD_CTX_copy_ex(tmp_ctx,ctx))
+		goto err;  
+	if (!EVP_DigestFinal_ex(tmp_ctx,m,&m_len))
+		goto err;
+	if (ctx->digest->flags & EVP_MD_FLAG_PKEY_METHOD_SIGNATURE)
+		{
+		pkctx = EVP_PKEY_CTX_new(pkey, NULL);
+		if (!pkctx)
+			goto err;
+		if (!EVP_PKEY_CTX_set_asynch_cb(pkctx, tmp_ctx->internal->cb)
+		    || !EVP_PKEY_CTX_set_asynch_cb_data(pkctx, tmp_ctx)
+		    || !EVP_PKEY_CTX_set_digest_buffer(pkctx, m)
+		    || !EVP_PKEY_CTX_set_digest_buffer_length(pkctx, m_len))
+			goto err;
+		if (EVP_PKEY_verify_init(pkctx) <= 0)
+			goto err;
+		if (EVP_PKEY_CTX_set_signature_md(pkctx, tmp_ctx->digest) <= 0)
+			goto err;
+		ret = EVP_PKEY_verify_asynch(pkctx, sigbuf, siglen, m, m_len, _evp_VerifyFinal_asynch_post, pkctx); 
+		if (ret <= 0)
+			goto err;
+		return ret;
+err:
+		if (m)
+			OPENSSL_free(m);
+		if (tmp_ctx)
+			{
+			EVP_MD_CTX_cleanup(tmp_ctx);
+			OPENSSL_free(tmp_ctx);
+			}
+		EVP_PKEY_CTX_free(pkctx);
+		return ret;
+		}
+
+	for (i=0; i<4; i++)
+		{
+		v=tmp_ctx->digest->required_pkey_type[i];
+		if (v == 0) break;
+		if (pkey->type == v)
+			{
+			ok=1;
+			break;
+			}
+		}
+	if (!ok)
+		{
+		EVPerr(EVP_F__EVP_VERIFYFINAL_ASYNCH,EVP_R_WRONG_PUBLIC_KEY_TYPE);
+		if(m)
+			OPENSSL_free(m);
+		if (tmp_ctx)
+			{
+			EVP_MD_CTX_cleanup(tmp_ctx);
+			OPENSSL_free(tmp_ctx);
+			}
+		return ret;
+		}
+
+	if (tmp_ctx->digest->verify.asynch == NULL)
+		{
+		if (tmp_ctx->digest->verify.synch != NULL)
+			{
+			EVP_PKEY_asynch_verify_cb* asynch_cb = (EVP_PKEY_asynch_verify_cb*)tmp_ctx->internal->cb;
+			ret =(ctx->digest->verify.synch(ctx->digest->type, m, m_len,
 		sigbuf,siglen,pkey->pkey.ptr));
+			asynch_cb(tmp_ctx, ret);
+			return ret;
+			}
+		else
+			{
+			EVPerr(EVP_F__EVP_VERIFYFINAL_ASYNCH,EVP_R_NO_SIGN_FUNCTION_CONFIGURED);
+			if(m)
+				OPENSSL_free(m);
+			if (tmp_ctx)
+				{
+				EVP_MD_CTX_cleanup(tmp_ctx);
+				OPENSSL_free(tmp_ctx);
+				}
+			return ret;
+			}
+		}
+	return(tmp_ctx->digest->verify.asynch(tmp_ctx->digest->type, m, m_len,
+		sigbuf, siglen, pkey->pkey.ptr, (EVP_PKEY_asynch_verify_cb*)tmp_ctx->internal->cb, tmp_ctx));
 	}
 
 int EVP_VerifyFinal(EVP_MD_CTX *ctx, const unsigned char *sigbuf,
 	     unsigned int siglen, EVP_PKEY *pkey)
 	{
-#if 0
-	if (ctx->digest->flags & EVP_MD_FLAG_ASYNCH)
+	if ((ctx->flags & EVP_MD_CTX_FLAG_EXPANDED)
+		&& ctx->internal->cb)
+		{
 		return _evp_VerifyFinal_asynch(ctx, sigbuf, siglen, pkey);
-#endif
+		}
 	return _evp_VerifyFinal(ctx, sigbuf, siglen, pkey);
 	}

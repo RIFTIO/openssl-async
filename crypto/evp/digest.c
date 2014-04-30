@@ -130,8 +130,7 @@ typedef int (*internal_asynch_cb_t)(unsigned char *md, unsigned int size,
 struct evp_md_ctx_internal_st
 	{
 	/* For asynch operations */
-	int (*cb)(unsigned char *md, unsigned int size,
-		void *userdata, int status);
+	void (*cb)(void);
 	void *cb_data;
 	/* Internal cache */
 	int (*internal_cb)(unsigned char *md, unsigned int size,
@@ -166,6 +165,7 @@ static EVP_ASYNCH_CTX *alloc_asynch_ctx()
 		if (asynch_ctx_pool == NULL)
 			{
 			CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
+			EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_MALLOC_FAILURE);
 			return NULL;
 			}
 		}
@@ -177,7 +177,10 @@ static EVP_ASYNCH_CTX *alloc_asynch_ctx()
 	else if (asynch_ctx_break < asynch_ctx_items)
 		ret = &asynch_ctx_pool[asynch_ctx_break++];
 	else
+		{
 		ret = NULL;
+		EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_RETRY);
+		}
 	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
 	return ret;
 	}
@@ -240,6 +243,7 @@ static int _evp_digest_cb(unsigned char *md, unsigned int size,
 	}
 int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl)
 	{
+	int call_asynch_cb_at_end = 0;
 	EVP_MD_CTX_clear_flags(ctx,EVP_MD_CTX_FLAG_CLEANED);
 #ifndef OPENSSL_NO_ENGINE
 	/* Whether it's nice or not, "Inits" can be used on "Final"'d contexts
@@ -270,21 +274,18 @@ int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl)
 		if(impl)
 			{
 			/* There's an ENGINE for this job ... (apparently) */
-			const EVP_MD *d;
+			const EVP_MD *d = NULL;
 			if ((ctx->flags & EVP_MD_CTX_FLAG_EXPANDED)
+			        && !(ctx->flags & EVP_MD_CTX_FLAG_DISABLE_ASYNCH_MD_ONLY)
 				&& ctx->internal->cb)
 				{
 				d = ENGINE_get_digest_asynch(impl, type->type);
+				}
 
 				if(!d)
 					{
-					EVPerr(EVP_F_EVP_DIGESTINIT_EX, EVP_R_NO_ASYNCH_SUPPORT);
-					ERR_add_error_data(1,EVP_MD_name(type));
-					return 0;
-					}
-				}
-			else
 				d = ENGINE_get_digest(impl, type->type);
+				}
 
 			if(!d)
 				{
@@ -320,14 +321,6 @@ int EVP_DigestInit_ex(EVP_MD_CTX *ctx, const EVP_MD *type, ENGINE *impl)
 				}
 #endif
 			}
-		else
-			if ((ctx->flags & EVP_MD_CTX_FLAG_EXPANDED)
-				&& ctx->internal->cb != NULL)
-				{
-				EVPerr(EVP_F_EVP_DIGESTINIT_EX, EVP_R_NO_ASYNCH_SUPPORT);
-				ERR_add_error_data(1,EVP_MD_name(type));
-				return 0;
-				}
 		}
 	else
 	if(!ctx->digest)
@@ -388,13 +381,28 @@ skip_to_init:
 			{
 			ctx->internal->internal_cb = NULL;
 			rc = ctx->digest->init.asynch(ctx, (asynch_cb_t)_evp_digest_cb);
+			if (!rc)
+				return rc;
+			call_asynch_cb_at_end = 1;
 			}
 		else
+			{
 			rc = ctx->digest->init.synch(ctx);
+			if (!rc)
+				return rc;
+			if ((ctx->flags & EVP_MD_CTX_FLAG_EXPANDED)
+				&& ctx->internal->cb)
+				{
+				call_asynch_cb_at_end = 1;
+				}
+			}
 		}
 
-	if (ctx->digest->flags & EVP_MD_FLAG_ASYNCH)
-		ctx->internal->cb(NULL, 0, ctx->internal->cb_data, rc);
+	if (call_asynch_cb_at_end)
+        	{
+        	asynch_cb_t asynch_cb = (asynch_cb_t)ctx->internal->cb;
+		asynch_cb(NULL, 0, ctx->internal->cb_data, rc);
+		}
 	return rc;
 	}
 	}
@@ -412,7 +420,7 @@ int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *data, size_t count)
 #ifdef OPENSSL_FIPS
 	return FIPS_digestupdate(ctx, data, count);
 #else
-	if (ctx->digest->flags & EVP_MD_FLAG_ASYNCH)
+	if (ctx->digest && ctx->digest->flags & EVP_MD_FLAG_ASYNCH)
 		{
 		EVP_ASYNCH_CTX *actx = NULL;
 		int ret = 0;
@@ -423,13 +431,23 @@ int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *data, size_t count)
 			return 0;
 			}
 		actx->ctx = ctx;
-		actx->user_cb = ctx->internal->cb;
+		actx->user_cb = (asynch_cb_t)ctx->internal->cb;
 		actx->user_cb_data = ctx->internal->cb_data;
 		actx->internal_cb = _evp_DigestUpdate_post;
 		ret = ctx->update.asynch(ctx,data,count,actx);
 		if (!ret)
 			free_asynch_ctx(actx);
 		return ret;
+		}
+	if ((ctx->flags & EVP_MD_CTX_FLAG_EXPANDED)
+		&& ctx->internal->cb)
+		{
+		int ret = 0;
+		ret = ctx->update.synch(ctx,data,count);
+        	asynch_cb_t asynch_cb = (asynch_cb_t)ctx->internal->cb;
+		asynch_cb(NULL, 0, ctx->internal->cb_data, ret);
+		return ret;
+
 		}
 	return ctx->update.synch(ctx,data,count);
 #endif
@@ -473,7 +491,7 @@ int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, unsigned int *size)
 #ifdef OPENSSL_FIPS
 	return FIPS_digestfinal(ctx, md, size);
 #else
-	int ret;
+	int ret=0;
 
 	OPENSSL_assert(ctx->digest->md_size <= EVP_MAX_MD_SIZE);
 	if (ctx->digest->flags & EVP_MD_FLAG_ASYNCH)
@@ -486,13 +504,34 @@ int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, unsigned int *size)
 			return 0;
 			}
 		actx->ctx = ctx;
-		actx->user_cb = ctx->internal->cb;
+		actx->user_cb = (asynch_cb_t)ctx->internal->cb;
 		actx->user_cb_data = ctx->internal->cb_data;
 		actx->internal_cb = _evp_DigestFinal_post;
 		ret = ctx->digest->final.asynch(ctx, md, actx);
 		if (!ret)
 			free_asynch_ctx(actx);
 		return ret;
+		}
+	if ((ctx->flags & EVP_MD_CTX_FLAG_EXPANDED)
+		&& ctx->internal->cb)
+		{
+		unsigned int tmpsize = 0;
+		asynch_cb_t asynch_cb = (asynch_cb_t)ctx->internal->cb;
+		void *asynch_cb_data = ctx->internal->cb_data;
+		ret = ctx->digest->final.synch(ctx,md);
+		if (size != NULL)
+			*size=ctx->digest->md_size;
+		tmpsize = ctx->digest->md_size;
+			
+		if (ctx->digest->cleanup)
+			{
+			ctx->digest->cleanup(ctx);
+			EVP_MD_CTX_set_flags(ctx,EVP_MD_CTX_FLAG_CLEANED);
+			}
+		memset(ctx->md_data,0,ctx->digest->ctx_size);
+		asynch_cb(md, tmpsize, asynch_cb_data, ret);
+		return ret;
+
 		}
 	ret=ctx->digest->final.synch(ctx,md);
 	if (size != NULL)
@@ -625,14 +664,13 @@ int EVP_MD_CTX_ctrl_ex(EVP_MD_CTX *ctx, int type, int arg, void *ptr,
 				EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX,ERR_R_MALLOC_FAILURE);
 				return 0;
 				}
-		ctx->internal->cb = (int (*)(unsigned char *md, unsigned int size,
-				void *userdata, int status))fn_ptr;
+		ctx->internal->cb = (void (*)(void))fn_ptr;
 		ctx->internal->cb_data = ptr;
 		return 1;
 	case EVP_MD_CTRL_UPDATE_ASYNCH_CALLBACK:
 		if (!ctx->digest)
 			{
-			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_NO_DIGEST_SET);
 			return 0;
 			}
 		if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
@@ -640,14 +678,13 @@ int EVP_MD_CTX_ctrl_ex(EVP_MD_CTX *ctx, int type, int arg, void *ptr,
 			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
 			return 0;
 			}
-		ctx->internal->cb = (int (*)(unsigned char *md, unsigned int size,
-				void *userdata, int status))fn_ptr;
+		ctx->internal->cb = (void (*)(void))fn_ptr;
 		ctx->internal->cb_data = ptr;
 		return 1;
 	case EVP_MD_CTRL_UPDATE_ASYNCH_CALLBACK_DATA:
 		if (!ctx->digest)
 			{
-			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_NO_DIGEST_SET);
 			return 0;
 			}
 		if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
@@ -660,7 +697,7 @@ int EVP_MD_CTX_ctrl_ex(EVP_MD_CTX *ctx, int type, int arg, void *ptr,
 	case EVP_MD_CTRL_GET_ASYNCH_CALLBACK_FN:
 		if (!ctx->digest)
 			{
-			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_NO_DIGEST_SET);
 			return 0;
 			}
 		if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
@@ -668,14 +705,13 @@ int EVP_MD_CTX_ctrl_ex(EVP_MD_CTX *ctx, int type, int arg, void *ptr,
 			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
 			return 0;
 			}
-		*(int (**)(unsigned char *md, unsigned int size,
-			   void *userdata, int status))ptr =
+		*(void (**)(void))ptr =
 			ctx->internal->cb;
 		return 1;
 	case EVP_MD_CTRL_GET_ASYNCH_CALLBACK_DATA:
 		if (!ctx->digest)
 			{
-			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_NO_DIGEST_SET);
 			return 0;
 			}
 		if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))

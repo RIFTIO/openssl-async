@@ -27,6 +27,8 @@ DLIBCRYPTO= ../libcrypto.a
 DLIBSSL= ../libssl.a
 LIBCRYPTO= -L.. -lcrypto
 LIBSSL= -L.. -lssl
+LIBPTHREAD=-lpthread
+LIBRARIES=$(LIBSSL) $(LIBKRB5) $(LIBCRYPTO) $(LIBPTHREAD) 
 
 BNTEST=		bntest
 ECTEST=		ectest
@@ -353,22 +355,20 @@ $(DLIBCRYPTO):
 BUILD_CMD=shlib_target=; if [ -n "$(SHARED_LIBS)" ]; then \
 		shlib_target="$(SHLIB_TARGET)"; \
 	fi; \
-	LIBRARIES="$(LIBSSL) $(LIBCRYPTO) $(LIBKRB5)"; \
 	$(MAKE) -f $(TOP)/Makefile.shared -e \
 		CC="$${CC}" APPNAME=$$target$(EXE_EXT) OBJECTS="$$target.o" \
-		LIBDEPS="$(PEX_LIBS) $$LIBRARIES $(EX_LIBS)" \
+		LIBDEPS="$(PEX_LIBS) $(LIBRARIES) $(EX_LIBS)" \
 		link_app.$${shlib_target}
 
 FIPS_BUILD_CMD=shlib_target=; if [ -n "$(SHARED_LIBS)" ]; then \
 		shlib_target="$(SHLIB_TARGET)"; \
 	fi; \
-	LIBRARIES="$(LIBSSL) $(LIBCRYPTO) $(LIBKRB5)"; \
 	if [ -z "$(SHARED_LIBS)" -a -n "$(FIPSCANLIB)" ] ; then \
 		FIPSLD_CC="$(CC)"; CC=$(FIPSDIR)/bin/fipsld; export CC FIPSLD_CC; \
 	fi; \
 	$(MAKE) -f $(TOP)/Makefile.shared -e \
 		CC="$${CC}" APPNAME=$$target$(EXE_EXT) OBJECTS="$$target.o" \
-		LIBDEPS="$(PEX_LIBS) $$LIBRARIES $(EX_LIBS)" \
+		LIBDEPS="$(PEX_LIBS) $(LIBRARIES) $(EX_LIBS)" \
 		link_app.$${shlib_target}
 
 $(RSATEST)$(EXE_EXT): $(RSATEST).o $(DLIBCRYPTO)
@@ -622,20 +622,11 @@ hmactest.o: ../include/openssl/objects.h ../include/openssl/opensslconf.h
 hmactest.o: ../include/openssl/opensslv.h ../include/openssl/ossl_typ.h
 hmactest.o: ../include/openssl/safestack.h ../include/openssl/stack.h
 hmactest.o: ../include/openssl/symhacks.h hmactest.c
-hmactest2.o: ../e_os.h ../include/openssl/asn1.h ../include/openssl/bio.h
 hmactest2.o: ../include/openssl/buffer.h ../include/openssl/crypto.h
-hmactest2.o: ../include/openssl/e_os2.h ../include/openssl/ec.h
-hmactest2.o: ../include/openssl/ecdh.h ../include/openssl/ecdsa.h
-hmactest2.o: ../include/openssl/engine.h ../include/openssl/err.h
-hmactest2.o: ../include/openssl/evp.h ../include/openssl/hmac.h
-hmactest2.o: ../include/openssl/lhash.h ../include/openssl/md5.h
-hmactest2.o: ../include/openssl/obj_mac.h ../include/openssl/objects.h
-hmactest2.o: ../include/openssl/opensslconf.h ../include/openssl/opensslv.h
-hmactest2.o: ../include/openssl/ossl_typ.h ../include/openssl/pkcs7.h
-hmactest2.o: ../include/openssl/safestack.h ../include/openssl/sha.h
-hmactest2.o: ../include/openssl/stack.h ../include/openssl/symhacks.h
-hmactest2.o: ../include/openssl/x509.h ../include/openssl/x509_vfy.h
-hmactest2.o: hmactest2.c
+hmactest2.o: ../include/openssl/e_os2.h ../include/openssl/opensslconf.h
+hmactest2.o: ../include/openssl/opensslv.h ../include/openssl/ossl_typ.h
+hmactest2.o: ../include/openssl/safestack.h ../include/openssl/stack.h
+hmactest2.o: ../include/openssl/symhacks.h hmactest2.c
 ideatest.o: ../e_os.h ../include/openssl/e_os2.h ../include/openssl/idea.h
 ideatest.o: ../include/openssl/opensslconf.h ideatest.c
 igetest.o: ../include/openssl/aes.h ../include/openssl/e_os2.h

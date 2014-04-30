@@ -72,7 +72,7 @@ typedef struct rsa_asynch_ctx_st RSA_ASYNCH_CTX;
 struct rsa_asynch_ctx_st
 	{
 	/* For asynch operations */
-	int (*sign_user_cb)(unsigned char *md, unsigned int size,
+	int (*sign_user_cb)(unsigned char *md, size_t size,
 		void *userdata, int status);
 	int (*verify_user_cb)(void *userdata, int status);
 	void *cb_userdata;
@@ -175,11 +175,11 @@ int RSA_sign(int type, const unsigned char *m, unsigned int m_len,
 	return(ret);
 	}
 
-static int RSA_sign_asynch_post(unsigned char *res, int reslen,
+static int RSA_sign_asynch_post(unsigned char *res, size_t reslen,
 	RSA_ASYNCH_CTX *cb_data, int status);
 int RSA_sign_asynch(int type, const unsigned char *m, unsigned int m_len,
 	unsigned char *sigret, unsigned int *siglen, RSA *rsa,
-	int (*cb)(unsigned char *res, unsigned int reslen, void *cb_data, int status),
+	int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
 	void *cb_data)
 	{
 	X509_SIG sig;
@@ -191,8 +191,11 @@ int RSA_sign_asynch(int type, const unsigned char *m, unsigned int m_len,
 	ASN1_OCTET_STRING digest;
 	RSA_ASYNCH_CTX *actx = NULL;
 
-	if((rsa->flags & RSA_FLAG_ASYNCH) == 0)
+	if((rsa->meth->flags & RSA_FLAG_ASYNCH) == 0)
+	{
+		RSAerr(RSA_F_RSA_SIGN_ASYNCH, RSA_R_NO_ASYNCH_SUPPORT);
 		return 0;
+	}
 
 #ifdef OPENSSL_FIPS
 	if (FIPS_mode() && !(rsa->meth->flags & RSA_FLAG_FIPS_METHOD)
@@ -258,19 +261,25 @@ int RSA_sign_asynch(int type, const unsigned char *m, unsigned int m_len,
 	actx = alloc_RSA_ASYNCH_CTX();
 	if (actx == NULL)
 		{
-		RSAerr(RSA_F_RSA_SIGN_ASYNCH,ERR_R_MALLOC_FAILURE);
-		goto err;
+		if(type != NID_md5_sha1) {
+			OPENSSL_cleanse(tmps,(unsigned int)j+1);
+			OPENSSL_free(tmps);
+		}
+		RSAerr(RSA_F_RSA_SIGN_ASYNCH,ERR_R_RETRY);
+		return -1;
 		}
 	actx->type = type;
 	actx->j = j;
 	actx->tmps = tmps;
+	actx->siglen_s = siglen;
+	actx->sign_user_cb = cb;
+	actx->cb_userdata = cb_data;
 
 	i=RSA_private_encrypt_asynch(i,s,sigret,rsa,RSA_PKCS1_PADDING,
-		(int (*)(unsigned char *res, int reslen,
+		(int (*)(unsigned char *res, size_t reslen,
 			void *cb_data, int status))RSA_sign_asynch_post,actx);
 	if (i <= 0)
 		{
-	err:
 		ret=0;
 		if(type != NID_md5_sha1) {
 			OPENSSL_cleanse(tmps,(unsigned int)j+1);
@@ -280,7 +289,8 @@ int RSA_sign_asynch(int type, const unsigned char *m, unsigned int m_len,
 		}
 	return(ret);
 	}
-static int RSA_sign_asynch_post(unsigned char *res, int reslen,
+
+static int RSA_sign_asynch_post(unsigned char *res, size_t reslen,
 	RSA_ASYNCH_CTX *actx, int status)
 	{
 	if(status)
@@ -461,9 +471,9 @@ int RSA_verify(int dtype, const unsigned char *m, unsigned int m_len,
 	return int_rsa_verify(dtype, m, m_len, NULL, NULL, sigbuf, siglen, rsa);
 	}
 
-static int int_rsa_verify_post1(unsigned char *res, int reslen,
+static int int_rsa_verify_post1(unsigned char *res, size_t reslen,
 	RSA_ASYNCH_CTX *actx, int status);
-static int int_rsa_verify_post2(unsigned char *res, int reslen,
+static int int_rsa_verify_post2(unsigned char *res, size_t reslen,
 	RSA_ASYNCH_CTX *actx, int status);
 static int int_rsa_verify_pre(int dtype, const unsigned char *m,
 	unsigned int m_len,
@@ -495,8 +505,13 @@ static int int_rsa_verify_pre(int dtype, const unsigned char *m,
 	actx = alloc_RSA_ASYNCH_CTX();
 	if (actx == NULL)
 		{
-		RSAerr(RSA_F_INT_RSA_VERIFY_PRE,ERR_R_MALLOC_FAILURE);
-		goto err;
+		if (s != NULL)
+			{
+			OPENSSL_cleanse(s,(unsigned int)siglen);
+			OPENSSL_free(s);
+			}
+		RSAerr(RSA_F_INT_RSA_VERIFY_PRE,ERR_R_RETRY);
+		return -1;
 		}
 	actx->dtype = dtype;
 	actx->m = m;
@@ -511,7 +526,7 @@ static int int_rsa_verify_pre(int dtype, const unsigned char *m,
 		{
 		i = RSA_public_decrypt_asynch((int)siglen,
 			sigbuf,rm,rsa,RSA_PKCS1_PADDING,
-			(int(*)(unsigned char *, int, void *, int))int_rsa_verify_post1, actx);
+			(int(*)(unsigned char *, size_t, void *, int))int_rsa_verify_post1, actx);
 		goto end;
 		}
 
@@ -527,7 +542,7 @@ static int int_rsa_verify_pre(int dtype, const unsigned char *m,
 	}
 	i=RSA_public_decrypt_asynch((int)siglen,
 		sigbuf,s,rsa,RSA_PKCS1_PADDING,
-		(int(*)(unsigned char *, int, void *, int))int_rsa_verify_post2, actx);
+		(int(*)(unsigned char *, size_t, void *, int))int_rsa_verify_post2, actx);
 end:
 	if (i)
 		return(1);
@@ -541,7 +556,7 @@ err:
 	return(0);
 	}
 
-static int int_rsa_verify_post1(unsigned char *res, int i,
+static int int_rsa_verify_post1(unsigned char *res, size_t i,
 	RSA_ASYNCH_CTX *actx, int status)
 	{
 	if (status < 0)
@@ -556,7 +571,7 @@ static int int_rsa_verify_post1(unsigned char *res, int i,
 	return status;
 	}
 
-static int int_rsa_verify_post2(unsigned char *res, int i,
+static int int_rsa_verify_post2(unsigned char *res, size_t i,
 	RSA_ASYNCH_CTX *actx, int status)
 	{
 	int ret=0,sigtype;

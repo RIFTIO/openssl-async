@@ -531,7 +531,7 @@ void EVP_PKEY_meth_set_sign(EVP_PKEY_METHOD *pmeth,
 void EVP_PKEY_meth_set_sign_asynch(EVP_PKEY_METHOD *pmeth,
 	int (*sign)(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen,
 		const unsigned char *tbs, size_t tbslen,
-		int (*cb)(unsigned char *sig, size_t siglen,
+		int (*cb)(unsigned char *result, size_t resultlen,
 			void *cb_data, int status),
 		void *cb_data))
 	{
@@ -668,4 +668,72 @@ void EVP_PKEY_meth_set_ctrl(EVP_PKEY_METHOD *pmeth,
 	{
 	pmeth->ctrl = ctrl;
 	pmeth->ctrl_str = ctrl_str;
+	}
+
+int EVP_PKEY_CTX_set_asynch_cb(EVP_PKEY_CTX *ctx, void *cb)
+	{
+	if (ctx)
+		{
+		ctx->asynchcb = cb;
+		return 1;
+		}
+	return 0;
+	}
+
+int EVP_PKEY_CTX_set_asynch_cb_data(EVP_PKEY_CTX *ctx, void *cb_data)
+	{
+	if (ctx)
+		{
+		ctx->asynchcb_data = cb_data;
+		return 1;
+		}
+	return 0;
+	}
+
+int EVP_PKEY_CTX_set_digest_buffer(EVP_PKEY_CTX *ctx, unsigned char *digest_buffer)
+	{
+	if (ctx)
+		{
+		ctx->digest_buffer = digest_buffer;
+		return 1;
+		}
+	return 0;
+	}
+
+int EVP_PKEY_CTX_set_digest_buffer_length(EVP_PKEY_CTX *ctx, unsigned int digest_buffer_length)
+	{
+	if (ctx)
+		{
+		ctx->digest_buffer_length = digest_buffer_length;
+		return 1;
+		}
+	return 0;
+	}
+
+void *EVP_PKEY_CTX_get_asynch_cb(EVP_PKEY_CTX *ctx)
+	{
+	if (ctx)
+	    return ctx->asynchcb;
+	return NULL;
+	}
+
+void *EVP_PKEY_CTX_get_asynch_cb_data(EVP_PKEY_CTX *ctx)
+	{
+	if (ctx)
+	    return ctx->asynchcb_data;
+	return NULL;
+	}
+
+unsigned char *EVP_PKEY_CTX_get_digest_buffer(EVP_PKEY_CTX *ctx)
+	{
+	if (ctx)
+	    return ctx->digest_buffer;
+	return NULL;
+	}
+
+unsigned int EVP_PKEY_CTX_get_digest_buffer_length(EVP_PKEY_CTX *ctx)
+	{
+	if (ctx)
+	    return ctx->digest_buffer_length;
+	return 0;
 	}

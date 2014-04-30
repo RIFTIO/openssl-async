@@ -1014,6 +1014,10 @@ struct ssl3_transmission_st
 
 	void *orig; size_t origlen;
 
+	/* used by ssl3_enc and tls1_enc to communicate what the
+	   encrypted record length should be */
+	unsigned int prel_rec_length;
+
 	/* used by ssl3_get_record_inner */
 	unsigned char _md[EVP_MAX_MD_SIZE];
 	int clear_enc;
@@ -1052,6 +1056,7 @@ int ssl3_asynch_handle_digest_callbacks(unsigned char *md, unsigned int size,
 	void *userdata, int status);
 SSL3_TRANSMISSION *ssl3_get_transmission_before(SSL *s, SSL3_TRANSMISSION *t);
 SSL3_TRANSMISSION *ssl3_get_transmission(SSL *s);
+void ssl3_remove_last_transmission(SSL *s, int mode);
 void ssl3_release_transmission(SSL3_TRANSMISSION *trans);
 void ssl3_cleanup_transmission_pool(SSL *s);
 int ssl3_asynch_read_pending(const SSL *s);

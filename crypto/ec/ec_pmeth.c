@@ -149,6 +149,39 @@ static int pkey_ec_sign(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen,
 	return 1;
 	}
 
+static int pkey_ec_sign_asynch(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen,
+					const unsigned char *tbs, size_t tbslen,
+					int (*cb)(unsigned char *result, size_t reslen,
+					void *cb_data, int status),void *cb_data)
+	{
+	int ret, type;
+	EC_PKEY_CTX *dctx = ctx->data;
+	EC_KEY *ec = ctx->pkey->pkey.ec;
+
+	if (!sig)
+		{
+		*siglen = ECDSA_size(ec);
+		return 1;
+		}
+	else if(*siglen < (size_t)ECDSA_size(ec))
+		{
+		ECerr(EC_F_PKEY_EC_SIGN_ASYNCH, EC_R_BUFFER_TOO_SMALL);
+		return 0;
+		}
+
+	if (dctx->md)
+		type = EVP_MD_type(dctx->md);
+	else
+		type = NID_sha1;
+
+	ret = ECDSA_sign_asynch(type, tbs, tbslen, sig, (unsigned int *)siglen, ec, cb, cb_data);
+
+	if (ret <= 0)
+		return ret;
+
+	return 1;
+	}
+
 static int pkey_ec_verify(EVP_PKEY_CTX *ctx,
 					const unsigned char *sig, size_t siglen,
 					const unsigned char *tbs, size_t tbslen)
@@ -163,6 +196,26 @@ static int pkey_ec_verify(EVP_PKEY_CTX *ctx,
 		type = NID_sha1;
 
 	ret = ECDSA_verify(type, tbs, tbslen, sig, siglen, ec);
+
+	return ret;
+	}
+
+static int pkey_ec_verify_asynch(EVP_PKEY_CTX *ctx,
+					const unsigned char *sig, size_t siglen,
+					const unsigned char *tbs, size_t tbslen,
+					int (*cb) (void *cb_data, int status),
+					void *cb_data)
+	{
+	int ret, type;
+	EC_PKEY_CTX *dctx = ctx->data;
+	EC_KEY *ec = ctx->pkey->pkey.ec;
+
+	if (dctx->md)
+		type = EVP_MD_type(dctx->md);
+	else
+		type = NID_sha1;
+
+	ret = ECDSA_verify_asynch(type, tbs, tbslen, sig, siglen, ec, cb, cb_data);
 
 	return ret;
 	}
@@ -319,10 +372,10 @@ const EVP_PKEY_METHOD ec_pkey_meth =
 	pkey_ec_keygen,
 
 	0,
-	{ pkey_ec_sign, 0 },
+	{ pkey_ec_sign, pkey_ec_sign_asynch },
 
 	0,
-	{ pkey_ec_verify, 0 },
+	{ pkey_ec_verify, pkey_ec_verify_asynch },
 
 	0, { 0, 0 },
 

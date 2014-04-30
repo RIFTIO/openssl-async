@@ -60,6 +60,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>
 #include <openssl/crypto.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
@@ -150,7 +151,7 @@ static int ssl_read(BIO *b, char *out, int outl)
 	SSL *ssl;
 	int retry_reason=0;
 	int r=0;
-
+	int error=0;
 	if (out == NULL) return(0);
 	sb=(BIO_SSL *)b->ptr;
 	ssl=sb->ssl;
@@ -221,10 +222,19 @@ static int ssl_read(BIO *b, char *out, int outl)
 		retry_reason=BIO_RR_CONNECT;
 		break;
 
-		/* The following two need to simply break with no reason.
+	case SSL_ERROR_WAIT_ASYNCH_READ:
+	if (sb->ssl->s3 && sb->ssl->s3->flags & SSL3_FLAGS_ASYNCH)
+		{
+		error = ERR_get_error();
+		if (ERR_R_RETRY == ERR_GET_REASON(error))
+			{
+			BIO_set_retry_read(b);
+			}
+		}
+	break;
+		/* The following need to simply break with no reason.
 		 * They do mean there's something to read, just not from the
 		 * underlying bio. */
-	case SSL_ERROR_WAIT_ASYNCH_READ:
 	case SSL_ERROR_WAIT_ASYNCH_WRITE:
 
 	case SSL_ERROR_SYSCALL:
@@ -244,6 +254,7 @@ static int ssl_write(BIO *b, const char *out, int outl)
 	int retry_reason=0;
 	SSL *ssl;
 	BIO_SSL *bs;
+	int error=0;
 
 	if (out == NULL) return(0);
 	bs=(BIO_SSL *)b->ptr;
@@ -296,15 +307,26 @@ static int ssl_write(BIO *b, const char *out, int outl)
 	case SSL_ERROR_WANT_CONNECT:
 		BIO_set_retry_special(b);
 		retry_reason=BIO_RR_CONNECT;
-
-		/* The following two need to simply break with no reason.
+	break;
+		/* The following need to simply break with no reason.
 		 * They do mean there's something to read, just not from the
 		 * underlying bio. */
 	case SSL_ERROR_WAIT_ASYNCH_READ:
+	break;
 	case SSL_ERROR_WAIT_ASYNCH_WRITE:
-
+	if (bs->ssl->s3 && bs->ssl->s3->flags & SSL3_FLAGS_ASYNCH)
+		{
+		error = ERR_get_error();
+		if (ERR_R_RETRY == ERR_GET_REASON(error))
+			{
+			BIO_set_retry_write(b);
+			}
+		}
+	break;
 	case SSL_ERROR_SYSCALL:
+	break;
 	case SSL_ERROR_SSL:
+	break;
 	default:
 		break;
 		}

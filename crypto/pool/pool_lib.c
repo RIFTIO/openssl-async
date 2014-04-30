@@ -106,6 +106,8 @@ void POOL_free_item(POOL *p, void *item)
 	{
 	if (p && item)
 		{
+		/* adjust item so that it points to POOL_ITEM */
+		item = item - sizeof(POOL_ITEM);
 		/* check that the position is correct and within the pool */
 		ssize_t poolpos = item - (void *)p;
 		if (poolpos > 0 && poolpos < p->totalsize

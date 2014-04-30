@@ -134,8 +134,10 @@ const EVP_MD *ENGINE_get_digest_asynch(ENGINE *e, int nid)
 	ENGINE_DIGESTS_PTR fn = ENGINE_get_digests_asynch(e);
 	if(!fn || !fn(e, &ret, NULL, nid))
 		{
-		ENGINEerr(ENGINE_F_ENGINE_GET_DIGEST_ASYNCH,
-				ENGINE_R_UNIMPLEMENTED_DIGEST);
+	 	/*We have decided to return NULL here and not 
+ 		  flag an error. This allows callers of this
+		  function to try getting a synch implementation
+		  without an error being flagged.*/ 
 		return NULL;
 		}
 	return ret;

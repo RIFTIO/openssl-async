@@ -94,3 +94,40 @@ err:
 	ECDSA_SIG_free(s);
 	return(ret);
 	}
+
+/* returns
+ *      1: correct signature
+ *      0: incorrect signature
+ *     -1: error
+ */
+int ECDSA_do_verify_asynch(const unsigned char *dgst, int dgst_len, 
+		const ECDSA_SIG *sig, EC_KEY *eckey,
+		int (*cb)(void *cb_data, int status),
+		void *cb_data)
+	{
+	ECDSA_DATA *ecdsa = ecdsa_check(eckey);
+	if (ecdsa == NULL || ecdsa->meth == NULL || ecdsa->meth->ecdsa_do_verify_asynch == NULL)
+		return 0;
+	return ecdsa->meth->ecdsa_do_verify_asynch(dgst, dgst_len, sig, eckey, cb, cb_data);
+	}
+
+/* returns
+ *      1: correct signature
+ *      0: incorrect signature
+ *     -1: error
+ */
+int ECDSA_verify_asynch(int type, const unsigned char *dgst, int dgst_len,
+		const unsigned char *sigbuf, int sig_len, EC_KEY *eckey,
+		int (*cb)(void *cb_data, int status),
+		void *cb_data)
+	{
+	ECDSA_SIG *s;
+	int ret=-1;
+	s = ECDSA_SIG_new();
+	if (s == NULL) return(ret);
+	if (d2i_ECDSA_SIG(&s, &sigbuf, sig_len) == NULL) goto err;
+	ret=ECDSA_do_verify_asynch(dgst, dgst_len, s, eckey, cb, cb_data);
+err:
+	ECDSA_SIG_free(s);
+	return(ret);
+	}

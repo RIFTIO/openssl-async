@@ -133,31 +133,31 @@ struct rsa_meth_st
 	int (*rsa_pub_enc_asynch)(int flen,const unsigned char *from,
 		unsigned char *to,
 		RSA *rsa,int padding,
-		int (*cb)(unsigned char *res, int reslen,
+		int (*cb)(unsigned char *res, size_t reslen,
 			void *cb_data, int status),
 		void *cb_data);
 	int (*rsa_pub_dec_asynch)(int flen,const unsigned char *from,
 		unsigned char *to,
 		RSA *rsa,int padding,
-		int (*cb)(unsigned char *res, int reslen,
+		int (*cb)(unsigned char *res, size_t reslen,
 			void *cb_data, int status),
 		void *cb_data);
 	int (*rsa_priv_enc_asynch)(int flen,const unsigned char *from,
 		unsigned char *to,
 		RSA *rsa,int padding,
-		int (*cb)(unsigned char *res, int reslen,
+		int (*cb)(unsigned char *res, size_t reslen,
 			void *cb_data, int status),
 		void *cb_data);
 	int (*rsa_priv_dec_asynch)(int flen,const unsigned char *from,
 		unsigned char *to,
 		RSA *rsa,int padding,
-		int (*cb)(unsigned char *res, int reslen,
+		int (*cb)(unsigned char *res, size_t reslen,
 			void *cb_data, int status),
 		void *cb_data);
 	int (*rsa_sign_asynch)(int type,
 		const unsigned char *m, unsigned int m_length,
 		unsigned char *sigret, unsigned int *siglen, const RSA *rsa,
-		int (*cb)(unsigned char *res, unsigned int reslen,
+		int (*cb)(unsigned char *res, size_t reslen,
 			void *cb_data, int status),
 		void *cb_data);
 	int (*rsa_verify_asynch)(int dtype,
@@ -343,25 +343,25 @@ int	RSA_public_encrypt(int flen, const unsigned char *from,
 		unsigned char *to, RSA *rsa,int padding);
 int	RSA_public_encrypt_asynch(int flen, const unsigned char *from,
 		unsigned char *to, RSA *rsa, int padding,
-		int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+		int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
 		void *cb_data);
 int	RSA_private_encrypt(int flen, const unsigned char *from,
 		unsigned char *to, RSA *rsa,int padding);
 int	RSA_private_encrypt_asynch(int flen, const unsigned char *from,
 		unsigned char *to, RSA *rsa, int padding,
-		int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+		int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
 		void *cb_data);
 int	RSA_public_decrypt(int flen, const unsigned char *from, 
 		unsigned char *to, RSA *rsa,int padding);
 int	RSA_public_decrypt_asynch(int flen, const unsigned char *from,
 		unsigned char *to, RSA *rsa, int padding,
-		int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+		int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
 		void *cb_data);
 int	RSA_private_decrypt(int flen, const unsigned char *from, 
 		unsigned char *to, RSA *rsa,int padding);
 int	RSA_private_decrypt_asynch(int flen, const unsigned char *from,
 		unsigned char *to, RSA *rsa, int padding,
-		int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+		int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
 		void *cb_data);
 void	RSA_free (RSA *r);
 /* "up" the RSA object's reference count */
@@ -425,7 +425,7 @@ int RSA_sign(int type, const unsigned char *m, unsigned int m_length,
 	unsigned char *sigret, unsigned int *siglen, RSA *rsa);
 int RSA_sign_asynch(int type, const unsigned char *m, unsigned int m_len,
 	unsigned char *sigret, unsigned int *siglen, RSA *rsa,
-	int (*cb)(unsigned char *res, unsigned int reslen, void *cb_data, int status),
+	int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
 	void *cb_data);
 int RSA_verify(int type, const unsigned char *m, unsigned int m_length,
 	const unsigned char *sigbuf, unsigned int siglen, RSA *rsa);
@@ -538,8 +538,10 @@ void ERR_load_RSA_strings(void);
 #define RSA_F_PKEY_RSA_CTRL				 143
 #define RSA_F_PKEY_RSA_CTRL_STR				 144
 #define RSA_F_PKEY_RSA_SIGN				 142
+#define RSA_F_PKEY_RSA_SIGN_ASYNCH			 164
 #define RSA_F_PKEY_RSA_VERIFY				 154
 #define RSA_F_PKEY_RSA_VERIFYRECOVER			 141
+#define RSA_F_PKEY_RSA_VERIFY_ASYNCH			 165
 #define RSA_F_RSA_BUILTIN_KEYGEN			 129
 #define RSA_F_RSA_CHECK_KEY				 123
 #define RSA_F_RSA_EAY_PRIVATE_DECRYPT			 101

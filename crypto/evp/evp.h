@@ -351,6 +351,7 @@ struct env_md_ctx_st
 #define EVP_MD_CTX_FLAG_NO_INIT		0x0100 /* Don't initialize md_data */
 
 #define EVP_MD_CTX_FLAG_EXPANDED	0x0200
+#define EVP_MD_CTX_FLAG_DISABLE_ASYNCH_MD_ONLY  0x0400
 
 struct evp_cipher_st
 	{
@@ -1242,10 +1243,21 @@ int EVP_PKEY_sign_init(EVP_PKEY_CTX *ctx);
 int EVP_PKEY_sign(EVP_PKEY_CTX *ctx,
 			unsigned char *sig, size_t *siglen,
 			const unsigned char *tbs, size_t tbslen);
+int EVP_PKEY_sign_asynch(EVP_PKEY_CTX *ctx,
+			unsigned char *sig, size_t *siglen,
+			const unsigned char *tbs, size_t tbslen,
+			int (*cb)(unsigned char *result, size_t resultlen,
+				void *cb_data, int status),
+			void *cb_data);
 int EVP_PKEY_verify_init(EVP_PKEY_CTX *ctx);
 int EVP_PKEY_verify(EVP_PKEY_CTX *ctx,
 			const unsigned char *sig, size_t siglen,
 			const unsigned char *tbs, size_t tbslen);
+int EVP_PKEY_verify_asynch(EVP_PKEY_CTX *ctx,
+			const unsigned char *sig, size_t siglen,
+			const unsigned char *tbs, size_t tbslen,
+			int (*cb)(void *cb_data, int status),
+			void *cb_data);
 int EVP_PKEY_verify_recover_init(EVP_PKEY_CTX *ctx);
 int EVP_PKEY_verify_recover(EVP_PKEY_CTX *ctx,
 			unsigned char *rout, size_t *routlen,
@@ -1264,8 +1276,8 @@ int EVP_PKEY_derive_set_peer(EVP_PKEY_CTX *ctx, EVP_PKEY *peer);
 int EVP_PKEY_derive(EVP_PKEY_CTX *ctx, unsigned char *key, size_t *keylen);
 
 typedef int EVP_PKEY_gen_cb(EVP_PKEY_CTX *ctx);
-typedef int EVP_PKEY_asynch_cb(unsigned char *result, size_t resultlen,
-	void *cb_data, int status);
+typedef int EVP_PKEY_asynch_sign_cb(unsigned char *result, size_t resultlen, void *cb_data, int status);
+typedef int EVP_PKEY_asynch_verify_cb(void *cb_data, int status);
 
 int EVP_PKEY_paramgen_init(EVP_PKEY_CTX *ctx);
 int EVP_PKEY_paramgen(EVP_PKEY_CTX *ctx, EVP_PKEY **ppkey);
@@ -1274,8 +1286,14 @@ int EVP_PKEY_keygen(EVP_PKEY_CTX *ctx, EVP_PKEY **ppkey);
 
 void EVP_PKEY_CTX_set_cb(EVP_PKEY_CTX *ctx, EVP_PKEY_gen_cb *cb);
 EVP_PKEY_gen_cb *EVP_PKEY_CTX_get_cb(EVP_PKEY_CTX *ctx);
-int EVP_PKEY_CTX_set_asynch_cb(EVP_PKEY_CTX *ctx, EVP_PKEY_asynch_cb *cb);
+int EVP_PKEY_CTX_set_asynch_cb(EVP_PKEY_CTX *ctx, void *cb);
 int EVP_PKEY_CTX_set_asynch_cb_data(EVP_PKEY_CTX *ctx, void *cb_data);
+int EVP_PKEY_CTX_set_digest_buffer(EVP_PKEY_CTX *ctx, unsigned char *digest_buffer);
+int EVP_PKEY_CTX_set_digest_buffer_length(EVP_PKEY_CTX *ctx, unsigned int digest_buffer_length);
+void *EVP_PKEY_CTX_get_asynch_cb(EVP_PKEY_CTX *ctx);
+void *EVP_PKEY_CTX_get_asynch_cb_data(EVP_PKEY_CTX *ctx);
+unsigned char *EVP_PKEY_CTX_get_digest_buffer(EVP_PKEY_CTX *ctx);
+unsigned int EVP_PKEY_CTX_get_digest_buffer_length(EVP_PKEY_CTX *ctx);
 
 int EVP_PKEY_CTX_get_keygen_info(EVP_PKEY_CTX *ctx, int idx);
 
@@ -1404,6 +1422,7 @@ void ERR_load_EVP_strings(void);
 #define EVP_F_AES_XTS					 172
 #define EVP_F_AES_XTS_CIPHER				 175
 #define EVP_F_ALG_MODULE_INIT				 177
+#define EVP_F_ALLOC_ASYNCH_CTX				 191
 #define EVP_F_CAMELLIA_INIT_KEY				 159
 #define EVP_F_CMAC_INIT					 173
 #define EVP_F_D2I_PKEY					 100
@@ -1412,6 +1431,8 @@ void ERR_load_EVP_strings(void);
 #define EVP_F_DSA_PKEY2PKCS8				 135
 #define EVP_F_ECDSA_PKEY2PKCS8				 129
 #define EVP_F_ECKEY_PKEY2PKCS8				 132
+#define EVP_F_EVP_ASYNCH_ADD_CIPHER_ENTRY		 192
+#define EVP_F_EVP_CIPHERINIT_ASYNCH			 193
 #define EVP_F_EVP_CIPHERINIT_EX				 123
 #define EVP_F_EVP_CIPHER_CTX_COPY			 163
 #define EVP_F_EVP_CIPHER_CTX_CTRL			 124
@@ -1420,6 +1441,7 @@ void ERR_load_EVP_strings(void);
 #define EVP_F_EVP_DECRYPTFINAL_EX			 101
 #define EVP_F_EVP_DECRYPTUPDATE				 179
 #define EVP_F_EVP_DIGESTFINAL_EX			 180
+#define EVP_F_EVP_DIGESTINIT_ASYNCH			 194
 #define EVP_F_EVP_DIGESTINIT_EX				 128
 #define EVP_F_EVP_DIGESTUPDATE				 181
 #define EVP_F_EVP_ENCRYPTFINAL_EX			 127
@@ -1458,8 +1480,10 @@ void ERR_load_EVP_strings(void);
 #define EVP_F_EVP_PKEY_PARAMGEN				 148
 #define EVP_F_EVP_PKEY_PARAMGEN_INIT			 149
 #define EVP_F_EVP_PKEY_SIGN				 140
+#define EVP_F_EVP_PKEY_SIGN_ASYNCH			 198
 #define EVP_F_EVP_PKEY_SIGN_INIT			 141
 #define EVP_F_EVP_PKEY_VERIFY				 142
+#define EVP_F_EVP_PKEY_VERIFY_ASYNCH			 199
 #define EVP_F_EVP_PKEY_VERIFY_INIT			 143
 #define EVP_F_EVP_PKEY_VERIFY_RECOVER			 144
 #define EVP_F_EVP_PKEY_VERIFY_RECOVER_INIT		 145
@@ -1486,7 +1510,9 @@ void ERR_load_EVP_strings(void);
 #define EVP_F__EVP_DECRYPTFINAL_EX_ASYNCH		 186
 #define EVP_F__EVP_DECRYPTFINAL_POST			 187
 #define EVP_F__EVP_SIGNFINAL				 188
+#define EVP_F__EVP_SIGNFINAL_ASYNCH			 200
 #define EVP_F__EVP_VERIFYFINAL				 189
+#define EVP_F__EVP_VERIFYFINAL_ASYNCH			 201
 #define EVP_F__HMAC_UPDATE_ASYNCH			 190
 
 /* Reason codes. */
@@ -1531,6 +1557,7 @@ void ERR_load_EVP_strings(void);
 #define EVP_R_INVALID_OPERATION				 148
 #define EVP_R_IV_TOO_LARGE				 102
 #define EVP_R_KEYGEN_FAILURE				 120
+#define EVP_R_MALLOC_FAILURE				 195
 #define EVP_R_MESSAGE_DIGEST_IS_NULL			 159
 #define EVP_R_METHOD_NOT_SUPPORTED			 144
 #define EVP_R_MISSING_PARAMETERS			 103

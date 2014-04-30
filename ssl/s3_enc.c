@@ -379,16 +379,23 @@ int ssl3_change_cipher_state(SSL *s, int which)
 
 	s->session->key_arg_length=0;
 
-	EVP_CipherInit_ex(dd,c,NULL,key,iv,(which & SSL3_CC_WRITE));
-
     if (s->s3->flags & SSL3_FLAGS_ASYNCH)
         if (!EVP_CIPHER_CTX_ctrl_ex(dd, EVP_CTRL_SETUP_ASYNCH_CALLBACK,
                                     0, NULL, (void(*)(void))ssl3_asynch_handle_cipher_callbacks))
             goto err2;
         
+
+	if (s->s3->read_retry_data_available) 
+		{
+		if (!EVP_CipherInit_ex(dd,c,NULL,key,(const unsigned char*)&s->s3->backup_iv,(which & SSL3_CC_WRITE)))
+			goto err2;
+		}
+	else 
+		{
     if (!EVP_CipherInit_ex(dd,c,NULL,key,iv,(which & SSL3_CC_WRITE)))
         goto err2;
-
+		memcpy(&s->s3->backup_iv, iv, k);
+		}
 
 	OPENSSL_cleanse(&(exp_key[0]),sizeof(exp_key));
 	OPENSSL_cleanse(&(exp_iv[0]),sizeof(exp_iv));
@@ -580,17 +587,34 @@ int ssl3_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post)
             trans->post = 0;
             ssl3_asynch_push_callback(trans, ssl3_enc_post);
             
+			if (send)
+				trans->flags |= SSL3_TRANS_FLAGS_SEND;
+			else
+				trans->flags &= ~SSL3_TRANS_FLAGS_SEND;
+
+			trans->prel_rec_length = l;
+
             EVP_CIPHER_CTX_ctrl_ex(ds,
                                    EVP_CTRL_UPDATE_ASYNCH_CALLBACK_DATA,
                                    0, trans, NULL);
+ 
+			if (s->s3->read_retry_data_available)
+				{
+				memcpy(ds->iv, &s->s3->backup_iv, ds->cipher->iv_len);
+				}
             if (!EVP_Cipher(ds, trans->rec.data, trans->rec.input, l))
+				{
                 return 0;
+				}
             return(-1); /* same kind of indication as no data
                          * in non-blocking I/O */
             }
+		else
+			{
+				EVP_Cipher(ds,rec->data,rec->input,l);
+			}
 
 post:
-		EVP_Cipher(ds,rec->data,rec->input,l);
 
 		if (EVP_MD_CTX_md(s->read_hash) != NULL)
 			mac_size = EVP_MD_CTX_size(s->read_hash);
@@ -871,7 +895,7 @@ static int n_ssl3_mac_inner(SSL *ssl, unsigned char *md, int send,
                 break;
             }
             
-post0:  /* This happens in application thread, which is
+		/* This happens in application thread, which is
          * quite important, we really want the sequence
          * to updated in application thread space. */
         if (trans)
@@ -881,7 +905,7 @@ post0:  /* This happens in application thread, which is
             seq = trans->seq_cache;
             /* TODO : Does this need to be pushed or can we simply do
              * this with EVP_MD_CTX_ctrl_ex */
-            //ssl3_asynch_push_callback(trans, n_ssl3_mac_post1);
+			ssl3_asynch_push_callback(trans, n_ssl3_mac_post1);
             trans->post = 0;
             }
             
@@ -892,8 +916,8 @@ post0:  /* This happens in application thread, which is
         if (trans)
             {
             EVP_MD_CTX_ctrl_ex( md_ctx,
-                                EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK,
-                                0, trans, n_ssl3_mac_post1);
+				EVP_MD_CTRL_UPDATE_ASYNCH_CALLBACK_DATA,
+				0, trans, (void(*)(void))n_ssl3_mac_post1);
             }
         EVP_DigestUpdate(md_ctx,mac_sec,md_size);
         EVP_DigestUpdate(md_ctx,ssl3_pad_1,npad);
@@ -915,7 +939,7 @@ post1:
             {
             /* TODO : Does this need to be pushed or can we simply do
              * this with EVP_MD_CTX_ctrl_ex */
-            //ssl3_asynch_push_callback(trans, n_ssl3_mac_post2);
+			ssl3_asynch_push_callback(trans, n_ssl3_mac_post2);
             trans->post = 0;
             }
         EVP_MD_CTX_copy_ex( md_ctx,hash);
@@ -923,12 +947,12 @@ post1:
             {
             EVP_MD_CTX_ctrl_ex( md_ctx,
                                 EVP_MD_CTRL_UPDATE_ASYNCH_CALLBACK_DATA,
-                                0, trans, n_ssl3_mac_post2);
+				0, trans, (void(*)(void))n_ssl3_mac_post2);
             }
         EVP_DigestUpdate(md_ctx,mac_sec,md_size);
         EVP_DigestUpdate(md_ctx,ssl3_pad_2,npad);
         EVP_DigestUpdate(md_ctx,md,md_size);
-        EVP_DigestFinal_ex( md_ctx,md,&md_size);
+		EVP_DigestFinal_ex( md_ctx,md,(unsigned int*)&md_size);
         if (trans)
             {
                 return 1;

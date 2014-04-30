@@ -233,11 +233,12 @@ rsa_pmeth.o: ../../include/openssl/lhash.h ../../include/openssl/obj_mac.h
 rsa_pmeth.o: ../../include/openssl/objects.h
 rsa_pmeth.o: ../../include/openssl/opensslconf.h
 rsa_pmeth.o: ../../include/openssl/opensslv.h ../../include/openssl/ossl_typ.h
-rsa_pmeth.o: ../../include/openssl/pkcs7.h ../../include/openssl/rsa.h
-rsa_pmeth.o: ../../include/openssl/safestack.h ../../include/openssl/sha.h
-rsa_pmeth.o: ../../include/openssl/stack.h ../../include/openssl/symhacks.h
-rsa_pmeth.o: ../../include/openssl/x509.h ../../include/openssl/x509_vfy.h
-rsa_pmeth.o: ../cryptlib.h ../evp/evp_locl.h rsa_locl.h rsa_pmeth.c
+rsa_pmeth.o: ../../include/openssl/pkcs7.h ../../include/openssl/pool.h
+rsa_pmeth.o: ../../include/openssl/rsa.h ../../include/openssl/safestack.h
+rsa_pmeth.o: ../../include/openssl/sha.h ../../include/openssl/stack.h
+rsa_pmeth.o: ../../include/openssl/symhacks.h ../../include/openssl/x509.h
+rsa_pmeth.o: ../../include/openssl/x509_vfy.h ../cryptlib.h ../evp/evp_locl.h
+rsa_pmeth.o: rsa_locl.h rsa_pmeth.c
 rsa_prn.o: ../../e_os.h ../../include/openssl/asn1.h
 rsa_prn.o: ../../include/openssl/bio.h ../../include/openssl/buffer.h
 rsa_prn.o: ../../include/openssl/crypto.h ../../include/openssl/e_os2.h

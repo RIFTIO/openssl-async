@@ -528,7 +528,7 @@ static EVP_CIPHER aesni_128_cbc_hmac_sha1_cipher =
 #endif
 	16,16,16,
 	EVP_CIPH_CBC_MODE|EVP_CIPH_FLAG_DEFAULT_ASN1|EVP_CIPH_FLAG_AEAD_CIPHER,
-	aesni_cbc_hmac_sha1_init_key,
+	{ aesni_cbc_hmac_sha1_init_key },
 	{ aesni_cbc_hmac_sha1_cipher },
 	NULL,
 	sizeof(EVP_AES_HMAC_SHA1),
@@ -547,7 +547,7 @@ static EVP_CIPHER aesni_256_cbc_hmac_sha1_cipher =
 #endif
 	16,32,16,
 	EVP_CIPH_CBC_MODE|EVP_CIPH_FLAG_DEFAULT_ASN1|EVP_CIPH_FLAG_AEAD_CIPHER,
-	aesni_cbc_hmac_sha1_init_key,
+	{ aesni_cbc_hmac_sha1_init_key },
 	{ aesni_cbc_hmac_sha1_cipher },
 	NULL,
 	sizeof(EVP_AES_HMAC_SHA1),

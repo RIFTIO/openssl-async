@@ -78,3 +78,17 @@ int ECDH_compute_key(void *out, size_t outlen, const EC_POINT *pub_key,
 		return 0;
 	return ecdh->meth->compute_key(out, outlen, pub_key, eckey, KDF);
 }
+
+int ECDH_compute_key_asynch(void *out, size_t *outlen, const EC_POINT *pub_key,
+	EC_KEY *eckey,
+	void *(*KDF)(const void *in, size_t inlen, void *out, size_t *outlen),
+	int (*cb)(unsigned char *res, size_t reslen,void *cb_data, int status),
+	void *cb_data)
+	{
+	ECDH_DATA *ecdh = ecdh_check(eckey);
+	if (ecdh == NULL)
+		return 0;
+	return ecdh->meth->compute_key_asynch(out, outlen, pub_key, eckey, KDF,
+						cb, cb_data);
+	}
+

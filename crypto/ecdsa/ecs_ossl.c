@@ -73,6 +73,8 @@ static ECDSA_METHOD openssl_ecdsa_meth = {
 	ecdsa_do_sign,
 	ecdsa_sign_setup,
 	ecdsa_do_verify,
+	NULL,
+	NULL,
 #if 0
 	NULL, /* init     */
 	NULL, /* finish   */

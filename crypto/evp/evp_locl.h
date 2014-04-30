@@ -290,11 +290,14 @@ struct evp_pkey_ctx_st
 	/* Keygen callback */
 	EVP_PKEY_gen_cb *pkey_gencb;
 	/* Asynch callback */
-	EVP_PKEY_asynch_cb *asynchcb;
+	void *asynchcb;
 	void *asynchcb_data;
 	/* implementation specific keygen data */
 	int *keygen_info;
 	int keygen_info_count;
+	unsigned char *digest_buffer;
+	unsigned int digest_buffer_length;
+        
 	} /* EVP_PKEY_CTX */;
 
 #define EVP_PKEY_FLAG_DYNAMIC	1

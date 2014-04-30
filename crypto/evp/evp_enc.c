@@ -123,6 +123,7 @@ static EVP_ASYNCH_CTX *alloc_asynch_ctx()
 		if (asynch_ctx_pool == NULL)
 			{
 			CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
+			EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_MALLOC_FAILURE);
 			return NULL;
 			}
 		}
@@ -134,7 +135,10 @@ static EVP_ASYNCH_CTX *alloc_asynch_ctx()
 	else if (asynch_ctx_break < asynch_ctx_items)
 		ret = &asynch_ctx_pool[asynch_ctx_break++];
 	else
+		{
 		ret = NULL;
+		EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_RETRY);
+		}
 	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
 	return ret;
 	}
@@ -270,17 +274,9 @@ int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *imp
 
 			if ((ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
 				&& ctx->internal->cb)
-				{
 				c = ENGINE_get_cipher_asynch(impl, cipher->nid);
 
 				if (!c)
-					{
-					EVPerr(EVP_F_EVP_CIPHERINIT_EX, EVP_R_NO_ASYNCH_SUPPORT);
-					ERR_add_error_data(1,EVP_CIPHER_name(cipher));
-					return 0;
-					}
-				}
-			else
 				c = ENGINE_get_cipher(impl, cipher->nid);
 
 			if(!c)
@@ -350,14 +346,6 @@ int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *imp
 				}
 #endif
 			}
-		else
-			if ((ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
-				&& ctx->internal->cb != NULL)
-				{
-				EVPerr(EVP_F_EVP_CIPHERINIT_EX, EVP_R_NO_ASYNCH_SUPPORT);
-				ERR_add_error_data(1,EVP_CIPHER_name(cipher));
-				return 0;
-				}
 		}
 	else if(!ctx->cipher)
 		{
@@ -406,11 +394,11 @@ skip_to_init:
 
 			default:
 			return 0;
-			break;
 		}
 	}
 
-	if(key || (ctx->cipher->flags & EVP_CIPH_ALWAYS_CALL_INIT)) {
+	if(key || (ctx->cipher->flags & EVP_CIPH_ALWAYS_CALL_INIT)) 
+		{
 		if(ctx->cipher->flags & EVP_CIPH_FLAG_ASYNCH)
 			{
 			if(!ctx->cipher->init.asynch(ctx,key,iv,enc,
@@ -425,6 +413,11 @@ skip_to_init:
 			if(!ctx->cipher->init.synch(ctx,key,iv,enc))
 				{
 				return 0;
+				}
+			if ((ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+				&& ctx->internal->cb)
+				{
+				call_asynch_cb_at_end = 1;
 				}
 			}
 	}
@@ -570,9 +563,6 @@ static int _evp_EncryptDecrypt_post(unsigned char *out, int outl,
 	if (status <= 0
 		|| used_bytes > actx->inl
 	        || used_bytes == actx->inl)
-//		|| ((actx->ctx->flags & EVP_CIPH_NO_PADDING)
-//				|| !actx->final)
-//			&& used_bytes == actx->inl))
 		{
 		int ret = actx->user_cb(actx->out, actx->outl,
 			actx->user_cb_data, status);
@@ -693,7 +683,6 @@ int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
 		int ret = 0;
 		if (actx == NULL)
 			{
-			EVPerr(EVP_F_EVP_ENCRYPTUPDATE,ERR_R_MALLOC_FAILURE);
 			return 0;
 			}
 		actx->ctx = ctx;
@@ -708,6 +697,15 @@ int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
 		ret = _evp_EncryptUpdate_asynch(actx, out, outl, in, inl);
 		if (!ret)
 			free_asynch_ctx(actx);
+		return ret;
+		}
+	else if ((ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+		&& ctx->internal->cb)
+		{
+		int ret = 0;
+		ret =_evp_EncryptUpdate(ctx, out, outl, in, inl);
+		if (ret > 0)
+			ctx->internal->cb(out,*outl,ctx->internal->cb_data,ret);
 		return ret;
 		}
 	return _evp_EncryptUpdate(ctx, out, outl, in, inl);
@@ -754,6 +752,13 @@ int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 			if (ret < 0)
 				free_asynch_ctx(actx);
 			}
+		else if ((ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+				&& ctx->internal->cb)
+			{
+			ret=M_do_cipher(ctx, out, NULL, 0);
+			if (ret > 0)
+				ctx->internal->cb(out,0,ctx->internal->cb_data,ret);
+			}
 		else
 			{
 			ret = M_do_cipher(ctx, out, NULL, 0);
@@ -774,6 +779,11 @@ int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 			{
 			actx->internal_cb(out, *outl, actx, 1);
 			}
+		else if ((ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+				&& ctx->internal->cb)
+			{
+			ctx->internal->cb(out,*outl,ctx->internal->cb_data,1);
+			}
 		return 1;
 		}
 	bl=ctx->buf_len;
@@ -791,6 +801,11 @@ int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 			{
 			actx->internal_cb(out, *outl, actx, 1);
 			}
+		else if ((ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+				&& ctx->internal->cb)
+			{
+			ctx->internal->cb(out,*outl,ctx->internal->cb_data,1);
+			}
 		return 1;
 		}
 
@@ -803,7 +818,17 @@ int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 		if (ret <= 0)
 			free_asynch_ctx(actx); 
 		}
-	else ret=M_do_cipher(ctx,out,ctx->buf,b);
+	else if ((ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+				&& ctx->internal->cb)
+		{
+			ret=M_do_cipher(ctx,out,ctx->buf,b);
+                        if (ret > 0)
+				ctx->internal->cb(out,b,ctx->internal->cb_data,ret);
+		}
+	else
+		{
+		 	ret=M_do_cipher(ctx,out,ctx->buf,b);
+		}
 
 
 	if(ret)
@@ -1151,6 +1176,15 @@ int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 		ret = _evp_DecryptFinal_ex_asynch(actx, out, outl);
 		if (!ret)
 			free_asynch_ctx(actx);
+		return ret;
+		}
+	else if ((ctx->flags & EVP_CIPH_CTX_FLAG_EXPANDED)
+		&& ctx->internal->cb)
+		{
+		int ret = 0;
+		ret =_evp_DecryptFinal_ex(ctx, out, outl);
+		if (ret > 0)
+			ctx->internal->cb(out,*outl,ctx->internal->cb_data,ret);
 		return ret;
 		}
 	return _evp_DecryptFinal_ex(ctx, out, outl);

@@ -39,6 +39,29 @@ int ssl3_asynch_push_callback(SSL3_TRANSMISSION *trans,
 	return 1;
 	}
 
+void ssl3_remove_last_transmission(SSL *s, int mode)
+	{
+	if(!s || !s->s3)
+		return;
+	SSL3_TRANSMISSION_POOL *pool = s->s3->transmission_pool;
+	struct transmission_queue_node *tail;
+	if(!pool)
+		return;
+	CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+	tail = pool->tail;
+	CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+	if (tail) 
+		{
+		SSL3_TRANSMISSION *trans = &tail->trans;
+		if(!trans)
+			return;
+		if (SSL_WRITING == mode)
+			ssl3_release_buffer(trans->s, &trans->buf,
+			!!(trans->flags & SSL3_TRANS_FLAGS_SEND));
+		ssl3_release_transmission(trans);
+		}
+	}
+
 static int ssl3_process_transmissions(SSL *s, int status)
 	{
 	SSL3_TRANSMISSION_POOL *pool = s->s3->transmission_pool;
@@ -120,6 +143,10 @@ int ssl3_asynch_handle_cipher_callbacks(unsigned char *data, int datalen,
 	fprintf(stderr, "ssl3_asynch_handle_cipher_callbacks: data = %p, datalen = %d, userdata = %p, status = %d\n",
 		data, datalen, userdata, status);
 #endif
+	if (NULL == userdata)
+		{
+		return status;
+		}
 	if (status < 0)
 		{
 		SSL3_TRANSMISSION *trans = (SSL3_TRANSMISSION *)userdata;
@@ -135,6 +162,8 @@ int ssl3_asynch_handle_cipher_callbacks(unsigned char *data, int datalen,
 					0, status, NULL, 0, NULL,
 					trans->s->asynch_completion_callback_arg);
 			}
+		else
+			SSLerr(SSL_F_SSL3_ASYNCH_HANDLE_CIPHER_CALLBACKS,SSL_R_ASYNCH_COMPL_CALLBACK_NOT_DEFINED);
 		return status;
 		}
 
@@ -165,6 +194,10 @@ int ssl3_asynch_handle_digest_callbacks(unsigned char *md, unsigned int size,
 	fprintf(stderr, "ssl3_asynch_handle_digest_callbacks: md = %p, size = %d, userdata = %p, status = %d\n",
 		md, size, userdata, status);
 #endif
+	if (NULL == userdata)
+		{
+		return status;
+		}
 	if (status < 0)
 		{
 		SSL3_TRANSMISSION *trans = (SSL3_TRANSMISSION *)userdata;
@@ -180,6 +213,8 @@ int ssl3_asynch_handle_digest_callbacks(unsigned char *md, unsigned int size,
 					0, status, NULL, 0, NULL,
 					trans->s->asynch_completion_callback_arg);
 			}
+		else
+			SSLerr(SSL_F_SSL3_ASYNCH_HANDLE_DIGEST_CALLBACKS,SSL_R_ASYNCH_COMPL_CALLBACK_NOT_DEFINED);
 		return status;
 		}
 
@@ -213,7 +248,9 @@ SSL3_TRANSMISSION *ssl3_get_transmission_before(SSL *s, SSL3_TRANSMISSION *t)
 		{
 		p = (SSL3_TRANSMISSION_POOL *)
 			OPENSSL_malloc(sizeof(SSL3_TRANSMISSION_POOL));
-		memset(p, 0, sizeof(SSL3_TRANSMISSION_POOL));
+		p->head = p->tail = p->free_head = p->free_tail = (void*)0; 
+		p->pool_break = 0; 
+		p->postprocessing = 0; 
 		s->s3->transmission_pool = p;
 		}
 

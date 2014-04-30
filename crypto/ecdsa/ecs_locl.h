@@ -74,6 +74,16 @@ struct ecdsa_method
 			BIGNUM **r);
 	int (*ecdsa_do_verify)(const unsigned char *dgst, int dgst_len, 
 			const ECDSA_SIG *sig, EC_KEY *eckey);
+	ECDSA_SIG *(*ecdsa_do_sign_asynch)(const unsigned char *dgst, int dgst_len,
+			const BIGNUM *inv, const BIGNUM *rp, EC_KEY *eckey,
+			unsigned char *sig, unsigned int *siglen,
+			int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
+			void *cb_data);
+	int (*ecdsa_do_verify_asynch)(const unsigned char *dgst, int dgst_len,
+			const ECDSA_SIG *sig, EC_KEY *eckey,
+			int (*cb)(void *cb_data, int status),
+			void *cb_data);
+
 #if 0
 	int (*init)(EC_KEY *eckey);
 	int (*finish)(EC_KEY *eckey);

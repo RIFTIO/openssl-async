@@ -566,9 +566,19 @@ printf("which = %04X\nmac key=",which);
 		EVP_CIPHER_CTX_ctrl(dd, EVP_CTRL_GCM_SET_IV_FIXED, k, iv);
 		}
 	else	
+		{
+		if (s->s3->read_retry_data_available) 
+			{
+			if (!EVP_CipherInit_ex(dd,c,NULL,key,(const unsigned char*)&s->s3->backup_iv,(which & SSL3_CC_WRITE)))
+				goto err2;
+			}
+			else 
+			{
         if (!EVP_CipherInit_ex(dd,c,NULL,key,iv,(which & SSL3_CC_WRITE)))
             goto err2;
-
+			memcpy(&s->s3->backup_iv, iv, k);
+			}  
+		} 
 	/* Needed for "composite" AEADs, such as RC4-HMAC-MD5 */
 	if ((EVP_CIPHER_flags(c)&EVP_CIPH_FLAG_AEAD_CIPHER) && *mac_secret_size)
 		EVP_CIPHER_CTX_ctrl(dd,EVP_CTRL_AEAD_SET_MAC_KEY,
@@ -894,23 +904,41 @@ static int tls1_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post)
             trans->te_enc = enc;
             trans->te_pad = pad;
 
+			if (send)
+				trans->flags |= SSL3_TRANS_FLAGS_SEND;
+			else
+				trans->flags &= ~SSL3_TRANS_FLAGS_SEND;
+
+			/* Time to detach the transmission from SSL* */
+			trans->prel_rec_length = l;
+
             EVP_CIPHER_CTX_ctrl_ex(ds,
                                    EVP_CTRL_UPDATE_ASYNCH_CALLBACK_DATA,
                                    0, trans, NULL);
+ 
+			if (s->s3->read_retry_data_available)
+				{
+				memcpy(ds->iv, &s->s3->backup_iv, ds->cipher->iv_len);
+				}
+
             if (!EVP_Cipher(ds, trans->rec.data, trans->rec.input, l))
+				{
                 return 0;
+				}
+                         
             return -1; /* same kind of indication as no data
                         * in non-blocking I/O */
             }
         else
             {
-            i = EVP_Cipher(ds,rec->data,rec->input,l);
+			status = EVP_Cipher(ds,rec->data,rec->input,l);
             }
 
 post:
+
 		if ((EVP_CIPHER_flags(ds->cipher)&EVP_CIPH_FLAG_CUSTOM_CIPHER)
-						?(i<0)
-						:(i==0))
+						?(status<0)
+						:(status==0))
 			return -1;	/* AEAD can fail to verify MAC */
 		if (EVP_CIPHER_mode(enc) == EVP_CIPH_GCM_MODE && !send)
 			{

@@ -1111,6 +1111,7 @@ void ERR_load_EC_strings(void);
 #define EC_F_PKEY_EC_KEYGEN				 199
 #define EC_F_PKEY_EC_PARAMGEN				 219
 #define EC_F_PKEY_EC_SIGN				 218
+#define EC_F_PKEY_EC_SIGN_ASYNCH			 238
 
 /* Reason codes. */
 #define EC_R_ASN1_ERROR					 115

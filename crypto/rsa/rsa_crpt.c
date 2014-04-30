@@ -87,7 +87,7 @@ int RSA_public_encrypt(int flen, const unsigned char *from, unsigned char *to,
 	}
 int RSA_public_encrypt_asynch(int flen, const unsigned char *from, unsigned char *to,
 	RSA *rsa, int padding,
-	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
 	void *cb_data)
 	{
 #ifdef OPENSSL_FIPS
@@ -121,7 +121,7 @@ int RSA_private_encrypt(int flen, const unsigned char *from, unsigned char *to,
 	}
 int RSA_private_encrypt_asynch(int flen, const unsigned char *from, unsigned char *to,
 	RSA *rsa, int padding,
-	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
 	void *cb_data)
 	{
 #ifdef OPENSSL_FIPS
@@ -155,7 +155,7 @@ int RSA_private_decrypt(int flen, const unsigned char *from, unsigned char *to,
 	}
 int RSA_private_decrypt_asynch(int flen, const unsigned char *from, unsigned char *to,
 	RSA *rsa, int padding,
-	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
 	void *cb_data)
 	{
 #ifdef OPENSSL_FIPS
@@ -189,7 +189,7 @@ int RSA_public_decrypt(int flen, const unsigned char *from, unsigned char *to,
 	}
 int RSA_public_decrypt_asynch(int flen, const unsigned char *from, unsigned char *to,
 	RSA *rsa, int padding,
-	int (*cb)(unsigned char *res, int reslen, void *cb_data, int status),
+	int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
 	void *cb_data)
 	{
 #ifdef OPENSSL_FIPS

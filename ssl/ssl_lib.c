@@ -829,9 +829,14 @@ int SSL_pending(const SSL *s)
 
 int SSL_crypto_pending(const SSL *s)
         {
+	if (s && s->s3)
+		{
         if(s->s3->flags & SSL3_FLAGS_ASYNCH)
                 {
-                return (s->s3->outstanding_write_records || s->s3->outstanding_read_records);
+			return ((s->s3->pkeystate == -1) ||
+				s->s3->outstanding_write_crypto || 
+				s->s3->outstanding_read_crypto);
+			}
                 }
         return 0;
         }
@@ -2507,17 +2512,29 @@ int SSL_get_error(const SSL *s,int i)
 	 * etc, where we do encode the error */
 	if ((l=ERR_peek_error()) != 0)
 		{
+		if ((!(s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH)) ||
+			( !(ERR_R_RETRY == ERR_GET_REASON(l))))
+			{
 		if (ERR_GET_LIB(l) == ERR_LIB_SYS)
 			return(SSL_ERROR_SYSCALL);
 		else
 			return(SSL_ERROR_SSL);
+		}
 		}
 
 	if ((i < 0) && SSL_want_read(s))
 		{
 		bio=SSL_get_rbio(s);
 		if (BIO_should_read(bio))
+			{
+			/* For the read case we want to prioritise reading from
+			the crypto engine over reading from the socket. */
+			if (s->s3 && (s->s3->flags & SSL3_FLAGS_ASYNCH) && (s->s3->outstanding_read_crypto))
+				{
+				return(SSL_ERROR_WAIT_ASYNCH_READ);
+				}
 			return(SSL_ERROR_WANT_READ);
+			}
 		else if (BIO_should_write(bio))
 			/* This one doesn't make too much sense ... We never try
 			 * to write to the rbio, and an application program where
@@ -2542,6 +2559,8 @@ int SSL_get_error(const SSL *s,int i)
 					return(SSL_ERROR_WAIT_ASYNCH_READ);
 				else if (s->s3->outstanding_read_records)
 					return(SSL_ERROR_WANT_READ);
+				else if (ERR_R_RETRY == ERR_GET_REASON(l))
+					return(SSL_ERROR_WAIT_ASYNCH_READ);
 				}
 			else
 				return(SSL_ERROR_SYSCALL); /* unknown */
@@ -2552,6 +2571,8 @@ int SSL_get_error(const SSL *s,int i)
 				return(SSL_ERROR_WAIT_ASYNCH_READ);
 			else if (s->s3->outstanding_read_records)
 				return(SSL_ERROR_WANT_READ);
+			else if (ERR_R_RETRY == ERR_GET_REASON(l))
+				return(SSL_ERROR_WAIT_ASYNCH_READ);
 			}
 		}
 
@@ -2576,6 +2597,8 @@ int SSL_get_error(const SSL *s,int i)
 					return(SSL_ERROR_WAIT_ASYNCH_WRITE);
 				else if (s->s3->outstanding_write_records)
 					return(SSL_ERROR_WANT_WRITE);
+				else if (ERR_R_RETRY == ERR_GET_REASON(l))
+					return(SSL_ERROR_WAIT_ASYNCH_WRITE);
 				}
 			else
 				return(SSL_ERROR_SYSCALL);
@@ -2586,6 +2609,8 @@ int SSL_get_error(const SSL *s,int i)
 				return(SSL_ERROR_WAIT_ASYNCH_WRITE);
 			else if (s->s3->outstanding_write_records)
 				return(SSL_ERROR_WANT_WRITE);
+			else if (ERR_R_RETRY == ERR_GET_REASON(l))
+				return(SSL_ERROR_WAIT_ASYNCH_WRITE);
 			}
 		}
 	if ((i < 0) && SSL_want_x509_lookup(s))
@@ -2597,6 +2622,21 @@ int SSL_get_error(const SSL *s,int i)
 		{
 		return(SSL_ERROR_WAIT_ASYNCH);
 		}
+
+	/* This section is to deal with the shutdown case
+	   During shutdown we prioritise SSL_ERROR_WAIT_ASYNCH_WRITE
+	   over SSL_ERROR_WANT_WRITE and the same for reads. */ 
+	if ((i < 0) && (s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH))
+		{
+		if (s->s3->outstanding_write_crypto)
+			return(SSL_ERROR_WAIT_ASYNCH_WRITE);
+		else if (s->s3->outstanding_write_records)
+			return(SSL_ERROR_WANT_WRITE);
+		else if (s->s3->outstanding_read_crypto)
+			return(SSL_ERROR_WAIT_ASYNCH_READ);
+		else if (s->s3->outstanding_read_records)
+			return(SSL_ERROR_WANT_READ);
+                }
 
 	if (i == 0)
 		{
@@ -2912,7 +2952,6 @@ const COMP_METHOD *SSL_get_current_expansion(SSL *s)
 int ssl_init_wbio_buffer(SSL *s,int push)
 	{
 	BIO *bbio;
-	int ret=1;
 
 	if (s->bbio == NULL)
 		{
@@ -2925,16 +2964,20 @@ int ssl_init_wbio_buffer(SSL *s,int push)
 		bbio=s->bbio;
 		if (s->bbio == s->wbio)
 			{
+			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 			s->wbio=BIO_pop(s->wbio);
+			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 			}
 		}
+	if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 	CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 	(void)BIO_reset(bbio);
 /*	if (!BIO_set_write_buffer_size(bbio,16*1024)) */
 	if (!BIO_set_read_buffer_size(bbio,1))
 		{
+		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 		CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 		SSLerr(SSL_F_SSL_INIT_WBIO_BUFFER,ERR_R_BUF_LIB);
 		return(0);
@@ -2949,6 +2992,7 @@ int ssl_init_wbio_buffer(SSL *s,int push)
 		if (s->wbio == bbio)
 			s->wbio=BIO_pop(bbio);
 		}
+	if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 	CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 	return(1);
 	}
@@ -2960,8 +3004,10 @@ void ssl_free_wbio_buffer(SSL *s)
 	if (s->bbio == s->wbio)
 		{
 		/* remove buffering */
+		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 		CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 		s->wbio=BIO_pop(s->wbio);
+		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 		CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 #ifdef REF_CHECK /* not the usual REF_CHECK, but this avoids adding one more preprocessor symbol */
 		assert(s->wbio != NULL);

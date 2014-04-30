@@ -63,6 +63,7 @@
 #include <openssl/rsa.h>
 #include <openssl/bn.h>
 #include <openssl/evp.h>
+#include <openssl/pool.h>
 #ifndef OPENSSL_NO_CMS
 #include <openssl/cms.h>
 #endif
@@ -92,6 +93,20 @@ typedef struct
 	/* Temp buffer */
 	unsigned char *tbuf;
 	} RSA_PKEY_CTX;
+
+typedef struct rsa_asynch_pkey_cb_ctx_st RSA_ASYNCH_PKEY_CB_CTX;
+struct rsa_asynch_pkey_cb_ctx_st
+	{
+	/* For asynch operations */
+	RSA_PKEY_CTX *rctx;
+	RSA *rsa;
+	int (*sign_user_cb)(unsigned char *md, size_t size,
+		void *userdata, int status);
+	int (*verify_user_cb)(void *userdata, int status);
+	void *cb_userdata;
+	const unsigned char *m;
+	};
+IMPLEMENT_TYPED_LOCKED_POOL(RSA_ASYNCH_PKEY_CB_CTX, 1024, CRYPTO_LOCK_ASYNCH)
 
 static int pkey_rsa_init(EVP_PKEY_CTX *ctx)
 	{
@@ -278,6 +293,84 @@ static int pkey_rsa_sign(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen,
 	return 1;
 	}
 
+static int pkey_rsa_sign_asynch(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen,
+					const unsigned char *tbs, size_t tbslen,
+					int (*cb)(unsigned char *result, size_t reslen,
+					void *cb_data, int status),
+					void *cb_data)
+	{
+	int ret=-1;
+	if (!ctx || !ctx->pkey)
+		return ret;
+	RSA_PKEY_CTX *rctx = ctx->data;
+	RSA *rsa = ctx->pkey->pkey.rsa;
+
+#ifdef OPENSSL_FIPS
+	RSAerr(RSA_F_PKEY_RSA_SIGN_ASYNCH, RSA_R_OPERATION_NOT_ALLOWED_IN_FIPS_MODE);
+	return -1;
+#endif
+
+	if (rctx->md)
+		{
+		if (tbslen != (size_t)EVP_MD_size(rctx->md))
+			{
+			RSAerr(RSA_F_PKEY_RSA_SIGN_ASYNCH,
+					RSA_R_INVALID_DIGEST_LENGTH);
+			return ret;
+			}
+		/* FIXME: there is no support for asynchronous RSA_sign_ASN1_OCTET_STRING */
+		if (EVP_MD_type(rctx->md) == NID_mdc2)
+			{
+			RSAerr(RSA_F_PKEY_RSA_SIGN_ASYNCH,
+					RSA_R_NO_ASYNCH_SUPPORT);
+			return ret;
+			}
+		else if (rctx->pad_mode == RSA_X931_PADDING)
+			{
+			if (!setup_tbuf(rctx, ctx))
+				{
+				RSAerr(RSA_F_PKEY_RSA_SIGN_ASYNCH,
+					ERR_R_MALLOC_FAILURE);
+				return ret;
+				}
+			memcpy(rctx->tbuf, tbs, tbslen);
+			rctx->tbuf[tbslen] =
+				RSA_X931_hash_id(EVP_MD_type(rctx->md));
+			ret = RSA_private_encrypt_asynch(tbslen + 1, rctx->tbuf,
+						sig, rsa, RSA_X931_PADDING, cb, cb_data);
+			}
+		if (rctx->pad_mode == RSA_PKCS1_PADDING)
+			{
+			ret = RSA_sign_asynch(EVP_MD_type(rctx->md),
+						tbs, tbslen, sig, (unsigned int*) siglen, rsa, cb, cb_data);
+			}
+		else if (rctx->pad_mode == RSA_PKCS1_PSS_PADDING)
+			{
+			if (!setup_tbuf(rctx, ctx))
+				{
+				RSAerr(RSA_F_PKEY_RSA_SIGN_ASYNCH,
+					ERR_R_MALLOC_FAILURE);
+				return -1;
+				}
+			if (!RSA_padding_add_PKCS1_PSS_mgf1(rsa,
+						rctx->tbuf, tbs,
+						rctx->md, rctx->mgf1md,
+						rctx->saltlen))
+				return -1;
+			ret = RSA_private_encrypt_asynch(RSA_size(rsa), rctx->tbuf,
+						sig, rsa, RSA_NO_PADDING, cb, cb_data);
+			}
+		else
+			{
+			RSAerr(RSA_F_PKEY_RSA_SIGN_ASYNCH,RSA_R_ILLEGAL_OR_UNSUPPORTED_PADDING_MODE);
+			return -1;
+			}
+		}
+	else
+		ret = RSA_private_encrypt_asynch(tbslen, tbs, sig, ctx->pkey->pkey.rsa,
+							rctx->pad_mode, cb, cb_data);
+	return ret;
+	}
 
 static int pkey_rsa_verifyrecover(EVP_PKEY_CTX *ctx,
 					unsigned char *rout, size_t *routlen,
@@ -410,6 +503,117 @@ static int pkey_rsa_verify(EVP_PKEY_CTX *ctx,
 
 	return 1;
 			
+	}
+	
+static int pkey_rsa_verify_asynch_post(unsigned char *res, size_t i,
+					void *apkcbctxt, int status)
+	{
+	int ret = 0;
+	RSA_ASYNCH_PKEY_CB_CTX *apkcbctx = (RSA_ASYNCH_PKEY_CB_CTX *)apkcbctxt;
+	RSA_PKEY_CTX *rctx = NULL;
+	RSA *rsa = NULL;
+	if (!apkcbctx || !apkcbctx->verify_user_cb)
+		return ret;
+       
+	rctx = apkcbctx->rctx;
+    
+	if (rctx && rctx->pad_mode == RSA_PKCS1_PSS_PADDING)
+		{
+		rsa = apkcbctx->rsa;
+    
+		if (status > 0 && rctx && rsa)
+			status = RSA_verify_PKCS1_PSS_mgf1(rsa, apkcbctx->m,
+					rctx->md, rctx->mgf1md,
+					rctx->tbuf, rctx->saltlen);
+		}
+                        
+	ret = apkcbctx->verify_user_cb(apkcbctx->cb_userdata, status);
+	free_RSA_ASYNCH_PKEY_CB_CTX(apkcbctx);
+	return ret;
+	}
+
+static int pkey_rsa_verify_asynch(EVP_PKEY_CTX *ctx, 
+		const unsigned char *sig, size_t siglen,
+		const unsigned char *tbs, size_t tbslen,
+		int (*cb)(void *cb_data, int status),
+		void *cb_data)
+	{
+	int ret=-1;
+	if( !ctx || !ctx->pkey)
+		return -1;
+	RSA_PKEY_CTX *rctx = ctx->data;
+	RSA *rsa = ctx->pkey->pkey.rsa;
+
+#ifdef OPENSSL_FIPS
+	RSAerr(RSA_F_PKEY_RSA_VERIFY_ASYNCH, RSA_R_OPERATION_NOT_ALLOWED_IN_FIPS_MODE);
+	return ret;
+#endif
+
+	if (rctx->md)
+		{
+		if (rctx->pad_mode == RSA_PKCS1_PADDING)
+			{
+			ret = RSA_verify_asynch(EVP_MD_type(rctx->md),
+						tbs, tbslen, sig, siglen, rsa, cb, cb_data);
+			}
+		else if (rctx->pad_mode == RSA_X931_PADDING)
+			{
+			/* FIXME: there is no support for asynchronous pkey_rsa_verifyrecover */
+			RSAerr(RSA_F_PKEY_RSA_VERIFY_ASYNCH,
+					RSA_R_NO_ASYNCH_SUPPORT);
+			return 0;
+			}
+		else if (rctx->pad_mode == RSA_PKCS1_PSS_PADDING)
+			{
+			RSA_ASYNCH_PKEY_CB_CTX *apkcbctx = alloc_RSA_ASYNCH_PKEY_CB_CTX();
+			if (apkcbctx == NULL)
+				{
+				RSAerr(RSA_F_PKEY_RSA_VERIFY_ASYNCH,ERR_R_RETRY);
+				return -1;
+				}
+			apkcbctx->rctx = rctx;
+			apkcbctx->rsa = rsa;
+			apkcbctx->verify_user_cb = cb;
+			apkcbctx->cb_userdata = cb_data;
+			apkcbctx->m = tbs;
+			if (!setup_tbuf(rctx, ctx))
+				{
+				RSAerr(RSA_F_PKEY_RSA_VERIFY_ASYNCH,ERR_R_MALLOC_FAILURE);
+				free_RSA_ASYNCH_PKEY_CB_CTX(apkcbctx);
+				return ret;
+				}
+			ret = RSA_public_decrypt_asynch(siglen, sig, rctx->tbuf,
+				rsa, RSA_NO_PADDING, pkey_rsa_verify_asynch_post, apkcbctx);
+			}
+		else
+			{
+			RSAerr(RSA_F_PKEY_RSA_VERIFY_ASYNCH,RSA_R_ILLEGAL_OR_UNSUPPORTED_PADDING_MODE);
+			return ret;
+			}
+		}
+	else
+		{
+		RSA_ASYNCH_PKEY_CB_CTX *apkcbctx = alloc_RSA_ASYNCH_PKEY_CB_CTX();
+		if (apkcbctx == NULL)
+			{
+			RSAerr(RSA_F_PKEY_RSA_VERIFY_ASYNCH,ERR_R_RETRY);
+			return -1;
+			}
+		apkcbctx->rctx = rctx;
+		apkcbctx->rsa = rsa;
+		apkcbctx->verify_user_cb = cb;
+		apkcbctx->cb_userdata = cb_data;
+		apkcbctx->m = tbs;
+		if (!setup_tbuf(rctx, ctx))
+			{
+			RSAerr(RSA_F_PKEY_RSA_VERIFY_ASYNCH,ERR_R_MALLOC_FAILURE);
+			free_RSA_ASYNCH_PKEY_CB_CTX(apkcbctx);
+			return ret;
+			}
+		ret = RSA_public_decrypt_asynch(siglen, sig, rctx->tbuf,
+						rsa, rctx->pad_mode, pkey_rsa_verify_asynch_post, apkcbctx);
+		}
+	return ret;
 	}
 	
 
@@ -699,10 +903,10 @@ const EVP_PKEY_METHOD rsa_pkey_meth =
 	pkey_rsa_keygen,
 
 	0,
-	{ pkey_rsa_sign, 0 },
+	{ pkey_rsa_sign, pkey_rsa_sign_asynch },
 
 	0,
-	{ pkey_rsa_verify, 0 },
+	{ pkey_rsa_verify, pkey_rsa_verify_asynch },
 
 	0,
 	{ pkey_rsa_verifyrecover, 0 },

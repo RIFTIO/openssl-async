@@ -79,7 +79,7 @@
 #define OUTPUT_HEXDUMP	2
 
 static void usage(void);
-static int write_results(unsigned char *buf, int buflen,
+static int write_results(unsigned char *buf, size_t buflen,
 			  void *cb_data, int status);
 
 #undef PROG
@@ -363,7 +363,7 @@ int MAIN(int argc, char **argv)
 	return ret;
 }
 
-static int write_results(unsigned char *buf, int buflen,
+static int write_results(unsigned char *buf, size_t buflen,
 			  void *cb_data, int status)
 {
 	struct output_data *actx = (struct output_data *)cb_data;
