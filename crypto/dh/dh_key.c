@@ -97,6 +97,56 @@ int DH_compute_key(unsigned char *key, const BIGNUM *pub_key, DH *dh)
 	return dh->meth->compute_key(key, pub_key, dh);
 	}
 
+int DH_generate_key_asynch(DH *dh,  int (*cb)(unsigned char *res,
+				size_t reslen, void *cb_data, int status),
+				void *cb_data)
+	{
+	if (!dh || !dh->meth)
+		{
+		DHerr(DH_F_DH_GENERATE_KEY_ASYNCH, DH_R_INVALID_NULL_PARAMETER);
+		return 0;
+		}
+#ifdef OPENSSL_FIPS
+	if (FIPS_mode() && !(dh->meth->flags & DH_FLAG_FIPS_METHOD)
+			&& !(dh->flags & DH_FLAG_NON_FIPS_ALLOW))
+		{
+		DHerr(DH_F_DH_GENERATE_KEY_ASYNCH, DH_R_NON_FIPS_METHOD);
+		return 0;
+		}
+#endif
+	if (!dh->meth->generate_key_asynch)
+		{
+		DHerr(DH_F_DH_GENERATE_KEY_ASYNCH, DH_R_INVALID_NULL_PARAMETER);
+		return 0;
+		}
+	return dh->meth->generate_key_asynch(dh, cb, cb_data);
+	}
+
+int DH_compute_key_asynch(unsigned char *key, int *len, const BIGNUM *pub_key, DH *dh,
+				int (*cb)(unsigned char *res, size_t reslen,
+				void *cb_data, int status), void *cb_data)
+	{
+	if (!dh || !dh->meth)
+		{
+		DHerr(DH_F_DH_COMPUTE_KEY_ASYNCH, DH_R_INVALID_NULL_PARAMETER);
+		return 0;
+		}
+#ifdef OPENSSL_FIPS
+	if (FIPS_mode() && !(dh->meth->flags & DH_FLAG_FIPS_METHOD)
+			&& !(dh->flags & DH_FLAG_NON_FIPS_ALLOW))
+		{
+		DHerr(DH_F_DH_COMPUTE_KEY_ASYNCH, DH_R_NON_FIPS_METHOD);
+		return 0;
+		}
+#endif
+	if (!dh->meth->compute_key_asynch)
+		{
+		DHerr(DH_F_DH_COMPUTE_KEY_ASYNCH, DH_R_INVALID_NULL_PARAMETER);
+		return 0;
+		}
+	return dh->meth->compute_key_asynch(key, len, pub_key, dh, cb, cb_data);
+	}
+
 static DH_METHOD dh_ossl = {
 "OpenSSL DH Method",
 generate_key,
@@ -105,6 +155,8 @@ dh_bn_mod_exp,
 dh_init,
 dh_finish,
 0,
+NULL,
+NULL,
 NULL,
 NULL
 };

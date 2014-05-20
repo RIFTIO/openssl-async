@@ -80,6 +80,7 @@
 #define DSA_SECONDS	10
 #define ECDSA_SECONDS   10
 #define ECDH_SECONDS    10
+#define DH_SECONDS      10
 
 /* 11-Sep-92 Andrew Daviel   Support for Silicon Graphics IRIX added */
 /* 06-Apr-92 Luke Brennan    Support for VMS and add extra signal calls */
@@ -184,6 +185,10 @@
 #include <openssl/dsa.h>
 #include "./testdsa.h"
 #endif
+#ifndef OPENSSL_NO_DH
+#include <openssl/dh.h>
+#include "./testdh.h"
+#endif
 #ifndef OPENSSL_NO_ECDSA
 #include <openssl/ecdsa.h>
 #endif
@@ -282,9 +287,14 @@ static int request_size_supported(const EVP_CIPHER* cipher, int size);
 #define SIZE_NUM	8
 #define RSA_NUM		4
 #define DSA_NUM		3
+#define DH_NUM		3
 
 #define EC_NUM       16
+#define MAX_DH_SIZE   512 
 #define MAX_ECDH_SIZE 256
+
+#define RETRY 		1
+#define NO_RETRY	0
 
 static const char *names[ALGOR_NUM]={
   "md2","mdc2","md4","md5","hmac(md5)","sha1","rmd160","rc4",
@@ -304,6 +314,9 @@ static double dsa_results[DSA_NUM][2];
 #endif
 #ifndef OPENSSL_NO_ECDSA
 static double ecdsa_results[EC_NUM][2];
+#endif
+#ifndef OPENSSL_NO_DH
+static double dh_results[DH_NUM][1];
 #endif
 #ifndef OPENSSL_NO_ECDH
 static double ecdh_results[EC_NUM][1];
@@ -338,16 +351,7 @@ typedef struct CallbackData
 } CallbackData_t;
 
 
-static void cipher_async_cb(unsigned char *out, int outl, void *vparams, int status)
-{
-    CallbackData_t *cbData = (CallbackData_t *)vparams;
-
-    if (status && outl != 0)
-		cbData->stats->resp++;
-}
-
-static void digest_async_cb(unsigned char *out, unsigned int outl, void *vparams, 
-				int status)
+static void async_cb(unsigned char *out, unsigned int outl, void *vparams, int status)
 {
     CallbackData_t *cbData = (CallbackData_t *)vparams;
 
@@ -356,7 +360,7 @@ static void digest_async_cb(unsigned char *out, unsigned int outl, void *vparams
 }
 
 
-static int rsa_async_cb(unsigned char *out, size_t outl, void *vparams, int status)
+static int async_cb_ex(unsigned char *out, size_t outl, void *vparams, int status)
 {
     CallbackData_t *cbData = (CallbackData_t *)vparams;
 
@@ -365,28 +369,16 @@ static int rsa_async_cb(unsigned char *out, size_t outl, void *vparams, int stat
 	return 1;
 	}
 
-static int ecdh_async_cb(unsigned char *out, size_t outl, void *vparams, int status)
+static int async_cb_ex1(unsigned char *out, size_t outl, void *vparams, int status)
 	{
 	CallbackData_t *cbData = (CallbackData_t *)vparams;
 
-	if (status && outl != 0)
-		cbData->stats->resp++;
-  
-	/* Used subsequently when comparing ECDH keys */ 
-	return 1;
-	}
-
-static int ecdsa_async_sign_cb(unsigned char *out, size_t outl, void *vparams, 
-				int status)
-	{
-	CallbackData_t *cbData = (CallbackData_t *)vparams;
-
-	if (status != 0)
+	if (status)
 		cbData->stats->resp++;
 	return 1;
 	}
 
-static int ecdsa_async_verify_cb(void *vparams, int status)
+static int async_verify_cb(void *vparams, int status)
 	{
 	CallbackData_t *cbData = (CallbackData_t *)vparams;
     
@@ -524,6 +516,27 @@ static void *KDF1_SHA1(const void *in, size_t inlen, void *out, size_t *outlen)
 	}
 #endif	/* OPENSSL_NO_ECDH */
 
+static void dumpError_ex(char *errStr, CallbackStats_t *stats, int retry, int *k)
+	{
+	char error_string[ERROR_STRING_LEN] = {0};
+	int error = ERR_get_error();
+
+	if((retry == RETRY) && (ERR_R_RETRY == ERR_GET_REASON(error)))
+		{
+		stats->submission_retries++;
+		}
+	else
+		{
+		stats->gen_errors++;
+		ERR_error_string(error, error_string);
+		BIO_printf(bio_err, "%s: %s\n",errStr, error_string);
+		}
+	}
+static void dumpError(char *errStr, CallbackStats_t *stats, int retry)
+	{
+	int k=-1;	
+	dumpError_ex(errStr,stats, retry, &k);
+	}
 
 int MAIN(int, char **);
 
@@ -538,7 +551,7 @@ int MAIN(int argc, char **argv)
 	char *engine_id = NULL;
 #endif
 #if !defined(OPENSSL_NO_RSA) || !defined(OPENSSL_NO_DSA)
-	long rsa_count;
+	long rsa_count=0;
 #endif
 #ifndef OPENSSL_NO_RSA
 	unsigned rsa_num;
@@ -775,6 +788,30 @@ int MAIN(int argc, char **argv)
 	long ecdsa_c[EC_NUM][2];
 #endif
 
+#ifndef OPENSSL_NO_DH
+	DH *dh_a[DH_NUM], *dh_b[DH_NUM];
+	unsigned char sec_a[MAX_DH_SIZE], sec_b[MAX_DH_SIZE];
+	int sec_size_a, sec_size_b;
+	int dh_checks = 0;
+	int sec_idx   = 0;
+	long dh_c[DH_NUM][2];
+
+	static int dh_bits[DH_NUM] =
+		{ 1024, 2048, 4096 };
+
+	static const char * dh_names[DH_NUM] =
+		{
+		"prime1024",
+		"prime2048",
+		"prime4096"
+		};
+
+#define R_P1024    0
+#define R_P2048    1
+#define R_P4096    2
+
+#endif
+
 #ifndef OPENSSL_NO_ECDH
 	EC_KEY *ecdh_a[EC_NUM], *ecdh_b[EC_NUM];
 	unsigned char secret_a[MAX_ECDH_SIZE], secret_b[MAX_ECDH_SIZE];
@@ -788,6 +825,9 @@ int MAIN(int argc, char **argv)
 	int dsa_doit[DSA_NUM];
 #ifndef OPENSSL_NO_ECDSA
 	int ecdsa_doit[EC_NUM];
+#endif
+#ifndef OPENSSL_NO_DH
+	int dh_doit[DH_NUM];
 #endif
 #ifndef OPENSSL_NO_ECDH
         int ecdh_doit[EC_NUM];
@@ -814,6 +854,13 @@ int MAIN(int argc, char **argv)
 #endif
 #ifndef OPENSSL_NO_ECDSA
 	for (i=0; i<EC_NUM; i++) ecdsa[i] = NULL;
+#endif
+#ifndef OPENSSL_NO_DH
+	for (i=0; i<DH_NUM; i++)
+		{
+		dh_a[i] = NULL;
+		dh_b[i] = NULL;
+		}
 #endif
 #ifndef OPENSSL_NO_ECDH
 	for (i=0; i<EC_NUM; i++)
@@ -861,6 +908,10 @@ int MAIN(int argc, char **argv)
 #ifndef OPENSSL_NO_ECDSA
 	for (i=0; i<EC_NUM; i++)
 		ecdsa_doit[i]=0;
+#endif
+#ifndef OPENSSL_NO_DH
+	for (i=0; i<DH_NUM; i++)
+		dh_doit[i]=0;
 #endif
 #ifndef OPENSSL_NO_ECDH
 	for (i=0; i<EC_NUM; i++)
@@ -1183,6 +1234,19 @@ int MAIN(int argc, char **argv)
 			}
 		else
 #endif
+
+#ifndef OPENSSL_NO_DH
+		     if (strcmp(*argv,"dhp1024") == 0) dh_doit[R_P1024]=2;
+		else if (strcmp(*argv,"dhp2048") == 0) dh_doit[R_P2048]=2;
+		else if (strcmp(*argv,"dhp4096") == 0) dh_doit[R_P4096]=2;
+		else if (strcmp(*argv,"dh") == 0)
+			{
+			for (i=0; i < DH_NUM; i++)
+				dh_doit[i]=1;
+			}
+		else
+#endif
+
 #ifndef OPENSSL_NO_ECDH
 		     if (strcmp(*argv,"ecdhp160") == 0) ecdh_doit[R_EC_P160]=2;
 		else if (strcmp(*argv,"ecdhp192") == 0) ecdh_doit[R_EC_P192]=2;
@@ -1296,6 +1360,10 @@ int MAIN(int argc, char **argv)
 			BIO_printf(bio_err,"ecdsab163 ecdsab233 ecdsab283 ecdsab409 ecdsab571\n");
 			BIO_printf(bio_err,"ecdsa\n");
 #endif
+#ifndef OPENSSL_NO_DH
+			BIO_printf(bio_err,"dhp1024  dhp2048  dhp4096\n");
+			BIO_printf(bio_err,"dh\n");
+#endif
 #ifndef OPENSSL_NO_ECDH
 			BIO_printf(bio_err,"ecdhp160  ecdhp192  ecdhp224  ecdhp256  ecdhp384  ecdhp521\n");
 			BIO_printf(bio_err,"ecdhk163  ecdhk233  ecdhk283  ecdhk409  ecdhk571\n");
@@ -1393,6 +1461,10 @@ int MAIN(int argc, char **argv)
 		for (i=0; i<EC_NUM; i++)
 			ecdsa_doit[i]=1;
 #endif
+#ifndef OPENSSL_NO_DH
+		for (i=0; i<DH_NUM; i++)
+			dh_doit[i]=1;
+#endif
 #ifndef OPENSSL_NO_ECDH
 		for (i=0; i<EC_NUM; i++)
 			ecdh_doit[i]=1;
@@ -1433,6 +1505,12 @@ int MAIN(int argc, char **argv)
 	dsa_key[0]=get_dsa512();
 	dsa_key[1]=get_dsa1024();
 	dsa_key[2]=get_dsa2048();
+#endif
+
+#ifndef OPENSSL_NO_DH
+	dh_a[0]=get_dh1024();
+	dh_a[1]=get_dh2048();
+	dh_a[2]=get_dh4096();
 #endif
 
 #ifndef OPENSSL_NO_DES
@@ -1650,6 +1728,27 @@ int MAIN(int argc, char **argv)
 			}
 		}
 #endif
+
+#ifndef OPENSSL_NO_DH
+	dh_c[R_P1024][0]=count/1000;
+	dh_c[R_P1024][1]=count/1000;
+	for (i=R_P2048; i<=R_P4096; i++)
+		{
+		dh_c[i][0]=dh_c[i-1][0]/2;
+		dh_c[i][1]=dh_c[i-1][1]/2;
+		if ((dh_doit[i] <= 1) && (dh_c[i][0] == 0))
+			dh_doit[i]=0;
+		else
+			{
+			if (dh_c[i] == 0)
+				{
+				dh_c[i][0]=1;
+				dh_c[i][1]=1;
+				}
+			}
+		}
+#endif
+
 
 #ifndef OPENSSL_NO_ECDH
 	ecdh_c[R_EC_P160][0]=count/1000;
@@ -2192,7 +2291,6 @@ int MAIN(int argc, char **argv)
 					EVP_CIPHER_CTX * ctx;
 					int outl;
 					int retval = 0;
-					int error;
 
 					ctx=(EVP_CIPHER_CTX *)OPENSSL_malloc(sizeof(EVP_CIPHER_CTX)); 
 					if(NULL==ctx)
@@ -2204,7 +2302,7 @@ int MAIN(int argc, char **argv)
 					EVP_CIPHER_CTX_init(ctx);
 
 					if (!EVP_CIPHER_CTX_ctrl_ex(ctx, EVP_CTRL_SETUP_ASYNCH_CALLBACK,
-                                				0, &cb_data, (void (*)(void))cipher_async_cb))
+								0, &cb_data, (void (*)(void))async_cb))
     				     		{
       				         	BIO_printf(bio_err, "[%s] --- Failed to Enable async/polling" 
 							"with EVP_CIPHER_CTX_ctrl_ex\n", __func__);
@@ -2242,18 +2340,7 @@ int MAIN(int argc, char **argv)
 							retval = EVP_DecryptUpdate(ctx,buf,&outl,buf,lengths[j]);
 							if(retval == 0)
 								{ /*Assume this is a retry error and poll to free up TX space */
-								error = ERR_get_error();
-								if (ERR_R_RETRY == ERR_GET_REASON(error))
-									cb_data.stats->submission_retries++;
-								else
-									{
-									char error_string[ERROR_STRING_LEN] = {0};
-									ERR_error_string(error, error_string);
-									BIO_printf(bio_err, "Error reported by "
-										"EVP interface %s\n", error_string);
-									cb_data.stats->gen_errors++;
-									}
-
+								dumpError("Error reported by EVP interface",cb_data.stats,RETRY); 
 								poll_engine(engine, &cb_stats, 0);
 								count--; /* Decrement count as the request was not submitted */
 								}
@@ -2274,18 +2361,7 @@ int MAIN(int argc, char **argv)
 							retval = EVP_EncryptUpdate(ctx,buf,&outl,buf,lengths[j]);
 							if(retval == 0)
 								{ /*Assume this is a retry error and poll to free up TX space */
-								error = ERR_get_error();
-								if (ERR_R_RETRY == ERR_GET_REASON(error))	
-									cb_data.stats->submission_retries++;
-								else
-									{
-									char error_string[ERROR_STRING_LEN] = {0};
-									ERR_error_string(error, error_string);
-        								BIO_printf(bio_err, "Error reported by "
-											 "EVP interface %s\n", error_string);
-									cb_data.stats->gen_errors++;
-									}
- 		
+								dumpError("Error reported by EVP interface", cb_data.stats,RETRY);
 								poll_engine(engine, &cb_stats, 0);
 								count--; /* Decrement count as the request was not submitted */
 								}
@@ -2298,21 +2374,9 @@ int MAIN(int argc, char **argv)
 						retval = EVP_EncryptFinal_ex(ctx,buf,&outl);
 						if(retval == 0)
 							{
-							error = ERR_get_error();
-							if (ERR_R_RETRY == ERR_GET_REASON(error))
-								{
-								cb_data.stats->submission_retries++;
+							dumpError_ex("Error reported by EVP interface", cb_data.stats,RETRY,&k);
 								poll_engine(engine, &cb_stats, 0);
 								}
-							else
-								{
-								char error_string[ERROR_STRING_LEN] = {0};
-								ERR_error_string(error, error_string);
-								BIO_printf(bio_err, "Error reported by "
-									"EVP interface %s\n", error_string);
-								cb_data.stats->gen_errors++;
-								}
-							}
 							poll_engine(engine, &cb_stats, EMPTY_ENGINE);
 						}
 
@@ -2376,7 +2440,7 @@ int MAIN(int argc, char **argv)
 				     	EVP_MD_CTX_set_flags(&ctx,EVP_MD_CTX_FLAG_ONESHOT);
 
 				     	if (!EVP_MD_CTX_ctrl_ex(&ctx, EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK,
-                                			0, &cb_data, (void (*)(void))digest_async_cb))
+								0, &cb_data, (void (*)(void))async_cb))
     				         	{
       				         	BIO_printf(bio_err, "[%s] --- Failed to Enable async/polling" 
 							"with EVP_MD_CTX_ctrl_ex\n", __func__);
@@ -2432,7 +2496,6 @@ int MAIN(int argc, char **argv)
 		RAND_pseudo_bytes(buf,36);
 		if(async)
 			{
-			int error = 0;
 			int dec_len = 0;
 			unsigned char* dec_buf=NULL;
 			if ((dec_buf=(unsigned char *)OPENSSL_malloc((int)BUFSIZE)) == NULL)
@@ -2441,17 +2504,11 @@ int MAIN(int argc, char **argv)
 				goto end;
 				}
 			dec_len=RSA_private_encrypt_asynch(36,buf,dec_buf,rsa_key[j],RSA_PKCS1_PADDING,
-								rsa_async_cb, &cb_data);
+								async_cb_ex, &cb_data);
 			if (dec_len == 0)
 				{
-				int error = 0;
-				char error_string[ERROR_STRING_LEN] = {0};
 				/*Assumed there wont be a retry*/
-				error = ERR_get_error();
-				ERR_error_string(error, error_string);
-				BIO_printf(bio_err, "RSA private encrypt failure %s, return %i "
-						"RSA test terminated\n",
-						error_string, rsa_num);
+				dumpError("RSA private encrypt failure", cb_data.stats,NO_RETRY);
 				rsa_count=1;
 				}
 			else
@@ -2469,24 +2526,11 @@ int MAIN(int argc, char **argv)
 				{
 					rsa_num=RSA_private_encrypt_asynch(36,buf,buf2,
 							rsa_key[j],RSA_PKCS1_PADDING,
-					rsa_async_cb, &cb_data);	
+							async_cb_ex, &cb_data);
 				
 				if (rsa_num == 0)
 					{
-						error = ERR_get_error();
-						if (ERR_R_RETRY == ERR_GET_REASON(error))
-							cb_data.stats->submission_retries++;
-						else
-							{
-							char error_string[ERROR_STRING_LEN] = {0};
-							ERR_error_string(error, error_string);
-					BIO_printf(bio_err,
-								"RSA private encrypt failure %s, return %i\n",
-								error_string, rsa_num);
-								cb_data.stats->gen_errors++;
-							}
-						poll_engine(engine, &cb_stats, 0);
-						count--; /* Decrement count as the request was not submitted */
+						dumpError("RSA private encrypt failure", cb_data.stats,RETRY);
 					}
 				else
 						cb_data.stats->req++;
@@ -2512,17 +2556,11 @@ int MAIN(int argc, char **argv)
 
 			ret=RSA_public_decrypt_asynch(dec_len,dec_buf,
 						buf,rsa_key[j],RSA_PKCS1_PADDING,
-						rsa_async_cb, &cb_data);
+						async_cb_ex, &cb_data);
 			if (ret == 0)
 				{
-				int error = 0;
-				char error_string[ERROR_STRING_LEN] = {0};
 				/*Currently retries are not supported*/
-				error = ERR_get_error();
-				ERR_error_string(error, error_string);
-				BIO_printf(bio_err, "RSA private encrypt failure %s, return %i "
-						"RSA test terminated\n",
-						error_string, rsa_num);
+				dumpError("RSA private encrypt failure", cb_data.stats,NO_RETRY);
 				rsa_count=1;
 				}
 			else
@@ -2538,22 +2576,11 @@ int MAIN(int argc, char **argv)
                                 {
 					ret=RSA_public_decrypt_asynch(dec_len,dec_buf,
 						buf,rsa_key[j],RSA_PKCS1_PADDING,
-					rsa_async_cb, &cb_data);
+						async_cb_ex, &cb_data);
                                 if (ret <= 0)
                                     	{
-						error = ERR_get_error();
-						if (ERR_R_RETRY == ERR_GET_REASON(error))
-							cb_data.stats->submission_retries++;
-						else
-							{
-							char error_string[ERROR_STRING_LEN] = {0};
-							ERR_error_string(error, error_string);
-                                    	BIO_printf(bio_err,
-								"RSA public decrypt failure %s, return %i\n",
-								error_string, ret);
+					dumpError("RSA public decrypt failure", cb_data.stats,RETRY);
                                         ERR_print_errors(bio_err);
-							cb_data.stats->gen_errors++;
-							}
 						poll_engine(engine, &cb_stats, 0);
 						count--; /* Decrement count as the request was not submitted */
                                     	}
@@ -2665,6 +2692,10 @@ int MAIN(int argc, char **argv)
 		{
 		unsigned int kk;
 		int ret;
+		CallbackStats_t cb_stats;
+		RESET_CALLBACK_STATS(cb_stats);
+		CallbackData_t cb_data;
+		cb_data.stats=&cb_stats;
 
 		if (!dsa_doit[j]) continue;
 		RAND_pseudo_bytes(buf,20);
@@ -2675,6 +2706,8 @@ int MAIN(int argc, char **argv)
 			}
 /*		DSA_generate_key(dsa_key[j]); */
 /*		DSA_sign_setup(dsa_key[j],NULL); */
+		if (!async) /* DSA sign & verify synchronous mode */
+			{
 		ret=DSA_sign(EVP_PKEY_DSA,buf,20,buf2,
 			&kk,dsa_key[j]);
 		if (ret == 0)
@@ -2743,7 +2776,117 @@ int MAIN(int argc, char **argv)
 				   count,dsa_bits[j],d);
 			dsa_results[j][1]=d/(double)count;
 			}
+			}	
 
+		if (async) /* DSA sign & verify asynchronous mode */
+			{
+			RESET_CALLBACK_STATS(cb_stats);
+
+			ret = DSA_sign_asynch(EVP_PKEY_DSA, buf, 20, buf2,
+					&kk, dsa_key[j], async_cb_ex1, &cb_data);
+			if (ret <= 0)
+				{
+				dumpError("DSA sign async failure. No DSA sign will be performed", cb_data.stats,NO_RETRY);
+				rsa_count=1;
+				}
+			else
+				{
+				cb_data.stats->req++;
+				poll_engine(engine, &cb_stats, EMPTY_ENGINE);
+				cb_data.stats->req = cb_data.stats->resp = 0;
+
+				pkey_print_message("sign","dsa",
+						dsa_c[j][0],
+						dsa_bits[j],
+						DSA_SECONDS);
+
+				Time_F(START);
+				for (count=0,run=1; COND(dsa_c[j][0]);
+						count++)
+					{
+					ret=DSA_sign_asynch(EVP_PKEY_DSA, buf, 20, buf2,
+							&kk, dsa_key[j], async_cb_ex1, &cb_data);
+
+					if (ret <= 0)
+						{
+						dumpError("DSA sign async failure", cb_data.stats,RETRY);
+						poll_engine(engine, &cb_stats, 0);
+						count--; /* Decrement count as the request was not submitted */
+						}
+					else
+						{
+						cb_data.stats->req++;
+						} 
+					if (count != 0 && (count % batch) == 0)
+						poll_engine(engine, &cb_stats, 0);
+					}
+				poll_engine(engine, &cb_stats, EMPTY_ENGINE);
+				d=Time_F(STOP);
+
+				BIO_printf(bio_err, mr ? "+R5:%ld:%d:%.2f\n" :
+						"%ld %d bit DSA signs in %.2fs \n",
+						count, dsa_bits[j], d);
+				dsa_results[j][0]=d/(double)count;
+				rsa_count=count;
+				BIO_printf(bio_err, "Async DSA Sign: no requests %u  no responses %u  "
+						"no submission retries %u  no polling retries %u "
+						"general error %u\n",
+						cb_stats.req, cb_stats.resp,
+						cb_stats.submission_retries, cb_stats.polling_retries, cb_stats.gen_errors);
+				ERR_print_errors(bio_err);
+				}
+
+			RESET_CALLBACK_STATS(cb_stats);
+
+			ret=DSA_verify_asynch(EVP_PKEY_DSA, buf, 20, buf2,
+					kk, dsa_key[j], async_verify_cb, &cb_data);
+
+			if (ret <= 0 )
+				{
+				dumpError("DSA verify failure. No DSA verify will be performed", cb_data.stats,NO_RETRY);
+				dsa_doit[j] = 0;
+				}
+			else
+				{
+				cb_data.stats->req++;
+				poll_engine(engine, &cb_stats, EMPTY_ENGINE);
+				cb_data.stats->req = cb_data.stats->resp = 0;
+
+				pkey_print_message("verify","dsa",
+						dsa_c[j][1],
+						dsa_bits[j],
+						DSA_SECONDS);
+				Time_F(START);
+				for (count=0,run=1; COND(dsa_c[j][1]); count++)
+					{
+					ret=DSA_verify_asynch(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j], async_verify_cb, &cb_data);
+					if (ret <= 0)
+						{
+						dumpError("DSA verify async failure", cb_data.stats,RETRY);
+						poll_engine(engine, &cb_stats, 0);
+						count--; /* Decrement count as the request was not submitted */
+						}
+					else
+						{
+						cb_data.stats->req++;
+						}
+					if (count != 0 && (count % batch) == 0)
+						poll_engine(engine, &cb_stats, 0);
+					}
+				poll_engine(engine, &cb_stats, EMPTY_ENGINE);
+				d=Time_F(STOP);
+				BIO_printf(bio_err, mr? "+R6:%ld:%d:%.2f\n"
+						: "%ld %d bit DSA verify in %.2fs\n",
+						count, dsa_bits[j], d);
+				dsa_results[j][1]=d/(double)count;
+				BIO_printf(bio_err, "Async DSA verify: no requests %u  no responses %u  "
+						"no submission retries %u  no polling retries %u "
+						"general error %u\n",
+						cb_stats.req, cb_stats.resp,
+						cb_stats.submission_retries, cb_stats.polling_retries, cb_stats.gen_errors);
+				ERR_print_errors(bio_err);
+				}
+			}
 		if (rsa_count <= 1)
 			{
 			/* if longer than 10s, don't do any more */
@@ -2859,18 +3002,14 @@ int MAIN(int argc, char **argv)
 				}
 			if (async) /* ECDSA sign & verify asynchronous mode */
 				{
-				int error = 0;
-				char error_string[ERROR_STRING_LEN] = {0};
 				RESET_CALLBACK_STATS(cb_stats);
 
 				ret = ECDSA_sign_asynch(0, buf, 20, ecdsasig,
-						&ecdsasiglen, ecdsa[j], ecdsa_async_sign_cb, &cb_data);
+						&ecdsasiglen, ecdsa[j], async_cb_ex, &cb_data);
 				if (ret <= 0)
 					{
 					/*Currently retries are not supported*/
-					error = ERR_get_error();
-					ERR_error_string(error, error_string);
-					BIO_printf(bio_err,"ECDSA sign async failure.  No ECDSA sign will be done.\n");
+					dumpError("ECDSA sign async failure. No ECDSA sign will be done", cb_data.stats,NO_RETRY);
 					rsa_count=1;
 					}
 				else
@@ -2890,18 +3029,10 @@ int MAIN(int argc, char **argv)
 						{
 						ret=ECDSA_sign_asynch(0, buf, 20,
 								ecdsasig, &ecdsasiglen,
-								ecdsa[j], ecdsa_async_sign_cb, &cb_data);
+								ecdsa[j], async_cb_ex, &cb_data);
 						if (ret <= 0)
 							{
-							error = ERR_get_error();
-							if (ERR_R_RETRY == ERR_GET_REASON(error))
-								cb_data.stats->submission_retries++;
-							else 
-								{
-								ERR_error_string(error, error_string);
-								BIO_printf(bio_err, "ECDSA sign async failure\n");
-								cb_data.stats->gen_errors++;
-								}
+							dumpError("ECDSA sign async failure.", cb_data.stats,RETRY);
 							poll_engine(engine, &cb_stats, 0);
 							count--; /* Decrement count as the request was not submitted */
 							}
@@ -2930,14 +3061,12 @@ int MAIN(int argc, char **argv)
 
 				RESET_CALLBACK_STATS(cb_stats);
 				ret=ECDSA_verify_asynch(0, buf, 20, ecdsasig,
-							ecdsasiglen, ecdsa[j], ecdsa_async_verify_cb, &cb_data);
+							ecdsasiglen, ecdsa[j], async_verify_cb, &cb_data);
 
 				if (ret <= 0 )
 					{
 					/*Currently retries are not supported*/
-					error = ERR_get_error();
-					ERR_error_string(error, error_string);
-					BIO_printf(bio_err,"ECDSA verify failure.  No ECDSA verify will be done.\n");
+					dumpError("ECDSA verify failure. No ECDSA verify will be done", cb_data.stats,NO_RETRY);
 					ecdsa_doit[j] = 0;
 					}
 				else
@@ -2953,18 +3082,10 @@ int MAIN(int argc, char **argv)
 					Time_F(START);
 					for (count=0,run=1; COND(ecdsa_c[j][1]); count++)
 						{
-						ret=ECDSA_verify_asynch(0, buf, 20, ecdsasig, ecdsasiglen, ecdsa[j], ecdsa_async_verify_cb, &cb_data);
+						ret=ECDSA_verify_asynch(0, buf, 20, ecdsasig, ecdsasiglen, ecdsa[j], async_verify_cb, &cb_data);
 						if (ret <= 0)
 							{
-							error = ERR_get_error();
-							if (ERR_R_RETRY == ERR_GET_REASON(error))
-								cb_data.stats->submission_retries++;
-							else
-								{
-								ERR_error_string(error, error_string);
-								BIO_printf(bio_err, "ECDSA verify async failure\n");
-								cb_data.stats->gen_errors++;
-								}
+							dumpError("ECDSA verify async failure.", cb_data.stats,RETRY);
 							poll_engine(engine, &cb_stats, 0);
 							count--; /* Decrement count as the request was not submitted */
 							}
@@ -2996,6 +3117,235 @@ int MAIN(int argc, char **argv)
 				for (j++; j<EC_NUM; j++)
 				ecdsa_doit[j]=0;
 				}
+			}
+		}
+	if (rnd_fake) RAND_cleanup();
+#endif
+
+#ifndef OPENSSL_NO_DH
+
+	for (j=0; j<DH_NUM; j++)
+		{
+
+		CallbackStats_t cb_stats;
+		RESET_CALLBACK_STATS(cb_stats);
+		CallbackData_t cb_data;
+		cb_data.stats=&cb_stats;
+
+		if (!dh_doit[j]) continue;
+		RAND_pseudo_bytes(buf,20);
+		if (RAND_status() != 1)
+			{
+			RAND_seed(rnd_seed, sizeof rnd_seed);
+			rnd_fake = 1;
+			}
+
+		if((dh_b[j] = DH_new()) == NULL) 
+			{
+			BIO_printf(bio_err,"DH failure.\n");
+			ERR_print_errors(bio_err);
+			rsa_count=1;
+			}
+		else
+			{
+			if (!DH_check(dh_a[j], &i))
+				{
+				BIO_printf(bio_err,"DH failure.\n");
+				ERR_print_errors(bio_err);
+				rsa_count=1;
+				}
+
+			dh_b[j]->p=BN_dup(dh_a[j]->p);
+			dh_b[j]->g=BN_dup(dh_a[j]->g);
+
+			if ((dh_b[j]->p == NULL) || (dh_b[j]->g == NULL))
+				{
+				BIO_printf(bio_err,"DH failure.\n");
+				ERR_print_errors(bio_err);
+				rsa_count=1;
+				}
+
+			if (!async) /* DH synchronous mode */
+				{
+				/* generate two DH key pairs */
+				if (!DH_generate_key(dh_a[j]) ||
+						!DH_generate_key(dh_b[j]))
+					{
+					BIO_printf(bio_err,"DH key generation failure.\n");
+					ERR_print_errors(bio_err);
+					rsa_count=1;		
+					}
+				else
+					{
+					sec_size_a = DH_compute_key(sec_a, dh_b[j]->pub_key, dh_a[j]);
+					sec_size_b = DH_compute_key(sec_b, dh_a[j]->pub_key, dh_b[j]);
+					if (sec_size_a != sec_size_b) 
+						dh_checks = 0;
+					else
+						dh_checks = 1;
+
+					for (sec_idx = 0; 
+							(sec_idx < sec_size_a)
+							&& (dh_checks == 1);
+							sec_idx++)
+						{
+						if (sec_a[sec_idx] != sec_b[sec_idx])
+							dh_checks = 0;
+						}
+
+					if (dh_checks == 0)
+						{
+						BIO_printf(bio_err,"DH computations don't match.\n");
+						ERR_print_errors(bio_err);
+						rsa_count=1;		
+						}
+
+					pkey_print_message("","dh",
+							dh_c[j][0], 
+							dh_bits[j],
+							DH_SECONDS);
+					Time_F(START);
+					for (count=0,run=1; COND(dh_c[j][0]); count++)
+						{
+						DH_compute_key(sec_a, dh_b[j]->pub_key, dh_a[j]);
+						}
+					d=Time_F(STOP);
+					BIO_printf(bio_err, mr ? "+R7:%ld:%d:%.2f\n" :"%ld %d-bit DH ops in %.2fs\n",
+							count, dh_bits[j], d);
+					dh_results[j][0]=d/(double)count;
+					rsa_count=count;
+					}
+				}
+			if (async) /* DH asynchronous mode */
+				{
+				RESET_CALLBACK_STATS(cb_stats);
+
+				/* generate two DH key pairs */
+				if (DH_generate_key_asynch(dh_a[j], async_cb_ex1, &cb_data) <= 0)
+
+					{
+					BIO_printf(bio_err,"DH key generation failure.\n");
+					ERR_print_errors(bio_err);
+					rsa_count=1;
+					}
+
+				else
+					{
+					cb_data.stats->req++;
+					poll_engine(engine, &cb_stats, EMPTY_ENGINE);
+					RESET_CALLBACK_STATS(cb_stats);
+
+					if (DH_generate_key_asynch(dh_b[j], async_cb_ex1, &cb_data) <= 0)
+						{
+						BIO_printf(bio_err,"DH key generation failure.\n");
+						ERR_print_errors(bio_err);
+						rsa_count=1;
+						}
+
+					else 
+						{ 
+						cb_data.stats->req++;
+						poll_engine(engine, &cb_stats, EMPTY_ENGINE);
+						RESET_CALLBACK_STATS(cb_stats);
+
+						sec_size_a = DH_compute_key_asynch(sec_a, &sec_size_a, dh_b[j]->pub_key,
+								dh_a[j], async_cb_ex1, &cb_data);
+
+						if (sec_size_a <= 0)
+							{
+							dumpError("Async DH compute key failure", cb_data.stats,NO_RETRY);
+							rsa_count=1;
+							}
+						else 
+							{
+							cb_data.stats->req++;
+							poll_engine(engine, &cb_stats, EMPTY_ENGINE);
+							cb_data.stats->req = cb_data.stats->resp = 0;
+							}
+
+						sec_size_b = DH_compute_key_asynch(sec_b, &sec_size_b, dh_a[j]->pub_key,
+								dh_b[j], async_cb_ex1, &cb_data);
+
+						if (sec_size_b <= 0)
+							{
+							dumpError("Async DH compute key failure", cb_data.stats,NO_RETRY);
+							rsa_count=1;
+							}
+						else
+							{
+							cb_data.stats->req++;
+							poll_engine(engine, &cb_stats, EMPTY_ENGINE);
+							cb_data.stats->req = cb_data.stats->resp = 0;
+							}
+
+						if (sec_size_a != sec_size_b)
+							dh_checks = 0;
+						else
+							dh_checks = 1;
+
+						for (sec_idx = 0;
+								(sec_idx < sec_size_a)
+								&& (dh_checks == 1);
+								sec_idx++)
+							{
+							if (sec_a[sec_idx] != sec_b[sec_idx])
+								dh_checks = 0;
+							}
+
+						if (dh_checks == 0)
+							{
+							BIO_printf(bio_err,"DH computations don't match.\n");
+							ERR_print_errors(bio_err);
+							rsa_count=1;		
+							}
+
+						pkey_print_message("","dh",
+								dh_c[j][0], 
+								dh_bits[j],
+								DH_SECONDS);
+						Time_F(START);
+						for (count=0,run=1; COND(dh_c[j][0]); count++)
+							{
+							sec_size_a = DH_compute_key_asynch(sec_a, &sec_size_a, dh_b[j]->pub_key,
+									dh_a[j], async_cb_ex1, &cb_data);
+
+							if (sec_size_a <= 0)
+								{
+								dumpError("Async DH compute key failure", cb_data.stats,RETRY);
+								poll_engine(engine, &cb_stats, 0);
+								count--; /* Decrement count as the request was not submitted */
+								}
+							else
+								{
+								cb_data.stats->req++;
+								}
+
+							if (count != 0 && (count % batch) == 0)
+								poll_engine(engine, &cb_stats, 0);
+							}
+						poll_engine(engine, &cb_stats, EMPTY_ENGINE);
+						d=Time_F(STOP);
+
+						BIO_printf(bio_err, mr ? "+R7:%ld:%d:%.2f\n" :"%ld %d-bit DH ops in %.2fs\n",
+								count, dh_bits[j], d);
+						dh_results[j][0]=d/(double)count;
+						rsa_count=count;
+						BIO_printf(bio_err, "Async DH: no requests %u  no responses %u  "
+								"no submission retries %u  no polling retries %u "
+								"general error %u\n",
+								cb_stats.req, cb_stats.resp,
+								cb_stats.submission_retries, cb_stats.polling_retries, cb_stats.gen_errors);
+						ERR_print_errors(bio_err);
+						}
+					}
+				}
+			}
+
+		if (rsa_count <= 1)
+			{
+			/* if longer than 10s, don't do any more */
+			for (j++; j<DH_NUM; j++)
+				dh_doit[j]=0;
 			}
 		}
 	if (rnd_fake) RAND_cleanup();
@@ -3101,21 +3451,17 @@ int MAIN(int argc, char **argv)
 			}
 				if (async) /* ECDH asynchronous mode */
 					{
-					int error = 0;
 					size_t ecdhlen=outlen;
-					char error_string[ERROR_STRING_LEN] = {0};
 					RESET_CALLBACK_STATS(cb_stats);
 
 					secret_size_a = ECDH_compute_key_asynch(secret_a, &ecdhlen,
 							EC_KEY_get0_public_key(ecdh_b[j]),
-							ecdh_a[j], kdf, ecdh_async_cb, &cb_data);
+							ecdh_a[j], kdf, async_cb_ex, &cb_data);
 
 					if (secret_size_a <= 0)
 						{
 						/*Retries are currently not supported*/
-						error = ERR_get_error();
-						ERR_error_string(error, error_string);
-						BIO_printf(bio_err, "Async ECDH compute key failure");
+						dumpError("Async ECDH compute key failure", cb_data.stats,NO_RETRY);
 						ecdh_checks=0;
 						}
 					else 
@@ -3130,14 +3476,12 @@ int MAIN(int argc, char **argv)
 					ecdhlen=outlen;
 					secret_size_b = ECDH_compute_key_asynch(secret_b, &ecdhlen,
 							EC_KEY_get0_public_key(ecdh_a[j]),
-							ecdh_b[j], kdf, ecdh_async_cb, &cb_data);
+							ecdh_b[j], kdf, async_cb_ex, &cb_data);
 
 					if (secret_size_b <= 0)
 						{
 						/*Retries are currently not supported*/
-						error = ERR_get_error();
-						ERR_error_string(error, error_string);
-						BIO_printf(bio_err, "Async ECDH compute key failure");
+						dumpError("Async ECDH compute key failure", cb_data.stats,NO_RETRY);
 						ecdh_checks=0;
 						}
 					else
@@ -3177,18 +3521,10 @@ int MAIN(int argc, char **argv)
 							{
 							secret_size_a = ECDH_compute_key_asynch(secret_a, &ecdhlen,
 									EC_KEY_get0_public_key(ecdh_b[j]),
-									ecdh_a[j], kdf, ecdh_async_cb, &cb_data);
+									ecdh_a[j], kdf, async_cb_ex, &cb_data);
 							if (secret_size_a <= 0)
 								{
-								error = ERR_get_error();
-								if (ERR_R_RETRY == ERR_GET_REASON(error))
-									cb_data.stats->submission_retries++;
-								else
-									{
-									ERR_error_string(error, error_string);
-									BIO_printf(bio_err, "Async ECDH compute key failure");
-									cb_data.stats->gen_errors++;
-									}
+								dumpError("Async ECDH compute key failure", cb_data.stats,RETRY);
 								poll_engine(engine, &cb_stats, 0);
 								count--; /* Decrement count as the request was not submitted */
 								}
@@ -3361,6 +3697,28 @@ show_res:
 		}
 #endif
 
+#ifndef OPENSSL_NO_DH
+	j=1;
+	for (k=0; k<DH_NUM; k++)
+		{
+		if (!dh_doit[k]) continue;
+		if (j && !mr)
+			{
+			printf("%30sop      op/s\n"," ");
+			j=0;
+			}
+		if (mr)
+			fprintf(stdout,"+F5:%u:%u:%f:%f\n",
+				k, dh_bits[k],
+				dh_results[k][0], 1.0/dh_results[k][0]);
+
+		else
+			fprintf(stdout,"%4u bit dh (%s) %8.4fs %8.1f\n",
+				dh_bits[k],
+				dh_names[k],
+				dh_results[k][0], 1.0/dh_results[k][0]);
+		}
+#endif
 
 #ifndef OPENSSL_NO_ECDH
 	j=1;
@@ -3407,6 +3765,17 @@ end:
 		if (ecdsa[i] != NULL)
 			EC_KEY_free(ecdsa[i]);
 #endif
+
+#ifndef OPENSSL_NO_DH
+	for (i=0; i<DH_NUM; i++)
+		{
+		if (dh_a[i] != NULL)
+			DH_free(dh_a[i]);
+		if (dh_b[i] != NULL)
+				DH_free(dh_b[i]);
+		}
+#endif
+
 #ifndef OPENSSL_NO_ECDH
 	for (i=0; i<EC_NUM; i++)
 	{
@@ -3675,6 +4044,25 @@ static int do_multi(int multi)
 					ecdsa_results[k][1]=d;
 				}
 #endif 
+
+#ifndef OPENSSL_NO_DH
+			else if(!strncmp(buf,"+F5:",4))
+				{
+				int k;
+				double d;
+				
+				p=buf+4;
+				k=atoi(sstrsep(&p,sep));
+				sstrsep(&p,sep);
+
+				d=atof(sstrsep(&p,sep));
+				if(n)
+					dh_results[k][0]=1/(1/dh_results[k][0]+1/d);
+				else
+					dh_results[k][0]=d;
+
+				}
+#endif
 
 #ifndef OPENSSL_NO_ECDH
 			else if(!strncmp(buf,"+F5:",4))

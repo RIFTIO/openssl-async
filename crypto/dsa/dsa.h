@@ -151,6 +151,14 @@ struct dsa_method
 			BN_GENCB *cb);
 	/* If this is non-NULL, it is used to generate DSA keys */
 	int (*dsa_keygen)(DSA *dsa);
+	DSA_SIG * (*dsa_do_sign_asynch)(const unsigned char *dgst, int dlen,
+					unsigned char *sig, unsigned int *siglen,
+					DSA *dsa, int (*cb)(unsigned char *res, 
+					size_t reslen, void *cb_data, int status),
+					void *cb_data);
+	int (*dsa_do_verify_asynch)(const unsigned char *dgst, int dgst_len,
+					DSA_SIG *sig, DSA *dsa, 
+					int (*cb)(void *cb_data, int status), void *cb_data);
 	};
 
 struct dsa_st
@@ -195,8 +203,18 @@ int	i2d_DSA_SIG(const DSA_SIG *a, unsigned char **pp);
 DSA_SIG * d2i_DSA_SIG(DSA_SIG **v, const unsigned char **pp, long length);
 
 DSA_SIG * DSA_do_sign(const unsigned char *dgst,int dlen,DSA *dsa);
+DSA_SIG * DSA_do_sign_asynch(const unsigned char *dgst, int dlen,
+                             unsigned char *sig, unsigned int *siglen,
+                             DSA *dsa, int (*cb)(unsigned char *res,
+                             size_t reslen, void *cb_data, int status),
+                             void *cb_data);
 int	DSA_do_verify(const unsigned char *dgst,int dgst_len,
 		      DSA_SIG *sig,DSA *dsa);
+int     DSA_do_verify_asynch(const unsigned char *dgst, int dgst_len, 
+                      DSA_SIG *sig, DSA *dsa,
+                      int (*cb)(void *cb_data, int status),
+                      void *cb_data);
+
 
 const DSA_METHOD *DSA_OpenSSL(void);
 
@@ -214,8 +232,17 @@ int	DSA_size(const DSA *);
 int	DSA_sign_setup( DSA *dsa,BN_CTX *ctx_in,BIGNUM **kinvp,BIGNUM **rp);
 int	DSA_sign(int type,const unsigned char *dgst,int dlen,
 		unsigned char *sig, unsigned int *siglen, DSA *dsa);
+int     DSA_sign_asynch(int type, const unsigned char *dgst, int dlen, 
+                unsigned char *sig, unsigned int *siglen, DSA *dsa,
+                int (*cb)(unsigned char *res, size_t reslen, void *cb_data,
+                int status), void *cb_data);
+
 int	DSA_verify(int type,const unsigned char *dgst,int dgst_len,
 		const unsigned char *sigbuf, int siglen, DSA *dsa);
+int     DSA_verify_asynch(int type, const unsigned char *dgst, int dgst_len,
+                const unsigned char *sigbuf, int siglen, DSA *dsa,
+                int (*cb)(void *cb_data, int status), void *cb_data);
+
 int DSA_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new *new_func,
 	     CRYPTO_EX_dup *dup_func, CRYPTO_EX_free *free_func);
 int DSA_set_ex_data(DSA *d, int idx, void *arg);
@@ -306,6 +333,8 @@ void ERR_load_DSA_strings(void);
 #define DSA_F_PKEY_DSA_CTRL				 120
 #define DSA_F_PKEY_DSA_KEYGEN				 121
 #define DSA_F_SIG_CB					 114
+#define DSA_F_DSA_DO_SIGN_ASYNCH                         126 
+#define DSA_F_DSA_DO_VERIFY_ASYNCH                       127 
 
 /* Reason codes. */
 #define DSA_R_BAD_Q_VALUE				 102
@@ -320,6 +349,7 @@ void ERR_load_DSA_strings(void);
 #define DSA_R_NON_FIPS_DSA_METHOD			 111
 #define DSA_R_NO_PARAMETERS_SET				 107
 #define DSA_R_PARAMETER_ENCODING_ERROR			 105
+#define DSA_R_INVALID_NULL_PARAMETER                     112
 
 #ifdef  __cplusplus
 }

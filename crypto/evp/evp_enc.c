@@ -61,6 +61,7 @@
 #include <openssl/evp.h>
 #include <openssl/err.h>
 #include <openssl/rand.h>
+#include <openssl/pool.h>
 #ifndef OPENSSL_NO_ENGINE
 #include <openssl/engine.h>
 #endif
@@ -78,7 +79,7 @@
 #endif
 
 typedef struct evp_asynch_ctx_st EVP_ASYNCH_CTX;
-typedef int (*internal_asynch_cb_t)(unsigned char *out, int outl,
+typedef int (*internal_asynch_cb_t)(unsigned char *out, unsigned int outl,
 	EVP_ASYNCH_CTX *ctx, int status);
 typedef int (*asynch_cb_t)(unsigned char *out, int outl, void *ctx, int status);
 
@@ -103,41 +104,22 @@ struct evp_asynch_ctx_st
 	int dec_buffered;
 	unsigned char final_out[EVP_MAX_BLOCK_LENGTH];/* possible final block */
 
-	EVP_ASYNCH_CTX *next_free;
 	};
-static EVP_ASYNCH_CTX *asynch_ctx_pool = NULL;
-static EVP_ASYNCH_CTX *asynch_ctx_next_free = NULL;
-static int asynch_ctx_break = 0;
-static int asynch_ctx_items = 0;
+static POOL  *asynch_ctx_pool = NULL;
 static EVP_ASYNCH_CTX *alloc_asynch_ctx()
 	{
 	EVP_ASYNCH_CTX *ret = NULL;
 	CRYPTO_w_lock(CRYPTO_LOCK_ASYNCH);
 	if (asynch_ctx_pool == NULL)
 		{
-		asynch_ctx_items = 1024;
-		asynch_ctx_break = 0;
-		asynch_ctx_next_free = NULL;
-		asynch_ctx_pool =
-			(EVP_ASYNCH_CTX *)OPENSSL_malloc(sizeof(EVP_ASYNCH_CTX) * asynch_ctx_items);
-		if (asynch_ctx_pool == NULL)
+                asynch_ctx_pool = POOL_init(sizeof(EVP_ASYNCH_CTX), 1024);
+		}
+        ret = (EVP_ASYNCH_CTX *) POOL_alloc_item(asynch_ctx_pool);
+        if(!ret)
 			{
 			CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
 			EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_MALLOC_FAILURE);
-			return NULL;
-			}
-		}
-	if (asynch_ctx_next_free)
-		{
-		ret = asynch_ctx_next_free;
-		asynch_ctx_next_free = asynch_ctx_next_free->next_free;
-		}
-	else if (asynch_ctx_break < asynch_ctx_items)
-		ret = &asynch_ctx_pool[asynch_ctx_break++];
-	else
-		{
-		ret = NULL;
-		EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_RETRY);
+                return ret;
 		}
 	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
 	return ret;
@@ -145,8 +127,7 @@ static EVP_ASYNCH_CTX *alloc_asynch_ctx()
 static void free_asynch_ctx(EVP_ASYNCH_CTX *item)
 	{
 	CRYPTO_w_lock(CRYPTO_LOCK_ASYNCH);
-	item->next_free = asynch_ctx_next_free;
-	asynch_ctx_next_free = item;
+	POOL_free_item(asynch_ctx_pool, item);
 	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
 	}
 
@@ -548,7 +529,7 @@ static int _evp_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl
 	return 1;
 	}
 
-static int _evp_EncryptDecrypt_post(unsigned char *out, int outl,
+static int _evp_EncryptDecrypt_post(unsigned char *out, unsigned int outl,
 	EVP_ASYNCH_CTX *actx, int status)
 	{
 	int used_bytes;
@@ -1058,7 +1039,7 @@ int _evp_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 	return(1);
 	}
 
-static int _evp_DecryptFinal_post(unsigned char *out, int outl,
+static int _evp_DecryptFinal_post(unsigned char *out, unsigned int outl,
 	EVP_ASYNCH_CTX *actx, int status);
 int _evp_DecryptFinal_ex_asynch(EVP_ASYNCH_CTX *actx, unsigned char *out, int *outl)
 	{
@@ -1117,7 +1098,7 @@ int _evp_DecryptFinal_ex_asynch(EVP_ASYNCH_CTX *actx, unsigned char *out, int *o
 		_evp_cipher_cb(out, *outl, actx, 1);
 	return(1);
 	}
-static int _evp_DecryptFinal_post(unsigned char *out, int outl,
+static int _evp_DecryptFinal_post(unsigned char *out, unsigned int outl,
 	EVP_ASYNCH_CTX *actx, int status)
 	{
 	if (status > 0)

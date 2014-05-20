@@ -113,6 +113,7 @@
 #include "cryptlib.h"
 #include <openssl/objects.h>
 #include <openssl/evp.h>
+#include <openssl/pool.h>
 #ifndef OPENSSL_NO_ENGINE
 #include <openssl/engine.h>
 #endif
@@ -145,41 +146,22 @@ struct evp_asynch_ctx_st
 	internal_asynch_cb_t internal_cb;
 	asynch_cb_t user_cb;	/* Cache of ctx->internal->cb */
 	void *user_cb_data;	/* Cache of ctx->internal->cb_data */
-	EVP_ASYNCH_CTX *next_free;
 	};
-static EVP_ASYNCH_CTX *asynch_ctx_pool = NULL;
-static EVP_ASYNCH_CTX *asynch_ctx_next_free = NULL;
-static int asynch_ctx_break = 0;
-static int asynch_ctx_items = 0;
+static POOL *asynch_ctx_pool = NULL;
 static EVP_ASYNCH_CTX *alloc_asynch_ctx()
 	{
 	EVP_ASYNCH_CTX *ret = NULL;
 	CRYPTO_w_lock(CRYPTO_LOCK_ASYNCH);
 	if (asynch_ctx_pool == NULL)
 		{
-		asynch_ctx_items = 1024;
-		asynch_ctx_break = 0;
-		asynch_ctx_next_free = NULL;
-		asynch_ctx_pool =
-			(EVP_ASYNCH_CTX *)OPENSSL_malloc(sizeof(EVP_ASYNCH_CTX) * asynch_ctx_items);
-		if (asynch_ctx_pool == NULL)
+		asynch_ctx_pool = POOL_init(sizeof(EVP_ASYNCH_CTX), 1024);
+		}
+	ret = (EVP_ASYNCH_CTX *) POOL_alloc_item(asynch_ctx_pool);
+	if(!ret)
 			{
 			CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
 			EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_MALLOC_FAILURE);
-			return NULL;
-			}
-		}
-	if (asynch_ctx_next_free)
-		{
-		ret = asynch_ctx_next_free;
-		asynch_ctx_next_free = asynch_ctx_next_free->next_free;
-		}
-	else if (asynch_ctx_break < asynch_ctx_items)
-		ret = &asynch_ctx_pool[asynch_ctx_break++];
-	else
-		{
-		ret = NULL;
-		EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_RETRY);
+		return ret;
 		}
 	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
 	return ret;
@@ -187,8 +169,7 @@ static EVP_ASYNCH_CTX *alloc_asynch_ctx()
 static void free_asynch_ctx(EVP_ASYNCH_CTX *item)
 	{
 	CRYPTO_w_lock(CRYPTO_LOCK_ASYNCH);
-	item->next_free = asynch_ctx_next_free;
-	asynch_ctx_next_free = item;
+	POOL_free_item(asynch_ctx_pool, item);
 	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
 	}
 
@@ -208,7 +189,7 @@ static int evp_MD_CTX_expand(EVP_MD_CTX *ctx)
 	ctx->internal = OPENSSL_malloc(sizeof(struct evp_md_ctx_internal_st));
 	if (!ctx->internal) return 0;
 	memset(ctx->internal,0,sizeof(struct evp_md_ctx_internal_st));
-	ctx->flags = EVP_MD_CTX_FLAG_EXPANDED;
+	EVP_MD_CTX_set_flags(ctx,EVP_MD_CTX_FLAG_EXPANDED);
 	return 1;
 	}
 
@@ -391,6 +372,7 @@ skip_to_init:
 			if (!rc)
 				return rc;
 			if ((ctx->flags & EVP_MD_CTX_FLAG_EXPANDED)
+				&& !(ctx->flags & EVP_MD_CTX_FLAG_DISABLE_ASYNCH_MD_ONLY)
 				&& ctx->internal->cb)
 				{
 				call_asynch_cb_at_end = 1;
@@ -410,10 +392,11 @@ skip_to_init:
 static int _evp_DigestUpdate_post(unsigned char *md, unsigned int size,
 	EVP_ASYNCH_CTX *actx, int status)
 	{
-	int ret = actx->user_cb(NULL, 0, actx->user_cb_data, status);
 	if (status >= 0)
 		free_asynch_ctx(actx);
-	return ret;
+	else
+		status = actx->user_cb(NULL, 0, actx->user_cb_data, status); 
+	return status;
 	}
 int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *data, size_t count)
 	{
@@ -440,6 +423,7 @@ int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *data, size_t count)
 		return ret;
 		}
 	if ((ctx->flags & EVP_MD_CTX_FLAG_EXPANDED)
+		&& !(ctx->flags & EVP_MD_CTX_FLAG_DISABLE_ASYNCH_MD_ONLY)
 		&& ctx->internal->cb)
 		{
 		int ret = 0;
@@ -513,6 +497,7 @@ int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, unsigned int *size)
 		return ret;
 		}
 	if ((ctx->flags & EVP_MD_CTX_FLAG_EXPANDED)
+		&& !(ctx->flags & EVP_MD_CTX_FLAG_DISABLE_ASYNCH_MD_ONLY)
 		&& ctx->internal->cb)
 		{
 		unsigned int tmpsize = 0;
@@ -643,6 +628,21 @@ int EVP_Digest(const void *data, size_t count,
 	return ret;
 	}
 
+static int EVP_check_ctx( EVP_MD_CTX *ctx )
+	{
+	if (!ctx->digest)
+		{
+		EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_NO_DIGEST_SET);
+		return 0;
+		}
+	if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
+		{
+		EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+		return 0;
+		}
+	return 1;
+	}
+
 int EVP_MD_CTX_ctrl_ex(EVP_MD_CTX *ctx, int type, int arg, void *ptr,
 	void (*fn_ptr)(void))
 {
@@ -668,57 +668,25 @@ int EVP_MD_CTX_ctrl_ex(EVP_MD_CTX *ctx, int type, int arg, void *ptr,
 		ctx->internal->cb_data = ptr;
 		return 1;
 	case EVP_MD_CTRL_UPDATE_ASYNCH_CALLBACK:
-		if (!ctx->digest)
-			{
-			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_NO_DIGEST_SET);
+		if (!EVP_check_ctx(ctx))
 			return 0;
-			}
-		if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
-			{
-			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
-			return 0;
-			}
 		ctx->internal->cb = (void (*)(void))fn_ptr;
 		ctx->internal->cb_data = ptr;
 		return 1;
 	case EVP_MD_CTRL_UPDATE_ASYNCH_CALLBACK_DATA:
-		if (!ctx->digest)
-			{
-			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_NO_DIGEST_SET);
+		if (!EVP_check_ctx(ctx))
 			return 0;
-			}
-		if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
-			{
-			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
-			return 0;
-			}
 		ctx->internal->cb_data = ptr;
 		return 1;
 	case EVP_MD_CTRL_GET_ASYNCH_CALLBACK_FN:
-		if (!ctx->digest)
-			{
-			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_NO_DIGEST_SET);
+		if (!EVP_check_ctx(ctx))
 			return 0;
-			}
-		if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
-			{
-			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
-			return 0;
-			}
 		*(void (**)(void))ptr =
 			ctx->internal->cb;
 		return 1;
 	case EVP_MD_CTRL_GET_ASYNCH_CALLBACK_DATA:
-		if (!ctx->digest)
-			{
-			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_NO_DIGEST_SET);
+		if (!EVP_check_ctx(ctx))
 			return 0;
-			}
-		if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
-			{
-			EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
-			return 0;
-			}
 		*(void **)ptr = ctx->internal->cb_data;
 		return 1;
 	default:

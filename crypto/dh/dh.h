@@ -125,6 +125,14 @@ struct dh_method
 	char *app_data;
 	/* If this is non-NULL, it will be used to generate parameters */
 	int (*generate_params)(DH *dh, int prime_len, int generator, BN_GENCB *cb);
+	int (*generate_key_asynch)(DH *dh,
+				int (*cb)(unsigned char *res, size_t reslen, 
+				void *cb_data, int status),
+				void *cb_data);
+	int (*compute_key_asynch)(unsigned char *key,int *len,const BIGNUM *pub_key,DH *dh,
+				int (*cb)(unsigned char *res, size_t reslen, 
+				void *cb_data, int status),
+				void *cb_data);
 	};
 
 struct dh_st
@@ -209,7 +217,14 @@ int	DH_generate_parameters_ex(DH *dh, int prime_len,int generator, BN_GENCB *cb)
 int	DH_check(const DH *dh,int *codes);
 int	DH_check_pub_key(const DH *dh,const BIGNUM *pub_key, int *codes);
 int	DH_generate_key(DH *dh);
+int	DH_generate_key_asynch(DH *dh,  int (*cb)(unsigned char *res,
+                           size_t reslen, void *cb_data, int status),
+                           void *cb_data);
 int	DH_compute_key(unsigned char *key,const BIGNUM *pub_key,DH *dh);
+int	DH_compute_key_asynch(unsigned char *key, int *len, const BIGNUM *pub_key, DH *dh,
+                          int (*cb)(unsigned char *res, size_t reslen,
+                          void *cb_data, int status), void *cb_data);
+
 DH *	d2i_DHparams(DH **a,const unsigned char **pp, long length);
 int	i2d_DHparams(const DH *a,unsigned char **pp);
 #ifndef OPENSSL_NO_FP_API
@@ -259,6 +274,8 @@ void ERR_load_DH_strings(void);
 #define DH_F_GENERATE_PARAMETERS			 104
 #define DH_F_PKEY_DH_DERIVE				 112
 #define DH_F_PKEY_DH_KEYGEN				 113
+#define DH_F_DH_COMPUTE_KEY_ASYNCH			 117
+#define DH_F_DH_GENERATE_KEY_ASYNCH			 118
 
 /* Reason codes. */
 #define DH_R_BAD_GENERATOR				 101
@@ -273,6 +290,7 @@ void ERR_load_DH_strings(void);
 #define DH_R_NO_PARAMETERS_SET				 107
 #define DH_R_NO_PRIVATE_VALUE				 100
 #define DH_R_PARAMETER_ENCODING_ERROR			 105
+#define DH_R_INVALID_NULL_PARAMETER			 112
 
 #ifdef  __cplusplus
 }

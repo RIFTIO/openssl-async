@@ -145,7 +145,9 @@ int EVP_PKEY_sign_asynch(EVP_PKEY_CTX *ctx,
 		{
 		if (ctx->pmeth->sign.synch)
 			{
-			ret=ctx->pmeth->sign.synch(ctx, sig, siglen, tbs, tbslen);
+			size_t sltmp = 0;
+			ret=ctx->pmeth->sign.synch(ctx, sig, &sltmp, tbs, tbslen);
+			*(unsigned int *)siglen = (unsigned int)sltmp;
 			cb(sig, *siglen, cb_data, ret);
 			return ret;
 			}

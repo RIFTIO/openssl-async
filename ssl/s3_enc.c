@@ -229,6 +229,9 @@ int ssl3_change_cipher_state(SSL *s, int which)
 	int is_exp,n,i,j,k,cl;
 	int reuse_dd = 0;
 
+	if(!s->s3)
+		goto err2;
+
 	is_exp=SSL_C_IS_EXPORT(s->s3->tmp.new_cipher);
 	c=s->s3->tmp.new_sym_enc;
 	m=s->s3->tmp.new_hash;
@@ -514,7 +517,7 @@ int ssl3_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post)
 	SSL3_RECORD *rec;
 	EVP_CIPHER_CTX *ds;
 	unsigned long l;
-	int bs,i,mac_size=0;
+	int bs=0,i,mac_size=0;
 	const EVP_CIPHER *enc;
 
 	if (send)
@@ -543,6 +546,7 @@ int ssl3_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post)
         if (post)
             {
             l = rec->length;
+			if (ds)
             bs = EVP_CIPHER_block_size(ds->cipher);
             
             goto post;

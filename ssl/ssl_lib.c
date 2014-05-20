@@ -220,7 +220,7 @@ int SSL_clear(SSL *s)
 
 	s->version=s->method->version;
 	s->client_version=s->version;
-	s->rwstate=SSL_NOTHING;
+	SSL_want_set(s, SSL_NOTHING);
 	s->rstate=SSL_ST_READ_HEADER;
 #if 0
 	s->read_ahead=s->ctx->read_ahead;
@@ -980,7 +980,7 @@ int SSL_read(SSL *s,void *buf,int num)
 
 	if (s->shutdown & SSL_RECEIVED_SHUTDOWN)
 		{
-		s->rwstate=SSL_NOTHING;
+		SSL_want_clear(s,SSL_READING);
 		return(0);
 		}
 	return(s->method->ssl_read(s,buf,num));
@@ -1011,7 +1011,7 @@ int SSL_write(SSL *s,const void *buf,int num)
 
 	if (s->shutdown & SSL_SENT_SHUTDOWN)
 		{
-		s->rwstate=SSL_NOTHING;
+		SSL_want_clear(s,SSL_WRITING);
 		SSLerr(SSL_F_SSL_WRITE,SSL_R_PROTOCOL_IS_SHUTDOWN);
 		return(-1);
 		}
@@ -3172,9 +3172,27 @@ void SSL_CTX_set_cert_store(SSL_CTX *ctx,X509_STORE *store)
 	ctx->cert_store=store;
 	}
 
-int SSL_want(const SSL *s)
+int SSL_want(const SSL *s, int flag)
 	{
-	return(s->rwstate);
+        if(SSL_NOTHING == flag)
+		{
+		return(s->rwstate == flag);
+		} 
+	return(s->rwstate & flag);
+	}
+
+void SSL_want_set(SSL *s, int flag)
+	{
+        if(SSL_NOTHING == flag)
+		{
+		s->rwstate = flag;
+		}
+	s->rwstate |= flag;
+	}
+
+void SSL_want_clear(SSL *s, int flag)
+	{
+	s->rwstate &= ~flag;
 	}
 
 /*!

@@ -138,6 +138,28 @@ static int pkey_dsa_sign(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen,
 	return 1;
 	}
 
+static int pkey_dsa_sign_asynch(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *siglen,
+					const unsigned char *tbs, size_t tbslen,
+                                        int (*cb)(unsigned char *result, size_t reslen,
+                                        void *cb_data, int status),void *cb_data)
+	{
+	int ret, type;
+	DSA_PKEY_CTX *dctx = ctx->data;
+	DSA *dsa = ctx->pkey->pkey.dsa;
+
+	if (dctx->md)
+		type = EVP_MD_type(dctx->md);
+	else
+		type = NID_sha1;
+
+	ret = DSA_sign_asynch(type, tbs, tbslen, sig, (unsigned int *)siglen, dsa, cb, cb_data);
+
+	if (ret <= 0)
+		return ret;
+	return 1;
+	}
+
+
 static int pkey_dsa_verify(EVP_PKEY_CTX *ctx,
 					const unsigned char *sig, size_t siglen,
 					const unsigned char *tbs, size_t tbslen)
@@ -152,6 +174,26 @@ static int pkey_dsa_verify(EVP_PKEY_CTX *ctx,
 		type = NID_sha1;
 
 	ret = DSA_verify(type, tbs, tbslen, sig, siglen, dsa);
+
+	return ret;
+	}
+
+static int pkey_dsa_verify_asynch(EVP_PKEY_CTX *ctx,
+					const unsigned char *sig, size_t siglen,
+					const unsigned char *tbs, size_t tbslen,
+                                        int (*cb) (void *cb_data, int status),
+                                        void *cb_data)
+	{
+	int ret, type;
+	DSA_PKEY_CTX *dctx = ctx->data;
+	DSA *dsa = ctx->pkey->pkey.dsa;
+
+	if (dctx->md)
+		type = EVP_MD_type(dctx->md);
+	else
+		type = NID_sha1;
+
+	ret = DSA_verify_asynch(type, tbs, tbslen, sig, siglen, dsa, cb, cb_data);
 
 	return ret;
 	}
@@ -296,10 +338,10 @@ const EVP_PKEY_METHOD dsa_pkey_meth =
 	pkey_dsa_keygen,
 
 	0,
-	{ pkey_dsa_sign, 0 },
+	{ pkey_dsa_sign, pkey_dsa_sign_asynch },
 
 	0,
-	{ pkey_dsa_verify, 0 },
+	{ pkey_dsa_verify, pkey_dsa_verify_asynch },
 
 	0,{ 0, 0 },
 

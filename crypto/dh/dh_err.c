@@ -75,6 +75,8 @@ static ERR_STRING_DATA DH_str_functs[]=
 {ERR_FUNC(DH_F_DH_BUILTIN_GENPARAMS),	"DH_BUILTIN_GENPARAMS"},
 {ERR_FUNC(DH_F_DH_COMPUTE_KEY),	"DH_compute_key"},
 {ERR_FUNC(DH_F_DH_GENERATE_KEY),	"DH_generate_key"},
+{ERR_FUNC(DH_F_DH_COMPUTE_KEY_ASYNCH),  "DH_compute_key_asynch"},
+{ERR_FUNC(DH_F_DH_GENERATE_KEY_ASYNCH), "DH_generate_key_asynch"},
 {ERR_FUNC(DH_F_DH_GENERATE_PARAMETERS_EX),	"DH_generate_parameters_ex"},
 {ERR_FUNC(DH_F_DH_NEW_METHOD),	"DH_new_method"},
 {ERR_FUNC(DH_F_DH_PARAM_DECODE),	"DH_PARAM_DECODE"},
@@ -104,6 +106,7 @@ static ERR_STRING_DATA DH_str_reasons[]=
 {ERR_REASON(DH_R_NO_PARAMETERS_SET)      ,"no parameters set"},
 {ERR_REASON(DH_R_NO_PRIVATE_VALUE)       ,"no private value"},
 {ERR_REASON(DH_R_PARAMETER_ENCODING_ERROR),"parameter encoding error"},
+{ERR_REASON(DH_R_INVALID_NULL_PARAMETER)  ,"invalid NULL parameter"},
 {0,NULL}
 	};
 

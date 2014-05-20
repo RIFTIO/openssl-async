@@ -166,6 +166,21 @@ int DSA_sign(int type, const unsigned char *dgst, int dlen, unsigned char *sig,
 	return(1);
 	}
 
+int DSA_sign_asynch(int type, const unsigned char *dgst, int dlen, unsigned char *sig,
+	     unsigned int *siglen, DSA *dsa,
+             int (*cb)(unsigned char *res, size_t reslen, void *cb_data, 
+             int status), void *cb_data)
+	{
+	DSA_SIG *s;
+	RAND_seed(dgst, dlen);
+	s=DSA_do_sign_asynch(dgst,dlen,sig,siglen,dsa,cb,cb_data);
+	if (s == NULL)
+           return 0;
+	DSA_SIG_free(s);
+	return 1;
+	}
+
+
 /* data has already been hashed (probably with SHA or SHA-1). */
 /* returns
  *      1: correct signature
@@ -182,6 +197,22 @@ int DSA_verify(int type, const unsigned char *dgst, int dgst_len,
 	if (s == NULL) return(ret);
 	if (d2i_DSA_SIG(&s,&sigbuf,siglen) == NULL) goto err;
 	ret=DSA_do_verify(dgst,dgst_len,s,dsa);
+err:
+	DSA_SIG_free(s);
+	return(ret);
+	}
+
+int DSA_verify_asynch(int type, const unsigned char *dgst, int dgst_len,
+	     const unsigned char *sigbuf, int siglen, DSA *dsa,
+             int (*cb)(void *cb_data, int status), void *cb_data)
+	{
+	DSA_SIG *s;
+	int ret=-1;
+
+	s = DSA_SIG_new();
+	if (s == NULL) return(ret);
+	if (d2i_DSA_SIG(&s,&sigbuf,siglen) == NULL) goto err;
+	ret=DSA_do_verify_asynch(dgst,dgst_len,s,dsa,cb,cb_data);
 err:
 	DSA_SIG_free(s);
 	return(ret);

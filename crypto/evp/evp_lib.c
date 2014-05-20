@@ -61,6 +61,7 @@
 #include <openssl/evp.h>
 #include <openssl/objects.h>
 #include "evp_locl.h"
+#include <openssl/pool.h>
 
 int EVP_CIPHER_param_to_asn1(EVP_CIPHER_CTX *c, ASN1_TYPE *type)
 	{
@@ -212,41 +213,22 @@ struct evp_asynch_ctx_st
 	internal_asynch_cb_t internal_cb;
 	asynch_cb_t user_cb;	/* Cache of ctx->internal->cb */
 	void *user_cb_data;	/* Cache of ctx->internal->cb_data */
-	EVP_ASYNCH_CTX *next_free;
 	};
-static EVP_ASYNCH_CTX *asynch_ctx_pool = NULL;
-static EVP_ASYNCH_CTX *asynch_ctx_next_free = NULL;
-static int asynch_ctx_break;
-static int asynch_ctx_items;
+static POOL *asynch_ctx_pool = NULL;
 static EVP_ASYNCH_CTX *alloc_asynch_ctx()
 	{
 	EVP_ASYNCH_CTX *ret = NULL;
 	CRYPTO_w_lock(CRYPTO_LOCK_ASYNCH);
 	if (asynch_ctx_pool == NULL)
 		{
-		asynch_ctx_items = 1024;
-		asynch_ctx_break = 0;
-		asynch_ctx_next_free = NULL;
-		asynch_ctx_pool =
-			(EVP_ASYNCH_CTX *)OPENSSL_malloc(sizeof(EVP_ASYNCH_CTX) * asynch_ctx_items);
-		if (asynch_ctx_pool == NULL)
+                asynch_ctx_pool = POOL_init(sizeof(EVP_ASYNCH_CTX), 1024);
+                }
+        ret = (EVP_ASYNCH_CTX *) POOL_alloc_item(asynch_ctx_pool);
+        if(!ret)
 			{
 			CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
 			EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_MALLOC_FAILURE);
-			return NULL;
-			}
-		}
-	if (asynch_ctx_next_free)
-		{
-		ret = asynch_ctx_next_free;
-		asynch_ctx_next_free = asynch_ctx_next_free->next_free;
-		}
-	else if (asynch_ctx_break < asynch_ctx_items)
-		ret = &asynch_ctx_pool[asynch_ctx_break++];
-	else
-		{
-		ret = NULL;
-		EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_RETRY);
+                return ret;
 		}
 	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
 	return ret;
@@ -254,8 +236,7 @@ static EVP_ASYNCH_CTX *alloc_asynch_ctx()
 static void free_asynch_ctx(EVP_ASYNCH_CTX *item)
 	{
 	CRYPTO_w_lock(CRYPTO_LOCK_ASYNCH);
-	item->next_free = asynch_ctx_next_free;
-	asynch_ctx_next_free = item;
+	POOL_free_item(asynch_ctx_pool, item);
 	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
 	}
 

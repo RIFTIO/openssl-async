@@ -4216,14 +4216,14 @@ int ssl3_write(SSL *s, const void *buf, int len)
 			s->s3->delay_buf_pop_ret=ret;
 			}
 
-		s->rwstate=SSL_WRITING;
+		SSL_want_set(s, SSL_WRITING);
 		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 		CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 		n=BIO_flush(s->wbio);
 		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 		CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 		if (n <= 0) return(n);
-		s->rwstate=SSL_NOTHING;
+		SSL_want_clear(s, SSL_WRITING);
 
 		/* We have flushed the buffer, so remove it */
 		ssl_free_wbio_buffer(s);

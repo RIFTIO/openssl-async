@@ -74,3 +74,28 @@ int DSA_do_verify(const unsigned char *dgst, int dgst_len, DSA_SIG *sig,
 #endif
 	return dsa->meth->dsa_do_verify(dgst, dgst_len, sig, dsa);
 	}
+
+int DSA_do_verify_asynch(const unsigned char *dgst, int dgst_len, DSA_SIG *sig,
+		DSA *dsa, int (*cb)(void *cb_data, int status), void *cb_data)
+	{
+	if (!dsa || !dsa->meth)
+		{
+		DSAerr(DSA_F_DSA_DO_VERIFY_ASYNCH, DSA_R_INVALID_NULL_PARAMETER);
+		return -1;
+		}
+#ifdef OPENSSL_FIPS
+	if (FIPS_mode() && !(dsa->meth->flags & DSA_FLAG_FIPS_METHOD)
+			&& !(dsa->flags & DSA_FLAG_NON_FIPS_ALLOW))
+		{
+		DSAerr(DSA_F_DSA_DO_VERIFY_ASYNCH, DSA_R_NON_FIPS_DSA_METHOD);
+		return -1;
+		}
+#endif
+	if (!dsa->meth->dsa_do_verify_asynch)
+		{
+		DSAerr(DSA_F_DSA_DO_VERIFY_ASYNCH, DSA_R_INVALID_NULL_PARAMETER);
+		return -1;
+		}
+	return dsa->meth->dsa_do_verify_asynch(dgst, dgst_len, sig, dsa, 
+						cb, cb_data);
+	}

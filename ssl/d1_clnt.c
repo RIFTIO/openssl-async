@@ -257,7 +257,7 @@ int dtls1_connect(SSL *s)
 			if (BIO_dgram_sctp_msg_waiting(SSL_get_rbio(s)))
 			{
 				s->s3->in_read_app_data=2;
-				s->rwstate=SSL_READING;
+				SSL_want_set(s, SSL_READING);
 				BIO_clear_retry_flags(SSL_get_rbio(s));
 				BIO_set_retry_read(SSL_get_rbio(s));
 				ret = -1;
@@ -276,7 +276,7 @@ int dtls1_connect(SSL *s)
 			if (ret == 0)
 			{
 				s->s3->in_read_app_data=2;
-				s->rwstate=SSL_READING;
+				SSL_want_set(s, SSL_READING);
 				BIO_clear_retry_flags(SSL_get_rbio(s));
 				BIO_set_retry_read(SSL_get_rbio(s));
 				ret = -1;
@@ -679,20 +679,20 @@ int dtls1_connect(SSL *s)
 			break;
 
 		case SSL3_ST_CW_FLUSH:
-			s->rwstate=SSL_WRITING;
+			SSL_want_set(s, SSL_WRITING);
 			if (BIO_flush(s->wbio) <= 0)
 				{
 				/* If the write error was fatal, stop trying */
 				if (!BIO_should_retry(s->wbio))
 					{
-					s->rwstate=SSL_NOTHING;
+					SSL_want_clear(s, SSL_WRITING);
 					s->state=s->s3->tmp.next_state;
 					}
 				
 				ret= -1;
 				goto end;
 				}
-			s->rwstate=SSL_NOTHING;
+			SSL_want_clear(s, SSL_WRITING);
 			s->state=s->s3->tmp.next_state;
 			break;
 
@@ -1655,16 +1655,16 @@ int dtls1_send_client_certificate(SSL *s)
 	if (s->state == SSL3_ST_CW_CERT_B)
 		{
 		/* If we get an error, we need to
-		 * ssl->rwstate=SSL_X509_LOOKUP; return(-1);
+		 * SSL_want_set(s, SSL_X509_LOOKUP); return(-1);
 		 * We then get retied later */
 		i=0;
 		i = ssl_do_client_cert_cb(s, &x509, &pkey);
 		if (i < 0)
 			{
-			s->rwstate=SSL_X509_LOOKUP;
+			SSL_want_set(s, SSL_X509_LOOKUP);
 			return(-1);
 			}
-		s->rwstate=SSL_NOTHING;
+		SSL_want_clear(s, SSL_X509_LOOKUP);
 		if ((i == 1) && (pkey != NULL) && (x509 != NULL))
 			{
 			s->state=SSL3_ST_CW_CERT_B;

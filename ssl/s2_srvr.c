@@ -269,10 +269,10 @@ int ssl2_accept(SSL *s)
  			num1=BIO_ctrl(s->wbio,BIO_CTRL_INFO,0,NULL);
  			if (num1 > 0)
  				{
-				s->rwstate=SSL_WRITING;
+				SSL_want_set(s, SSL_WRITING);
  				num1=BIO_flush(s->wbio);
  				if (num1 <= 0) { ret= -1; goto end; }
-				s->rwstate=SSL_NOTHING;
+				SSL_want_clear(s, SSL_WRITING);
 				}
 
  			/* flushed and now remove buffering */

@@ -76,6 +76,34 @@ DSA_SIG * DSA_do_sign(const unsigned char *dgst, int dlen, DSA *dsa)
 	return dsa->meth->dsa_do_sign(dgst, dlen, dsa);
 	}
 
+DSA_SIG * DSA_do_sign_asynch(const unsigned char *dgst, int dlen, 
+				unsigned char *sig, unsigned int *siglen, 
+				DSA *dsa, int (*cb)(unsigned char *res,
+				size_t reslen, void *cb_data, int status), 
+				void *cb_data)
+	{
+	if (!dsa || !dsa->meth)
+		{
+		DSAerr(DSA_F_DSA_DO_SIGN_ASYNCH, DSA_R_INVALID_NULL_PARAMETER);
+		return NULL;
+		}
+#ifdef OPENSSL_FIPS
+	if (FIPS_mode() && !(dsa->meth->flags & DSA_FLAG_FIPS_METHOD)
+			&& !(dsa->flags & DSA_FLAG_NON_FIPS_ALLOW))
+		{
+		DSAerr(DSA_F_DSA_DO_SIGN_ASYNCH, DSA_R_NON_FIPS_DSA_METHOD);
+		return NULL;
+		}
+#endif
+	if (!dsa->meth->dsa_do_sign_asynch)
+		{
+		DSAerr(DSA_F_DSA_DO_SIGN_ASYNCH, DSA_R_INVALID_NULL_PARAMETER);
+		return NULL;
+		}
+	return dsa->meth->dsa_do_sign_asynch(dgst, dlen, sig, siglen, 
+						dsa, cb, cb_data);
+	}
+
 int DSA_sign_setup(DSA *dsa, BN_CTX *ctx_in, BIGNUM **kinvp, BIGNUM **rp)
 	{
 #ifdef OPENSSL_FIPS

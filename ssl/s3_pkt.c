@@ -238,7 +238,7 @@ int ssl3_read_n(SSL *s, int n, int max, int extend)
 		clear_sys_error();
 		if (s->rbio != NULL)
 			{
-			s->rwstate=SSL_READING;
+			SSL_want_set(s, SSL_READING);
 			/* See comment in do_ssl3_write, around the call
 			 * to ssl3_write_pending2 */
 			if ((s->s3->flags & SSL3_FLAGS_ASYNCH) && (s->rbio == s->wbio))
@@ -277,7 +277,7 @@ int ssl3_read_n(SSL *s, int n, int max, int extend)
 	rb->offset += n;
 	rb->left = left - n;
 	s->packet_length += n;
-	s->rwstate=SSL_NOTHING;
+	SSL_want_clear(s, SSL_READING);
 	return(n);
 	}
 
@@ -403,13 +403,12 @@ again:
 			mac = _mac;
 			enc_err = (arr->status==0 ? -1 : 1);
 
-			if (EVP_CIPHER_CTX_mode(s->enc_read_ctx) == EVP_CIPH_CBC_MODE)
+			if (s->enc_read_ctx && EVP_CIPHER_CTX_mode(s->enc_read_ctx) == EVP_CIPH_CBC_MODE)
 				OPENSSL_free(arr->mac);
 			ssl3_release_read_record(arr);
 
 			/* We're done with the actual reading */
-			s->rwstate = SSL_NOTHING;
-
+			SSL_want_clear(s, SSL_READING);
 			goto post_mac;
 			}
 		}
@@ -509,14 +508,13 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 	/* decrypt in place in 'rr->input' */
 	rr->data=rr->input;
 
-	/*FIXME: How do we handle retries in callback thread*/
 	if (!clear_enc && (s->s3->flags & SSL3_FLAGS_ASYNCH))
         {
         trans = ssl3_get_transmission(s);
 
         if (trans == NULL)
             {
-            s->rwstate=SSL_READING;
+			SSL_want_set(s, SSL_READING);
 			SSLerr(SSL_F_SSL3_GET_RECORD_INNER, ERR_R_RETRY);
             return -1; /* treat it like a non-blocking
                           I/O that couldn't transmit for
@@ -559,7 +557,7 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 				s->s3->outstanding_read_crypto--;
 				s->s3->outstanding_read_records--;
 				CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
-				s->rwstate=SSL_READING;
+				SSL_want_set(s, SSL_READING);
 				if (s->s3->rrec.type == SSL3_RT_APPLICATION_DATA)
 					{
 					s->rstate=SSL_ST_READ_BODY;
@@ -579,7 +577,7 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 			}
 		else 
 			{
-			s->rwstate=SSL_READING;
+			SSL_want_set(s, SSL_READING);
 			s->s3->read_retry_data_available=0;
 			}
 		return(-1);
@@ -587,7 +585,7 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 
 	if (trans)
 	    {
-		s->rwstate=SSL_READING;
+		SSL_want_set(s, SSL_READING);
 		return(-1);
 	    }
 
@@ -667,6 +665,7 @@ printf("\n");
 									  ssl3_get_record_asynch_cb);
 		    }
 
+		/*FIXME: How do we handle retries in callback thread*/
 		i=s->method->ssl3_enc->mac(s,md,0,trans);
 
 		if (trans)
@@ -796,8 +795,7 @@ int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len)
 	const unsigned char *buf=buf_;
 	unsigned int tot,n,nw;
 	int i;
-
-	s->rwstate=SSL_NOTHING;
+	SSL_want_clear(s, SSL_WRITING);
 	tot=s->s3->wnum;
 	s->s3->wnum=0;
 
@@ -956,7 +954,7 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
 			trans = ssl3_get_transmission(s);
 			if (trans == NULL)
 				{
-				s->rwstate=SSL_WRITING;
+				SSL_want_set(s, SSL_WRITING);
 				SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_RETRY);
 				return -1; /* treat it like a non-blocking I/O that
 					      couldn't transmit for the moment */
@@ -999,7 +997,7 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
 				if (t == NULL)
 					{
 					ssl3_release_transmission(trans);
-					s->rwstate=SSL_WRITING;
+					SSL_want_set(s, SSL_WRITING);
 					SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_RETRY);
 					return -1; /* treat it like a non-blocking I/O that
 					      couldn't transmit for the moment */
@@ -1317,7 +1315,7 @@ static int ssl3_write_pending2(SSL *s, SSL3_BUFFER *wb)
 		if (s->wbio != NULL)
 			{
 			if(!(s->s3->flags & SSL3_FLAGS_ASYNCH))
-				s->rwstate=SSL_WRITING;
+				SSL_want_set(s, SSL_WRITING);
 			i=BIO_write(s->wbio,
 				(char *)&(wb->buf[wb->offset]),
 				(unsigned int)wb->left);
@@ -1334,7 +1332,7 @@ static int ssl3_write_pending2(SSL *s, SSL3_BUFFER *wb)
 			if (s->mode & SSL_MODE_RELEASE_BUFFERS &&
 			    SSL_version(s) != DTLS1_VERSION && SSL_version(s) != DTLS1_BAD_VER)
 				ssl3_release_write_buffer(s);
-			s->rwstate=SSL_NOTHING;
+			SSL_want_clear(s, SSL_WRITING);
 			return(s->s3->wpend_ret);
 			}
 		else if (i <= 0) {
@@ -1436,7 +1434,7 @@ int ssl3_read_bytes(SSL *s, int type, unsigned char *buf, int len, int peek)
 			}
 		}
 start:
-	s->rwstate=SSL_NOTHING;
+	SSL_want_clear(s, SSL_READING);
 
 	/* s->s3->rrec.type	    - is the type of record
 	 * s->s3->rrec.data,    - data
@@ -1467,7 +1465,7 @@ start:
 	if (s->shutdown & SSL_RECEIVED_SHUTDOWN)
 		{
 		rr->length=0;
-		s->rwstate=SSL_NOTHING;
+       	SSL_want_clear(s, SSL_READING);
 		return(0);
 		}
 
@@ -1538,7 +1536,7 @@ start:
 
 			/* Exit and notify application to read again */
 			rr->length = 0;
-			s->rwstate=SSL_READING;
+			SSL_want_set(s, SSL_READING);
 			BIO_clear_retry_flags(SSL_get_rbio(s));
 			BIO_set_retry_read(SSL_get_rbio(s));
 			return(-1);
@@ -1611,7 +1609,7 @@ start:
 						 * but we trigger an SSL handshake, we return -1 with
 						 * the retry option set.  Otherwise renegotiation may
 						 * cause nasty problems in the blocking world */
-						s->rwstate=SSL_READING;
+						SSL_want_set(s, SSL_READING);
 						bio=SSL_get_rbio(s);
 						BIO_clear_retry_flags(bio);
 						BIO_set_retry_read(bio);
@@ -1696,7 +1694,7 @@ start:
 			{
 			char tmp[16];
 
-			s->rwstate=SSL_NOTHING;
+			SSL_want_clear(s, SSL_READING);
 			s->s3->fatal_alert = alert_descr;
 			SSLerr(SSL_F_SSL3_READ_BYTES, SSL_AD_REASON_OFFSET + alert_descr);
 			BIO_snprintf(tmp,sizeof tmp,"%d",alert_descr);
@@ -1717,7 +1715,7 @@ start:
 
 	if (s->shutdown & SSL_SENT_SHUTDOWN) /* but we have not received a shutdown */
 		{
-		s->rwstate=SSL_NOTHING;
+		SSL_want_clear(s, SSL_READING);
 		rr->length=0;
 		return(0);
 		}
@@ -1789,7 +1787,7 @@ start:
 				 * but we trigger an SSL handshake, we return -1 with
 				 * the retry option set.  Otherwise renegotiation may
 				 * cause nasty problems in the blocking world */
-				s->rwstate=SSL_READING;
+				SSL_want_set(s, SSL_READING);
 				bio=SSL_get_rbio(s);
 				BIO_clear_retry_flags(bio);
 				BIO_set_retry_read(bio);

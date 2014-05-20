@@ -76,6 +76,8 @@ static ERR_STRING_DATA DSA_str_functs[]=
 {ERR_FUNC(DSA_F_DSAPARAMS_PRINT_FP),	"DSAparams_print_fp"},
 {ERR_FUNC(DSA_F_DSA_DO_SIGN),	"DSA_do_sign"},
 {ERR_FUNC(DSA_F_DSA_DO_VERIFY),	"DSA_do_verify"},
+{ERR_FUNC(DSA_F_DSA_DO_SIGN_ASYNCH),   "DSA_do_sign_asynch"},
+{ERR_FUNC(DSA_F_DSA_DO_VERIFY_ASYNCH), "DSA_do_verify_asynch"},
 {ERR_FUNC(DSA_F_DSA_GENERATE_KEY),	"DSA_generate_key"},
 {ERR_FUNC(DSA_F_DSA_GENERATE_PARAMETERS_EX),	"DSA_generate_parameters_ex"},
 {ERR_FUNC(DSA_F_DSA_NEW_METHOD),	"DSA_new_method"},
@@ -112,6 +114,7 @@ static ERR_STRING_DATA DSA_str_reasons[]=
 {ERR_REASON(DSA_R_NON_FIPS_DSA_METHOD)   ,"non fips dsa method"},
 {ERR_REASON(DSA_R_NO_PARAMETERS_SET)     ,"no parameters set"},
 {ERR_REASON(DSA_R_PARAMETER_ENCODING_ERROR),"parameter encoding error"},
+{ERR_REASON(DSA_R_INVALID_NULL_PARAMETER)  ,"invalid NULL parameter"},
 {0,NULL}
 	};
 

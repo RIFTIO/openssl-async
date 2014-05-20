@@ -352,7 +352,7 @@ int ssl3_accept(SSL *s)
 		case SSL3_ST_SR_CLNT_HELLO_C:
 
 			s->shutdown=0;
-			if (s->rwstate != SSL_X509_LOOKUP)
+			if (!SSL_want_x509_lookup(s))
 			{
 				ret=ssl3_get_client_hello(s);
 				if (ret <= 0) goto end;
@@ -363,7 +363,7 @@ int ssl3_accept(SSL *s)
 			if ((ret = ssl_check_srp_ext_ClientHello(s,&al))  < 0)
 					{
 					/* callback indicates firther work to be done */
-					s->rwstate=SSL_X509_LOOKUP;
+					SSL_want_set(s,SSL_X509_LOOKUP);
 					goto end;
 					}
 			if (ret != SSL_ERROR_NONE)
@@ -564,7 +564,7 @@ int ssl3_accept(SSL *s)
 			 * unconditionally.
 			 */
 
-			s->rwstate=SSL_WRITING;
+			SSL_want_set(s,SSL_WRITING);
 			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 			if (BIO_flush(s->wbio) <= 0)
@@ -576,7 +576,7 @@ int ssl3_accept(SSL *s)
 				}
 			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
-			s->rwstate=SSL_NOTHING;
+			SSL_want_clear(s,SSL_WRITING);
 
 			s->state=s->s3->tmp.next_state;
 			break;
@@ -1569,6 +1569,12 @@ static int ssl3_send_server_key_exchange_md_post(unsigned char *md, unsigned int
 	return 1;
 	}
 
+static int ssl3_send_server_key_exchange_dh_post(unsigned char *res, size_t reslen, SSL *s, int status)
+	{
+	s->s3->pkeystate = 4;
+	return 1;
+	}
+
 static int ssl3_send_server_key_exchange_pkey_post(unsigned char *res, size_t reslen, SSL *s, int status)
 	{
 	s->s3->send_server_key_exchange.status = status;
@@ -1663,6 +1669,16 @@ int ssl3_send_server_key_exchange(SSL *s)
 					n = s->s3->send_server_key_exchange.n;
 					i = s->s3->send_server_key_exchange.i;
 					goto post_pkey;
+#ifndef OPENSSL_NO_DH
+				case 4:
+					s->s3->pkeystate = 0; /* No longer needed, reset it */
+					p = s->s3->send_server_key_exchange.p;
+					u = s->s3->send_server_key_exchange.u;
+					n = s->s3->send_server_key_exchange.n;
+					pkey = s->s3->send_server_key_exchange.pkey;
+					dh = s->s3->send_server_key_exchange.pkey->pkey.dh;
+					goto post_dh;
+#endif
 				default:
 					break;
 					}
@@ -1728,6 +1744,46 @@ int ssl3_send_server_key_exchange(SSL *s)
 			     dhp->priv_key == NULL ||
 			     (s->options & SSL_OP_SINGLE_DH_USE)))
 				{
+				if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+					{
+					s->s3->pkeystate = -1;
+					s->s3->send_server_key_exchange.p = p;
+					s->s3->send_server_key_exchange.u = u;
+					s->s3->send_server_key_exchange.n = n;
+					s->s3->send_server_key_exchange.pkey = pkey;
+					s->s3->send_server_key_exchange.pkey->pkey.dh = dh;
+					if(!DH_generate_key_asynch(dh,
+						(int (*)(unsigned char *, size_t,  void *, int))
+						ssl3_send_server_key_exchange_dh_post, s))
+						{
+						int error = 0;
+						s->s3->pkeystate = 0;
+						error = ERR_get_error();
+						if(ERR_R_RETRY == ERR_GET_REASON(error))
+							{
+							s->s3->pkeystate = 2;
+#ifndef OPENSSL_NO_DH
+							if (s->s3->tmp.dh != NULL)
+								{
+								DH_free(s->s3->tmp.dh);
+								s->s3->tmp.dh = NULL;
+								}
+#endif
+#ifndef OPENSSL_NO_ECDH
+							if (s->s3->tmp.ecdh != NULL)
+								{
+								EC_KEY_free(s->s3->tmp.ecdh);
+								s->s3->tmp.ecdh = NULL;
+								}
+#endif
+							goto err;
+							}
+						SSLerr(SSL_F_SSL3_SEND_SERVER_KEY_EXCHANGE,ERR_R_DH_LIB);
+						goto err;
+						}
+					EVP_MD_CTX_cleanup(&md_ctx);
+					return -1;
+					}
 				if(!DH_generate_key(dh))
 				    {
 				    SSLerr(SSL_F_SSL3_SEND_SERVER_KEY_EXCHANGE,
@@ -1746,6 +1802,7 @@ int ssl3_send_server_key_exchange(SSL *s)
 					goto err;
 					}
 				}
+post_dh:
 			r[0]=dh->p;
 			r[1]=dh->g;
 			r[2]=dh->pub_key;
@@ -2371,8 +2428,11 @@ int ssl3_get_client_key_exchange(SSL *s)
 			case EVP_PKEY_RSA:
 				p = s->s3->get_client_key_exchange.p;
 				i = n = s->s3->get_client_key_exchange.n;
+				/* To handle ephemeral DH case */
+				if ((alg_k & SSL_kEDH) && (alg_a & SSL_aRSA))
+					goto post_dh;
 				/* To handle ephemeral ECDH case */
-				if ((alg_k & SSL_kEECDH) && (alg_a & SSL_aRSA))
+				else if ((alg_k & SSL_kEECDH) && (alg_a & SSL_aRSA))
 					goto post_ecdh;
 				else 
 				goto post_rsa;
@@ -2382,6 +2442,12 @@ int ssl3_get_client_key_exchange(SSL *s)
 				p = s->s3->get_client_key_exchange.p;
 				i = n = s->s3->get_client_key_exchange.n;
 				goto post_ecdh;
+#endif
+#ifndef OPENSSL_NO_DH
+			case EVP_PKEY_DSA:
+				p = s->s3->get_client_key_exchange.p;
+				i = n = s->s3->get_client_key_exchange.n;
+				goto post_dh;
 #endif
 			default:
 				break;
@@ -2584,6 +2650,40 @@ int ssl3_get_client_key_exchange(SSL *s)
 			goto err;
 			}
 
+		pkey = ssl_get_sign_pkey(s,s->s3->tmp.new_cipher, NULL);
+
+		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+			{
+			s->s3->pkeystate = -1;
+			s->s3->get_client_key_exchange.pkey = pkey;
+			s->s3->get_client_key_exchange.p = p;
+			s->s3->get_client_key_exchange.n = n;
+			i=DH_compute_key_asynch(p,&s->s3->get_client_key_exchange.n,pub,dh_srvr,
+					(int (*)(unsigned char *, size_t, void *, int))
+					ssl3_get_client_key_exchange_post, s);
+			if (i <= 0)
+				{
+				int error = 0;
+				s->s3->pkeystate = 0;
+				error = ERR_get_error();
+				if(ERR_R_RETRY == ERR_GET_REASON(error))
+					{
+					s->s3->pkeystate = 2;
+					s->s3->tmp.reuse_message = 1;
+					goto err;
+					}
+				else
+					{
+					SSLerr(SSL_F_SSL3_GET_CLIENT_KEY_EXCHANGE,ERR_R_DH_LIB);
+					goto err;
+					}
+				}
+			DH_free(s->s3->tmp.dh);
+			s->s3->tmp.dh=NULL;
+			BN_clear_free(pub);
+			pub=NULL; 
+			return -1;
+			}
 		i=DH_compute_key(p,pub,dh_srvr);
 
 		if (i <= 0)
@@ -2598,6 +2698,7 @@ int ssl3_get_client_key_exchange(SSL *s)
 
 		BN_clear_free(pub);
 		pub=NULL;
+post_dh:
 		s->session->master_key_length=
 			s->method->ssl3_enc->generate_master_secret(s,
 				s->session->master_key,p,i);
@@ -3285,6 +3386,12 @@ int ssl3_get_cert_verify(SSL *s)
 						j = s->s3->get_cert_verify.status;
 						goto post_ecdsa;
 #endif
+#ifndef OPENSSL_NO_DSA
+					case EVP_PKEY_DSA:
+						p = s->s3->get_cert_verify.p;
+						j = s->s3->get_cert_verify.status;
+						goto post_dsa;
+#endif
 			default:
 				break;
 				}
@@ -3565,9 +3672,41 @@ post_pkey:
 #ifndef OPENSSL_NO_DSA
 		if (pkey->type == EVP_PKEY_DSA)
 		{
+			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+			{
+				s->s3->pkeystate = -1;
+				s->s3->get_cert_verify.pkey = pkey;
+				s->s3->get_cert_verify.p = p;
+
+				j=DSA_verify_asynch(pkey->save_type,
+						&(s->s3->tmp.cert_verify_md[MD5_DIGEST_LENGTH]),
+						SHA_DIGEST_LENGTH,p,i,pkey->pkey.dsa,
+                                                (int (*)(void *, int))ssl3_get_cert_verify_pkey_post, s);
+				if (!j)
+				{
+					int error = 0;
+					s->s3->pkeystate = 0;
+					error = ERR_get_error();
+					if(ERR_R_RETRY == ERR_GET_REASON(error))
+					{
+						s->s3->pkeystate = 2;
+						s->s3->tmp.reuse_message = 1;
+						EVP_MD_CTX_cleanup(&mctx);
+						EVP_PKEY_free(pkey);
+						return -1;
+					}
+					SSLerr(SSL_F_SSL3_GET_CERT_VERIFY,
+							ERR_LIB_DSA);
+					goto f_err;
+				}
+				EVP_MD_CTX_cleanup(&mctx);
+				return -1;
+			}
+
 		j=DSA_verify(pkey->save_type,
 			&(s->s3->tmp.cert_verify_md[MD5_DIGEST_LENGTH]),
 			SHA_DIGEST_LENGTH,p,i,pkey->pkey.dsa);
+post_dsa:
 		if (j <= 0)
 			{
 			/* bad signature */

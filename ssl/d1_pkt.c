@@ -794,7 +794,7 @@ int dtls1_read_bytes(SSL *s, int type, unsigned char *buf, int len, int peek)
 		}
 
 start:
-	s->rwstate=SSL_NOTHING;
+	SSL_want_set(s, SSL_NOTHING);
 
 	/* s->s3->rrec.type	    - is the type of record
 	 * s->s3->rrec.data,    - data
@@ -874,7 +874,7 @@ start:
 	if (s->shutdown & SSL_RECEIVED_SHUTDOWN)
 		{
 		rr->length=0;
-		s->rwstate=SSL_NOTHING;
+		SSL_want_clear(s, SSL_READING);
 		return(0);
 		}
 
@@ -918,7 +918,7 @@ start:
 			    rr->type == SSL3_RT_APPLICATION_DATA &&
 			    (s->state == DTLS1_SCTP_ST_SR_READ_SOCK || s->state == DTLS1_SCTP_ST_CR_READ_SOCK))
 				{
-				s->rwstate=SSL_READING;
+				SSL_want_set(s, SSL_READING);
 				BIO_clear_retry_flags(SSL_get_rbio(s));
 				BIO_set_retry_read(SSL_get_rbio(s));
 				}
@@ -968,7 +968,7 @@ start:
 
 			/* Exit and notify application to read again */
 			rr->length = 0;
-			s->rwstate=SSL_READING;
+			SSL_want_set(s, SSL_READING);
 			BIO_clear_retry_flags(SSL_get_rbio(s));
 			BIO_set_retry_read(SSL_get_rbio(s));
 			return(-1);
@@ -985,7 +985,7 @@ start:
 				BIO *bio;
 				s->s3->in_read_app_data=2;
 				bio=SSL_get_rbio(s);
-				s->rwstate=SSL_READING;
+				SSL_want_set(s, SSL_READING);
 				BIO_clear_retry_flags(bio);
 				BIO_set_retry_read(bio);
 				return(-1);
@@ -1079,7 +1079,7 @@ start:
 						 * but we trigger an SSL handshake, we return -1 with
 						 * the retry option set.  Otherwise renegotiation may
 						 * cause nasty problems in the blocking world */
-						s->rwstate=SSL_READING;
+						SSL_want_set(s, SSL_READING);
 						bio=SSL_get_rbio(s);
 						BIO_clear_retry_flags(bio);
 						BIO_set_retry_read(bio);
@@ -1129,7 +1129,7 @@ start:
 					BIO_dgram_sctp_msg_waiting(SSL_get_rbio(s)))
 					{
 					s->d1->shutdown_received = 1;
-					s->rwstate=SSL_READING;
+					SSL_want_set(s, SSL_READING);
 					BIO_clear_retry_flags(SSL_get_rbio(s));
 					BIO_set_retry_read(SSL_get_rbio(s));
 					return -1;
@@ -1168,7 +1168,7 @@ start:
 			{
 			char tmp[16];
 
-			s->rwstate=SSL_NOTHING;
+			SSL_want_clear(s, SSL_READING);
 			s->s3->fatal_alert = alert_descr;
 			SSLerr(SSL_F_DTLS1_READ_BYTES, SSL_AD_REASON_OFFSET + alert_descr);
 			BIO_snprintf(tmp,sizeof tmp,"%d",alert_descr);
@@ -1189,7 +1189,7 @@ start:
 
 	if (s->shutdown & SSL_SENT_SHUTDOWN) /* but we have not received a shutdown */
 		{
-		s->rwstate=SSL_NOTHING;
+		SSL_want_clear(s, SSL_READING);
 		rr->length=0;
 		return(0);
 		}
@@ -1312,7 +1312,7 @@ start:
 				 * but we trigger an SSL handshake, we return -1 with
 				 * the retry option set.  Otherwise renegotiation may
 				 * cause nasty problems in the blocking world */
-				s->rwstate=SSL_READING;
+				SSL_want_set(s, SSL_READING);
 				bio=SSL_get_rbio(s);
 				BIO_clear_retry_flags(bio);
 				BIO_set_retry_read(bio);
@@ -1462,7 +1462,7 @@ int dtls1_write_bytes(SSL *s, int type, const void *buf, int len)
 	int i;
 
 	OPENSSL_assert(len <= SSL3_RT_MAX_PLAIN_LENGTH);
-	s->rwstate=SSL_NOTHING;
+	SSL_want_clear(s, SSL_WRITING);
 	i=do_dtls1_write(s, type, buf, len, 0);
 	return i;
 	}

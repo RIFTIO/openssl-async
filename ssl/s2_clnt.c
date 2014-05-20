@@ -797,7 +797,7 @@ static int client_certificate(SSL *s)
 		EVP_PKEY *pkey=NULL;
 
 		/* If we get an error we need to
-		 * ssl->rwstate=SSL_X509_LOOKUP;
+		 * SSL_want_set(s, SSL_X509_LOOKUP);
 		 * return(error);
 		 * We should then be retried when things are ok and we
 		 * can get a cert or not */
@@ -810,10 +810,10 @@ static int client_certificate(SSL *s)
 
 		if (i < 0)
 			{
-			s->rwstate=SSL_X509_LOOKUP;
+			SSL_want_set(s, SSL_X509_LOOKUP);
 			return(-1);
 			}
-		s->rwstate=SSL_NOTHING;
+		SSL_want_clear(s, SSL_X509_LOOKUP);
 
 		if ((i == 1) && (pkey != NULL) && (x509 != NULL))
 			{
