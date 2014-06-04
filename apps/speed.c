@@ -2531,6 +2531,8 @@ int MAIN(int argc, char **argv)
 				if (rsa_num == 0)
 					{
 						dumpError("RSA private encrypt failure", cb_data.stats,RETRY);
+						poll_engine(engine, &cb_stats, 0);
+						count--;
 					}
 				else
 						cb_data.stats->req++;

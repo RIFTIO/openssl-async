@@ -795,7 +795,7 @@ int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len)
 	const unsigned char *buf=buf_;
 	unsigned int tot,n,nw;
 	int i;
-	SSL_want_clear(s, SSL_WRITING);
+	SSL_want_set(s, SSL_NOTHING);
 	tot=s->s3->wnum;
 	s->s3->wnum=0;
 

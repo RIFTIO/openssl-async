@@ -85,23 +85,6 @@ static int ssl3_process_transmissions(SSL *s, int status)
 			{
 			SSL3_TRANSMISSION *trans = &head->trans;
 			status = 1;
-			while(trans->post && trans->callback_list_top > 0)
-				{
-				SSL3_ASYNCH_CALLBACK_LIST *p =
-					&(trans->callback_list[--trans->callback_list_top]);
-				status = p->cb(trans, status);
-				}
-
-			/*
-			 * If trans->post is false, something extraordinary
-			 * happened that has us push the rest of the processing
-			 * to a later time.  For example, if one of the
-			 * callbacks initiates another crypto or digest
-			 * operation on the same transmissions.
-			 */
-			if (!trans->post)
-				break;
-
 			if (trans->s->asynch_completion_callback)
 				{
 				if (trans->flags & SSL3_TRANS_FLAGS_SEND)
@@ -120,6 +103,24 @@ static int ssl3_process_transmissions(SSL *s, int status)
 						trans->s,
 						trans->s->asynch_completion_callback_arg);
 				}
+
+			while(trans->post && trans->callback_list_top > 0)
+				{
+				SSL3_ASYNCH_CALLBACK_LIST *p =
+					&(trans->callback_list[--trans->callback_list_top]);
+				status = p->cb(trans, status);
+				}
+
+			/*
+			 * If trans->post is false, something extraordinary
+			 * happened that has us push the rest of the processing
+			 * to a later time.  For example, if one of the
+			 * callbacks initiates another crypto or digest
+			 * operation on the same transmissions.
+			 */
+			if (!trans->post)
+				break;
+
 			ssl3_release_buffer(trans->s, &trans->buf,
 				!!(trans->flags & SSL3_TRANS_FLAGS_SEND));
 			ssl3_release_transmission(trans);

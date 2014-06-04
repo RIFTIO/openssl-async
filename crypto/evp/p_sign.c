@@ -257,11 +257,9 @@ err:
 		{
 		if (tmp_ctx->digest->sign.synch != NULL)
 			{
-			size_t sltmp = 0;
 			EVP_PKEY_asynch_sign_cb *asynch_cb = (EVP_PKEY_asynch_sign_cb*)tmp_ctx->internal->cb;
 			ret =(ctx->digest->sign.synch(ctx->digest->type, m, m_len,
-				sigret, &sltmp, pkey->pkey.ptr));
-			*siglen = sltmp;
+				sigret, siglen, pkey->pkey.ptr));
 			asynch_cb(sigret, *siglen, tmp_ctx, ret);
 			return ret;
 			}
