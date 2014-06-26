@@ -796,7 +796,7 @@ dtls1_get_message_fragment(SSL *s, int st1, int stn, long max, int *ok)
 		DTLS1_HM_HEADER_LENGTH, 0);
 	if (i <= 0) 	/* nbio, or an error */
 		{
-		SSL_want_set(s, SSL_READING);
+		s->rwstate=SSL_READING;
 		*ok = 0;
 		return i;
 		}
@@ -868,7 +868,7 @@ dtls1_get_message_fragment(SSL *s, int st1, int stn, long max, int *ok)
 		/* XDTLS:  fix this--message fragments cannot span multiple packets */
 		if (i <= 0)
 			{
-			SSL_want_set(s, SSL_READING);
+			s->rwstate=SSL_READING;
 			*ok = 0;
 			return i;
 			}

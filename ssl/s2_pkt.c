@@ -145,7 +145,7 @@ static int ssl2_read_internal(SSL *s, void *buf, int len, int peek)
 		}
 
 	clear_sys_error();
-	SSL_want_clear(s, SSL_READING);
+	s->rwstate=SSL_NOTHING;
 	if (len <= 0) return(len);
 
 	if (s->s2->ract_data_length != 0) /* read from buffer */
@@ -375,7 +375,7 @@ static int read_n(SSL *s, unsigned int n, unsigned int max,
 		clear_sys_error();
 		if (s->rbio != NULL)
 			{
-			SSL_want_set(s, SSL_READING);
+			s->rwstate=SSL_READING;
 			i=BIO_read(s->rbio,(char *)&(s->s2->rbuf[off+newb]),
 				max-newb);
 			}
@@ -410,7 +410,7 @@ static int read_n(SSL *s, unsigned int n, unsigned int max,
 		s->packet_length+=n;
 	else
 		s->packet_length=n;
-	SSL_want_clear(s, SSL_READING);
+	s->rwstate=SSL_NOTHING;
 	return(n);
 	}
 
@@ -439,7 +439,7 @@ int ssl2_write(SSL *s, const void *_buf, int len)
 		}
 
 	clear_sys_error();
-	SSL_want_clear(s, SSL_WRITING);
+	s->rwstate=SSL_NOTHING;
 	if (len <= 0) return(len);
 
 	tot=s->s2->wnum;
@@ -486,7 +486,7 @@ static int write_pending(SSL *s, const unsigned char *buf, unsigned int len)
 		clear_sys_error();
 		if (s->wbio != NULL)
 			{
-			SSL_want_set(s, SSL_WRITING);
+			s->rwstate=SSL_WRITING;
 			i=BIO_write(s->wbio,
 				(char *)&(s->s2->write_ptr[s->s2->wpend_off]),
 				(unsigned int)s->s2->wpend_len);
@@ -502,7 +502,7 @@ static int write_pending(SSL *s, const unsigned char *buf, unsigned int len)
 		if (i == s->s2->wpend_len)
 			{
 			s->s2->wpend_len=0;
-			SSL_want_clear(s, SSL_WRITING);
+			s->rwstate=SSL_NOTHING;
 			return(s->s2->wpend_ret);
 			}
 		else if (i <= 0)

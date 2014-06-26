@@ -352,7 +352,7 @@ int ssl3_accept(SSL *s)
 		case SSL3_ST_SR_CLNT_HELLO_C:
 
 			s->shutdown=0;
-			if (!SSL_want_x509_lookup(s))
+			if (s->rwstate != SSL_X509_LOOKUP)
 			{
 				ret=ssl3_get_client_hello(s);
 				if (ret <= 0) goto end;
@@ -363,7 +363,7 @@ int ssl3_accept(SSL *s)
 			if ((ret = ssl_check_srp_ext_ClientHello(s,&al))  < 0)
 					{
 					/* callback indicates firther work to be done */
-					SSL_want_set(s,SSL_X509_LOOKUP);
+					s->rwstate=SSL_X509_LOOKUP;
 					goto end;
 					}
 			if (ret != SSL_ERROR_NONE)
@@ -564,7 +564,7 @@ int ssl3_accept(SSL *s)
 			 * unconditionally.
 			 */
 
-			SSL_want_set(s,SSL_WRITING);
+			s->rwstate=SSL_WRITING;
 			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 			if (BIO_flush(s->wbio) <= 0)
@@ -576,7 +576,7 @@ int ssl3_accept(SSL *s)
 				}
 			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
-			SSL_want_clear(s,SSL_WRITING);
+			s->rwstate=SSL_NOTHING;
 
 			s->state=s->s3->tmp.next_state;
 			break;

@@ -155,12 +155,18 @@ static EVP_ASYNCH_CTX *alloc_asynch_ctx()
 	if (asynch_ctx_pool == NULL)
 		{
 		asynch_ctx_pool = POOL_init(sizeof(EVP_ASYNCH_CTX), 1024);
+		if(!asynch_ctx_pool)
+			{
+			CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
+			EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_MALLOC_FAILURE);
+			return NULL;
+			}
 		}
 	ret = (EVP_ASYNCH_CTX *) POOL_alloc_item(asynch_ctx_pool);
 	if(!ret)
 			{
 			CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);
-			EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_MALLOC_FAILURE);
+		EVPerr(EVP_F_ALLOC_ASYNCH_CTX,ERR_R_RETRY);
 		return ret;
 		}
 	CRYPTO_w_unlock(CRYPTO_LOCK_ASYNCH);

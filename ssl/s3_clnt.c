@@ -571,7 +571,7 @@ int ssl3_connect(SSL *s)
 			break;
 
 		case SSL3_ST_CW_FLUSH:
-			SSL_want_set(s,SSL_WRITING);
+			s->rwstate=SSL_WRITING;
 			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 			if (BIO_flush(s->wbio) <= 0)
@@ -583,7 +583,7 @@ int ssl3_connect(SSL *s)
 				}
 			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
-			SSL_want_clear(s,SSL_WRITING);
+			s->rwstate=SSL_NOTHING;
 			s->state=s->s3->tmp.next_state;
 			break;
 
@@ -3659,16 +3659,16 @@ int ssl3_send_client_certificate(SSL *s)
 	if (s->state == SSL3_ST_CW_CERT_B)
 		{
 		/* If we get an error, we need to
-		 * SSL_want_set(s, SSL_X509_LOOKUP); return(-1);
+		 * ssl->rwstate=SSL_X509_LOOKUP; return(-1);
 		 * We then get retied later */
 		i=0;
 		i = ssl_do_client_cert_cb(s, &x509, &pkey);
 		if (i < 0)
 			{
-			SSL_want_set(s,SSL_X509_LOOKUP);
+			s->rwstate=SSL_X509_LOOKUP;
 			return(-1);
 			}
-		SSL_want_clear(s,SSL_X509_LOOKUP);
+		s->rwstate=SSL_NOTHING;
 		if ((i == 1) && (pkey != NULL) && (x509 != NULL))
 			{
 			s->state=SSL3_ST_CW_CERT_B;

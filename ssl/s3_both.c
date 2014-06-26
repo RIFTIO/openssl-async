@@ -458,7 +458,7 @@ long ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
 					&p[s->init_num],4 - s->init_num, 0);
 				if (i <= 0)
 					{
-					SSL_want_set(s, SSL_READING);
+					s->rwstate=SSL_READING;
 					*ok = 0;
 					return i;
 					}
@@ -538,7 +538,7 @@ long ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
 		i=s->method->ssl_read_bytes(s,SSL3_RT_HANDSHAKE,&p[s->init_num],n,0);
 		if (i <= 0)
 			{
-			SSL_want_set(s, SSL_READING);
+			s->rwstate=SSL_READING;
 			*ok = 0;
 			return i;
 			}

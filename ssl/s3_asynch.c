@@ -94,7 +94,6 @@ static int ssl3_process_transmissions(SSL *s, int status)
 						trans->orig, trans->origlen,
 						trans->s,
 						trans->s->asynch_completion_callback_arg);
-					OPENSSL_free(trans->orig);
 					}
 				else
 					trans->s->asynch_completion_callback(
@@ -121,6 +120,12 @@ static int ssl3_process_transmissions(SSL *s, int status)
 			if (!trans->post)
 				break;
 
+			if ((trans->s->asynch_completion_callback) && 
+			    (trans->flags & SSL3_TRANS_FLAGS_SEND) &&
+			    (trans->orig))
+				{
+				OPENSSL_free(trans->orig);
+				}
 			ssl3_release_buffer(trans->s, &trans->buf,
 				!!(trans->flags & SSL3_TRANS_FLAGS_SEND));
 			ssl3_release_transmission(trans);

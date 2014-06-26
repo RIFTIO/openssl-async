@@ -348,7 +348,7 @@ int dtls1_accept(SSL *s)
 			if (BIO_dgram_sctp_msg_waiting(SSL_get_rbio(s)))		
 				{
 				s->s3->in_read_app_data=2;
-				SSL_want_set(s, SSL_READING);
+				s->rwstate=SSL_READING;
 				BIO_clear_retry_flags(SSL_get_rbio(s));
 				BIO_set_retry_read(SSL_get_rbio(s));
 				ret = -1;
@@ -367,7 +367,7 @@ int dtls1_accept(SSL *s)
 				if (s->d1->next_state != SSL_ST_OK)
 					{
 					s->s3->in_read_app_data=2;
-					SSL_want_set(s, SSL_READING);
+					s->rwstate=SSL_READING;
 					BIO_clear_retry_flags(SSL_get_rbio(s));
 					BIO_set_retry_read(SSL_get_rbio(s));
 					ret = -1;
@@ -569,20 +569,20 @@ int dtls1_accept(SSL *s)
 			break;
 		
 		case SSL3_ST_SW_FLUSH:
-			SSL_want_set(s, SSL_WRITING);
+			s->rwstate=SSL_WRITING;
 			if (BIO_flush(s->wbio) <= 0)
 				{
 				/* If the write error was fatal, stop trying */
 				if (!BIO_should_retry(s->wbio))
 					{
-					SSL_want_clear(s, SSL_WRITING);
+					s->rwstate=SSL_NOTHING;
 					s->state=s->s3->tmp.next_state;
 					}
 				
 				ret= -1;
 				goto end;
 				}
-			SSL_want_clear(s, SSL_WRITING);
+			s->rwstate=SSL_NOTHING;
 			s->state=s->s3->tmp.next_state;
 			break;
 

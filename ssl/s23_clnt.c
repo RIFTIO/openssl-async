@@ -758,7 +758,7 @@ static int ssl23_get_server_hello(SSL *s)
 			if (s->msg_callback)
 				s->msg_callback(0, s->version, SSL3_RT_ALERT, p+5, 2, s, s->msg_callback_arg);
 
-			SSL_want_clear(s, SSL_READING);
+			s->rwstate=SSL_NOTHING;
 			SSLerr(SSL_F_SSL23_GET_SERVER_HELLO,SSL_AD_REASON_OFFSET+p[6]);
 			goto err;
 			}

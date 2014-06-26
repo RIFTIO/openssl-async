@@ -73,7 +73,7 @@ int ssl23_write_bytes(SSL *s)
 	num=s->init_num;
 	for (;;)
 		{
-		SSL_want_set(s, SSL_WRITING);
+		s->rwstate=SSL_WRITING;
 		i=BIO_write(s->wbio,&(buf[tot]),num);
 		if (i <= 0)
 			{
@@ -81,7 +81,7 @@ int ssl23_write_bytes(SSL *s)
 			s->init_num=num;
 			return(i);
 			}
-		SSL_want_clear(s, SSL_WRITING);
+		s->rwstate=SSL_NOTHING;
 		if (i == num) return(tot+i);
 
 		num-=i;
@@ -101,12 +101,12 @@ int ssl23_read_bytes(SSL *s, int n)
 
 		for (;;)
 			{
-			SSL_want_set(s, SSL_READING);
+			s->rwstate=SSL_READING;
 			j=BIO_read(s->rbio,(char *)&(p[s->packet_length]),
 				n-s->packet_length);
 			if (j <= 0)
 				return(j);
-			SSL_want_clear(s, SSL_READING);
+			s->rwstate=SSL_NOTHING;
 			s->packet_length+=j;
 			if (s->packet_length >= (unsigned int)n)
 				return(s->packet_length);

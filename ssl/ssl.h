@@ -1110,14 +1110,14 @@ const char *SSL_get_psk_identity(const SSL *s);
 
 #define SSL_NOTHING	1
 #define SSL_WRITING	2
-#define SSL_READING	4			
-#define SSL_X509_LOOKUP	8			
+#define SSL_READING	3
+#define SSL_X509_LOOKUP	4
 
 /* These will only be used when doing non-blocking IO */
-#define SSL_want_nothing(s)	(SSL_want(s, SSL_NOTHING))
-#define SSL_want_read(s)	(SSL_want(s, SSL_READING))
-#define SSL_want_write(s)	(SSL_want(s, SSL_WRITING))
-#define SSL_want_x509_lookup(s)	(SSL_want(s, SSL_X509_LOOKUP))
+#define SSL_want_nothing(s)	(SSL_want(s) == SSL_NOTHING)
+#define SSL_want_read(s)	(SSL_want(s) == SSL_READING)
+#define SSL_want_write(s)	(SSL_want(s) == SSL_WRITING)
+#define SSL_want_x509_lookup(s)	(SSL_want(s) == SSL_X509_LOOKUP)
 
 #define SSL_MAC_FLAG_READ_MAC_STREAM 1
 #define SSL_MAC_FLAG_WRITE_MAC_STREAM 2
@@ -1700,9 +1700,7 @@ long SSL_CTX_set_timeout(SSL_CTX *ctx,long t);
 long SSL_CTX_get_timeout(const SSL_CTX *ctx);
 X509_STORE *SSL_CTX_get_cert_store(const SSL_CTX *);
 void SSL_CTX_set_cert_store(SSL_CTX *,X509_STORE *);
-int SSL_want(const SSL *s, int flag);
-void SSL_want_set(SSL *s, int flag);
-void SSL_want_clear(SSL *s, int flag);
+int SSL_want(const SSL *s);
 int	SSL_clear(SSL *s);
 
 void	SSL_CTX_flush_sessions(SSL_CTX *ctx,long tm);
