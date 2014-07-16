@@ -1676,7 +1676,7 @@ int ssl3_send_server_key_exchange(SSL *s)
 					u = s->s3->send_server_key_exchange.u;
 					n = s->s3->send_server_key_exchange.n;
 					pkey = s->s3->send_server_key_exchange.pkey;
-					dh = s->s3->send_server_key_exchange.pkey->pkey.dh;
+					dh = s->s3->send_server_key_exchange.dh;
 					goto post_dh;
 #endif
 				default:
@@ -1751,7 +1751,7 @@ int ssl3_send_server_key_exchange(SSL *s)
 					s->s3->send_server_key_exchange.u = u;
 					s->s3->send_server_key_exchange.n = n;
 					s->s3->send_server_key_exchange.pkey = pkey;
-					s->s3->send_server_key_exchange.pkey->pkey.dh = dh;
+					s->s3->send_server_key_exchange.dh = dh;
 					if(!DH_generate_key_asynch(dh,
 						(int (*)(unsigned char *, size_t,  void *, int))
 						ssl3_send_server_key_exchange_dh_post, s))
@@ -2422,19 +2422,32 @@ int ssl3_get_client_key_exchange(SSL *s)
 		case 1:			/* In post */
 			s->s3->pkeystate = 0; /* No longer needed, reset it */
 			pkey = s->s3->get_client_key_exchange.pkey;
+#ifndef OPENSSL_NO_DH
+			if(!pkey && (alg_k & SSL_kEDH) && (alg_a & SSL_aNULL))
+				{
+				p = s->s3->get_client_key_exchange.p;
+				i = n = s->s3->get_client_key_exchange.n;
+				goto post_dh;
+				}
+#endif
 			switch (pkey->type)
 				{
 #ifndef OPENSSL_NO_RSA
 			case EVP_PKEY_RSA:
 				p = s->s3->get_client_key_exchange.p;
 				i = n = s->s3->get_client_key_exchange.n;
+#ifndef OPENSSL_NO_DH
 				/* To handle ephemeral DH case */
 				if ((alg_k & SSL_kEDH) && (alg_a & SSL_aRSA))
 					goto post_dh;
+				else 
+#endif
+#ifndef OPENSSL_NO_ECDH
 				/* To handle ephemeral ECDH case */
-				else if ((alg_k & SSL_kEECDH) && (alg_a & SSL_aRSA))
+					if ((alg_k & SSL_kEECDH) && (alg_a & SSL_aRSA))
 					goto post_ecdh;
 				else 
+#endif
 				goto post_rsa;
 #endif
 #ifndef OPENSSL_NO_ECDH
@@ -2650,10 +2663,12 @@ int ssl3_get_client_key_exchange(SSL *s)
 			goto err;
 			}
 
-		pkey = ssl_get_sign_pkey(s,s->s3->tmp.new_cipher, NULL);
-
 		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 			{
+
+			if (!(s->s3->tmp.new_cipher->algorithm_auth & SSL_aNULL))
+				pkey = ssl_get_sign_pkey(s,s->s3->tmp.new_cipher, NULL);
+
 			s->s3->pkeystate = -1;
 			s->s3->get_client_key_exchange.pkey = pkey;
 			s->s3->get_client_key_exchange.p = p;
@@ -3331,14 +3346,7 @@ err:
 /* This only stores values, the rest is supposedly being handled by calling
  * ssl3_get_cert_verify() again.
  */
-static int ssl3_get_cert_verify_post(unsigned char *md, unsigned int size, SSL *s, int status)
-	{
-	s->s3->get_cert_verify.status = status;
-	s->s3->pkeystate = 1;
-	return 1;
-	}
-
-static int ssl3_get_cert_verify_pkey_post(SSL *s, int status)
+static int ssl3_get_cert_verify_post(SSL *s, int status)
 	{
 	s->s3->get_cert_verify.status = status;
 	s->s3->pkeystate = 1;
@@ -3536,7 +3544,7 @@ fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 			{
 			if (!EVP_MD_CTX_ctrl_ex(&mctx, EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK,
-				0, s, (void (*)(void))ssl3_get_cert_verify_pkey_post))
+				0, s, (void (*)(void))ssl3_get_cert_verify_post))
 				{
 				SSLerr(SSL_F_SSL3_GET_CERT_VERIFY,ERR_LIB_EVP);
 				al=SSL_AD_INTERNAL_ERROR;
@@ -3681,7 +3689,7 @@ post_pkey:
 				j=DSA_verify_asynch(pkey->save_type,
 						&(s->s3->tmp.cert_verify_md[MD5_DIGEST_LENGTH]),
 						SHA_DIGEST_LENGTH,p,i,pkey->pkey.dsa,
-                                                (int (*)(void *, int))ssl3_get_cert_verify_pkey_post, s);
+                                                (int (*)(void *, int))ssl3_get_cert_verify_post, s);
 				if (!j)
 				{
 					int error = 0;

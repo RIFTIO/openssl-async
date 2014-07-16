@@ -625,6 +625,9 @@ typedef struct ssl3_state_st
         unsigned char md_buf[EVP_MAX_MD_SIZE*2]; /* A duplicate */
         unsigned int u;
 #endif
+#ifndef OPENSSL_NO_DH
+        DH *dh;
+#endif
         unsigned char *p, *d;
         int i;
         int n;

@@ -1432,6 +1432,8 @@ int MAIN(int argc, char **argv)
 #ifndef OPENSSL_NO_ENGINE
 	/*Now that we are after the fork, each child can init the engine.*/
 	engine = ENGINE_by_id(engine_id);
+	if (engine != NULL)
+		{
 
         if(async)
 	{
@@ -1443,7 +1445,11 @@ int MAIN(int argc, char **argv)
         	}
 	}
 
+		}
 	engine = setup_engine(bio_err, engine_id, 0);
+
+	if ((NULL == engine) && (async))
+		goto end;
 #endif
 
 	if (j == 0)

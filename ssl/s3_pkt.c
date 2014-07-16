@@ -881,6 +881,7 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
 	SSL3_RECORD *wr = NULL;
 	SSL3_BUFFER *wb = NULL;
 	SSL_SESSION *sess;
+	int encstate=0, seqzeropos=0, seqpos=0;
 
 	if (!trans)
 		{
@@ -1203,16 +1204,42 @@ post_mac:
 	    trans->dsw_plen_offset = plen - wb->buf;
 	    }
 
-	/*FIXME: Retries*/
-	s->method->ssl3_enc->enc(s,1,trans);
+		encstate = s->method->ssl3_enc->enc(s,1,trans);
+		if (0 == encstate){
+			/* Cleanup transmission pool entry here as we had an error*/
+			ssl3_remove_last_transmission(s, SSL_WRITING);
+			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+			trans->s->s3->outstanding_write_crypto--;
+			s->s3->outstanding_write_records--;
+			/* On an error where the message never got sent we should
+			roll the sequence number back as otherwise it will
+			upset the client*/
+			/* First we check the sequence number isn't zero */
+			seqzeropos = 8; /* length of sequence number */
+			do {
+				seqzeropos--;
+			} while ((seqzeropos > 0) && (0 != s->s3->write_sequence[seqzeropos]));
+			if (0 != s->s3->write_sequence[seqzeropos])
+			{
+			for (seqpos=7; seqpos>=0; seqpos--)
+			{
+				if (0 == s->s3->write_sequence[seqpos])
+					s->s3->write_sequence[seqpos] = 0xFF;
+				else
+				{
+					s->s3->write_sequence[seqpos]--;
+					break;
+				}
+			}
+			}
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+			return -1;
+ 		}
 	if (trans)
 	    {
-		if(post==0)
+			/* Asynch case */
 	        return len;
-
-	    return 1;
 	    }
-
 post_enc:
 	/* record length after mac and block padding */
 	s2n(wr->length,plen);

@@ -1031,11 +1031,21 @@ int SSL_shutdown(SSL *s)
 		SSLerr(SSL_F_SSL_SHUTDOWN, SSL_R_UNINITIALIZED);
 		return -1;
 		}
-
-	if ((s != NULL) && !SSL_in_init(s))
+        if (s != NULL)
+        {
+            if (SSL_in_init(s))
+            {
+               /* Check for asynch inflights */
+               if ((s->s3->flags & SSL3_FLAGS_ASYNCH) && (SSL_crypto_pending(s)))
+                   return -1;
+               else
+                   return 1;
+            }
+            else
 		return(s->method->ssl_shutdown(s));
+        }
 	else
-		return(1);
+            return 1;
 	}
 
 int SSL_renegotiate(SSL *s)

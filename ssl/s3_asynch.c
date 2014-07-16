@@ -80,10 +80,10 @@ static int ssl3_process_transmissions(SSL *s, int status)
 		struct transmission_queue_node *head;
 		CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 		head = pool->head;
-		CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 		if (head && head->trans.post)
 			{
 			SSL3_TRANSMISSION *trans = &head->trans;
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 			status = 1;
 			if (trans->s->asynch_completion_callback)
 				{
@@ -117,8 +117,14 @@ static int ssl3_process_transmissions(SSL *s, int status)
 			 * callbacks initiates another crypto or digest
 			 * operation on the same transmissions.
 			 */
+			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 			if (!trans->post)
+			{
+				pool->postprocessing = 0;
+				CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 				break;
+			}
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 
 			if ((trans->s->asynch_completion_callback) && 
 			    (trans->flags & SSL3_TRANS_FLAGS_SEND) &&
@@ -131,14 +137,11 @@ static int ssl3_process_transmissions(SSL *s, int status)
 			ssl3_release_transmission(trans);
 			}
 		else
-			break;
-		}
-
-	if (iterate)
 		{
-		CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 		pool->postprocessing = 0;
 		CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+			break;
+		}
 		}
 	return status;
 	}

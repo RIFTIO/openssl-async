@@ -1311,6 +1311,8 @@ int ssl3_get_key_exchange(SSL *s)
 	int encoded_pt_len = 0;
 #endif
 
+        EVP_MD_CTX_init(&md_ctx);
+
 	if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 		switch (s->s3->pkeystate)
 			{
@@ -1410,7 +1412,6 @@ int ssl3_get_key_exchange(SSL *s)
 	param_len=0;
 	alg_k=s->s3->tmp.new_cipher->algorithm_mkey;
 	alg_a=s->s3->tmp.new_cipher->algorithm_auth;
-	EVP_MD_CTX_init(&md_ctx);
 
 #ifndef OPENSSL_NO_PSK
 	if (alg_k & SSL_kPSK)
@@ -1858,6 +1859,7 @@ fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 					EVP_DigestUpdate(ctx,param,param_len);
 					EVP_DigestFinal_ex(ctx,q,
 						(unsigned int *)&s->s3->key_exchange_cache.i);
+					EVP_MD_CTX_cleanup(&md_ctx);
 					return -1;
 					}
 				}
@@ -1909,6 +1911,7 @@ fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 					goto err;
 					}
 					}
+				EVP_MD_CTX_cleanup(&md_ctx);
 				return -1;
 				}
 			else
@@ -3336,7 +3339,6 @@ static int ssl3_send_client_verify_post(unsigned char *res, size_t reslen, SSL *
 	{
 	/*We are going to save off the verify data here*/
 	s->s3->send_client_verify.status = status;
-	memcpy(s->s3->send_client_verify.p+2, res, reslen);
 	s->s3->pkeystate = 1;
 	return 1;
 	}
