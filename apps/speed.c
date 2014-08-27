@@ -3794,6 +3794,11 @@ end:
 	}
 #endif
 
+        if (bio_err != NULL)
+        {
+                BIO_free(bio_err);
+                bio_err=NULL;
+        }
 	apps_shutdown();
 	OPENSSL_EXIT(mret);
 	}
