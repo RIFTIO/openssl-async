@@ -3536,7 +3536,7 @@ long ssl3_ctx_ctrl(SSL_CTX *ctx, int cmd, long larg, void *parg)
 			}
 		if (!(ctx->options & SSL_OP_SINGLE_ECDH_USE))
 			{
-			if (!EC_KEY_generate_key(ecdh))
+			if (!ECDH_generate_key(ecdh))
 				{
 				EC_KEY_free(ecdh);
 				SSLerr(SSL_F_SSL3_CTX_CTRL,ERR_R_ECDH_LIB);

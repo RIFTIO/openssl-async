@@ -348,8 +348,8 @@ typedef struct CallbackData
 	EVP_MD_CTX     	*digest;
 	RSA	       	*rsa;
     } ctx;
+	size_t outlen;
 } CallbackData_t;
-
 
 static void async_cb(unsigned char *out, unsigned int outl, void *vparams, int status)
 {
@@ -365,7 +365,10 @@ static int async_cb_ex(unsigned char *out, size_t outl, void *vparams, int statu
     CallbackData_t *cbData = (CallbackData_t *)vparams;
 
     if (status && outl != 0)
+		{
 		cbData->stats->resp++;
+		cbData->outlen = outl;
+		}
 	return 1;
 	}
 
@@ -374,7 +377,10 @@ static int async_cb_ex1(unsigned char *out, size_t outl, void *vparams, int stat
 	CallbackData_t *cbData = (CallbackData_t *)vparams;
 
 	if (status)
+		{
 		cbData->stats->resp++;
+		cbData->outlen = outl;
+		}
 	return 1;
 	}
 
@@ -815,7 +821,7 @@ int MAIN(int argc, char **argv)
 #ifndef OPENSSL_NO_ECDH
 	EC_KEY *ecdh_a[EC_NUM], *ecdh_b[EC_NUM];
 	unsigned char secret_a[MAX_ECDH_SIZE], secret_b[MAX_ECDH_SIZE];
-	int secret_size_a, secret_size_b;
+	int secret_size_a = 0, secret_size_b = 0;
 	int ecdh_checks = 1;
 	int secret_idx = 0;
 	long ecdh_c[EC_NUM][2];
@@ -3383,10 +3389,12 @@ int MAIN(int argc, char **argv)
 			rsa_count=1;
 			}
 		else
+			if (!async) /* ECDH synchronous mode */
 			{
 			/* generate two ECDH key pairs */
-			if (!EC_KEY_generate_key(ecdh_a[j]) ||
-				!EC_KEY_generate_key(ecdh_b[j]))
+			secret_size_a = ECDH_generate_key(ecdh_a[j]);
+			secret_size_b = ECDH_generate_key(ecdh_b[j]);
+			if ((secret_size_a < 0) || (secret_size_b < 0 ))
 				{
 				BIO_printf(bio_err,"ECDH key generation failure.\n");
 				ERR_print_errors(bio_err);
@@ -3407,11 +3415,11 @@ int MAIN(int argc, char **argv)
 					}
 				else
 					{
+					fprintf(stderr,"PFT:@3653:speed.c\n");
 					outlen = (field_size+7)/8;
 					kdf = NULL;
 					}
-				if (!async) /* ECDH Synchronous mode */
-					{
+
 				secret_size_a = ECDH_compute_key(secret_a, outlen,
 					EC_KEY_get0_public_key(ecdh_b[j]),
 					ecdh_a[j], kdf);
@@ -3457,16 +3465,56 @@ int MAIN(int argc, char **argv)
 				rsa_count=count;
 				}
 			}
+			}
 				if (async) /* ECDH asynchronous mode */
 					{
-					size_t ecdhlen=outlen;
+			/* generate two ECDH key pairs */
+			if (ECDH_generate_key_asynch(ecdh_a[j], async_cb_ex, &cb_data) <= 0)
+				{
+				BIO_printf(bio_err,"ECDH key generation failure.\n");
+				ERR_print_errors(bio_err);
+				rsa_count=1;
+				}
+			else
+				{
+				cb_data.stats->req++;
+				poll_engine(engine, &cb_stats, EMPTY_ENGINE);
 					RESET_CALLBACK_STATS(cb_stats);
 
-					secret_size_a = ECDH_compute_key_asynch(secret_a, &ecdhlen,
-							EC_KEY_get0_public_key(ecdh_b[j]),
-							ecdh_a[j], kdf, async_cb_ex, &cb_data);
+				if (ECDH_generate_key_asynch(ecdh_b[j], async_cb_ex, &cb_data) <= 0)
+					{
+					BIO_printf(bio_err,"ECDH key generation failure.\n");
+					ERR_print_errors(bio_err);
+					rsa_count=1;
+					}
+				else
+					{
+					cb_data.stats->req++;
+					poll_engine(engine, &cb_stats, EMPTY_ENGINE);
+					RESET_CALLBACK_STATS(cb_stats);
 
-					if (secret_size_a <= 0)
+					int field_size, outlen;
+					void *(*kdf)(const void *in, size_t inlen, void *out, size_t *xoutlen);
+					field_size = EC_GROUP_get_degree(EC_KEY_get0_group(ecdh_a[j]));
+					if (field_size <= 24 * 8)
+						{
+						outlen = KDF1_SHA1_len;
+						kdf = KDF1_SHA1;
+						}
+					else
+						{
+						outlen = (field_size+7)/8;
+						kdf = NULL;
+						}
+
+					size_t ecdhlen = outlen;
+					int retStatus = 0;
+
+					retStatus = ECDH_compute_key_asynch(secret_a, ecdhlen,
+														EC_KEY_get0_public_key(ecdh_b[j]),
+														ecdh_a[j], kdf, async_cb_ex,
+														&cb_data);
+					if (retStatus <= 0)
 						{
 						/*Retries are currently not supported*/
 						dumpError("Async ECDH compute key failure", cb_data.stats,NO_RETRY);
@@ -3476,17 +3524,15 @@ int MAIN(int argc, char **argv)
 						{
 						cb_data.stats->req++;
 						poll_engine(engine, &cb_stats, EMPTY_ENGINE);
-						secret_size_a = ecdhlen;
+						secret_size_a = cb_data.outlen;
 						cb_data.stats->req = cb_data.stats->resp = 0;
 						}
 
-
-					ecdhlen=outlen;
-					secret_size_b = ECDH_compute_key_asynch(secret_b, &ecdhlen,
+					retStatus = ECDH_compute_key_asynch(secret_b, ecdhlen,
 							EC_KEY_get0_public_key(ecdh_a[j]),
-							ecdh_b[j], kdf, async_cb_ex, &cb_data);
-
-					if (secret_size_b <= 0)
+														ecdh_b[j], kdf, async_cb_ex,
+														&cb_data);
+					if (retStatus <= 0)
 						{
 						/*Retries are currently not supported*/
 						dumpError("Async ECDH compute key failure", cb_data.stats,NO_RETRY);
@@ -3496,7 +3542,7 @@ int MAIN(int argc, char **argv)
 						{
 						cb_data.stats->req++;
 						poll_engine(engine, &cb_stats, EMPTY_ENGINE);
-						secret_size_b = ecdhlen;
+						secret_size_b = cb_data.outlen;
 						cb_data.stats->req = cb_data.stats->resp = 0;
 						}
 
@@ -3524,13 +3570,13 @@ int MAIN(int argc, char **argv)
 						pkey_print_message("","ecdh", ecdh_c[j][0], 
 							test_curves_bits[j],ECDH_SECONDS);
 						Time_F(START);
-						ecdhlen=outlen;
 						for (count=0,run=1; COND(ecdh_c[j][0]); count++)
 							{
-							secret_size_a = ECDH_compute_key_asynch(secret_a, &ecdhlen,
+							retStatus = ECDH_compute_key_asynch(secret_a, ecdhlen,
 									EC_KEY_get0_public_key(ecdh_b[j]),
-									ecdh_a[j], kdf, async_cb_ex, &cb_data);
-							if (secret_size_a <= 0)
+																ecdh_a[j], kdf, async_cb_ex,
+																&cb_data);
+							if (retStatus <= 0)
 								{
 								dumpError("Async ECDH compute key failure", cb_data.stats,RETRY);
 								poll_engine(engine, &cb_stats, 0);

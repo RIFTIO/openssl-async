@@ -188,6 +188,7 @@ void EVP_MD_CTX_init(EVP_MD_CTX *ctx)
 	ctx->md_data = NULL;
 	ctx->pctx = NULL;
 	ctx->update.synch = NULL;
+	ctx->internal = NULL;
 	}
 
 static int evp_MD_CTX_expand(EVP_MD_CTX *ctx)

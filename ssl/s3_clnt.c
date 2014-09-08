@@ -1861,11 +1861,12 @@ fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 					EVP_DigestUpdate(ctx,param,param_len);
 					EVP_DigestFinal_ex(ctx,q,
 						(unsigned int *)&s->s3->key_exchange_cache.i);
-					EVP_MD_CTX_cleanup(&md_ctx);
 					return -1;
 					}
-				}
 			else
+					EVP_MD_CTX_cleanup(&s->s3->key_exchange_cache.md_ctx);
+				}
+			else /* synch mode */
 				{
 				int num;
 
@@ -1913,7 +1914,6 @@ fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 					goto err;
 					}
 					}
-				EVP_MD_CTX_cleanup(&md_ctx);
 				return -1;
 				}
 			else
@@ -1965,7 +1965,7 @@ fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 				EVP_MD_CTX_cleanup(&md_ctx);
 				return -1;
 				}
-			else
+			else /* synch mode */
 				{
 			if (EVP_VerifyFinal(&md_ctx,p,(int)n,pkey) <= 0)
 				{
@@ -2396,6 +2396,15 @@ int ssl3_get_server_done(SSL *s)
 	}
 
 static int ssl3_send_client_key_exchange_dh_post(unsigned char *res, size_t reslen, SSL *s, int status)
+	{
+	s->s3->send_client_key_exchange.status = status;
+	s->s3->send_client_key_exchange.p = res;
+	s->s3->send_client_key_exchange.n = (int)reslen;
+	s->s3->pkeystate = 3;
+	return 1;
+	}
+
+static int ssl3_send_client_key_exchange_ecdh_post(unsigned char *res, size_t reslen, SSL *s, int status)
 	{
 	s->s3->send_client_key_exchange.status = status;
 	s->s3->send_client_key_exchange.p = res;
@@ -2863,10 +2872,15 @@ post_dh_generate:
 						s->s3->pkeystate = 0; /* No longer needed, reset it */
 						clnt_ecdh = s->s3->send_client_key_exchange.clnt_ecdh;
 						srvr_group = s->s3->send_client_key_exchange.srvr_group;
+						goto post_ecdh_generate;
+					case 3:
+						s->s3->pkeystate = 0; /* No longer needed, reset it */
+						clnt_ecdh = s->s3->send_client_key_exchange.clnt_ecdh;
+						srvr_group = s->s3->send_client_key_exchange.srvr_group;
 						p = s->s3->send_client_key_exchange.p;
 						q = s->s3->send_client_key_exchange.q;
 						n = s->s3->send_client_key_exchange.n;
-						goto post_ecdh;
+						goto post_ecdh_compute;
 					default:
 						break;
 					}
@@ -2964,13 +2978,44 @@ post_dh_generate:
 			else 
 				{
 				/* Generate a new ECDH key pair */
-				if (!(EC_KEY_generate_key(clnt_ecdh)))
+				if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+					{
+					s->s3->pkeystate = -1;
+					s->s3->send_client_key_exchange.clnt_ecdh = clnt_ecdh;
+					s->s3->send_client_key_exchange.srvr_group = srvr_group;
+
+					if (!ECDH_generate_key_asynch(s->s3->send_client_key_exchange.clnt_ecdh,
+												  (int (*)(unsigned char *, size_t, void *, int))
+												  ssl3_send_client_key_exchange_post, s))
+						{
+						int error = 0;
+						s->s3->pkeystate = 0;
+						error = ERR_get_error();
+						if(ERR_R_RETRY == ERR_GET_REASON(error))
+							{
+							s->s3->pkeystate = 2;
+							goto err;
+							}
+						else
 					{
 					SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE, ERR_R_ECDH_LIB);
 					goto err;
 					}
 				}
+					return -1;
+					}
+				else /* synch mode */
+					{
+					if (!ECDH_generate_key(clnt_ecdh))
+						/* if(!EC_KEY_generate_key(clnt_ecdh)) */
+						{
+						SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE, ERR_R_ECDH_LIB);
+						goto err;
+						}
+					}
+				}
 
+post_ecdh_generate:
 			/* use the 'p' output buffer for the ECDH key, but
 			 * make sure to clear it out afterwards
 			 */
@@ -2990,10 +3035,13 @@ post_dh_generate:
 				s->s3->send_client_key_exchange.q = q;
 				s->s3->send_client_key_exchange.p = p;
 				s->s3->send_client_key_exchange.n = (field_size+7)/8;
-				n = ECDH_compute_key_asynch(p, (size_t *) &s->s3->send_client_key_exchange.n, 
-					   srvr_ecpoint, clnt_ecdh, NULL,
-					   (int (*)(unsigned char *, size_t,  void *, int))
-					   ssl3_send_client_key_exchange_post, s); 
+				n = ECDH_compute_key_asynch(p,
+											(size_t)s->s3->send_client_key_exchange.n,
+											srvr_ecpoint,
+											s->s3->send_client_key_exchange.clnt_ecdh,
+											NULL,
+											(int (*)(unsigned char *, size_t, void *, int))ssl3_send_client_key_exchange_ecdh_post,
+											s);
 				if (n <= 0)
 					{
 					int error = 0;
@@ -3012,6 +3060,8 @@ post_dh_generate:
 					}
 				return -1; 
 				}
+
+			/* Synch mode */
 			n=ECDH_compute_key(p, (field_size+7)/8, srvr_ecpoint, clnt_ecdh, NULL);
 			if (n <= 0)
 				{
@@ -3020,7 +3070,7 @@ post_dh_generate:
 				goto err;
 				}
 
-post_ecdh:
+post_ecdh_compute:
 			/* generate master key from the result */
 			s->session->master_key_length = s->method->ssl3_enc \
 			    -> generate_master_secret(s, 

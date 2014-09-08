@@ -1580,6 +1580,12 @@ static int ssl3_send_server_key_exchange_dh_post(unsigned char *res, size_t resl
 	return 1;
 	}
 
+static int ssl3_send_server_key_exchange_ecdh_gen_post(unsigned char *res, size_t reslen, SSL *s, int status)
+{
+	s->s3->pkeystate = 5;
+	return 1;
+}
+
 static int ssl3_send_server_key_exchange_pkey_post(unsigned char *res, size_t reslen, SSL *s, int status)
 	{
 	s->s3->send_server_key_exchange.status = status;
@@ -1683,6 +1689,12 @@ int ssl3_send_server_key_exchange(SSL *s)
 					pkey = s->s3->send_server_key_exchange.pkey;
 					dh = s->s3->send_server_key_exchange.dh;
 					goto post_dh;
+#endif
+#ifndef OPENSSL_NO_ECDH
+				case 5:
+					s->s3->pkeystate = 0; /* No longer needed, reset it */
+					ecdh = s->s3->tmp.ecdh;
+					goto post_ecdh_gen_key;
 #endif
 				default:
 					break;
@@ -1819,6 +1831,13 @@ post_dh:
 			{
 			const EC_GROUP *group;
 
+				if ((s->s3->pkeystate == 2) && (s->s3->tmp.ecdh != NULL))
+					{
+					/* Case of a retry */
+					ecdh = s->s3->tmp.ecdh;
+					}
+				else
+					{
 			ecdhp=cert->ecdh_tmp;
 			if ((ecdhp == NULL) && (s->cert->ecdh_tmp_cb != NULL))
 				{
@@ -1839,12 +1858,6 @@ post_dh:
 				goto err;
 				}
 
-			/* Duplicate the ECDH structure. */
-			if (ecdhp == NULL)
-				{
-				SSLerr(SSL_F_SSL3_SEND_SERVER_KEY_EXCHANGE,ERR_R_ECDH_LIB);
-				goto err;
-				}
 			if ((ecdh = EC_KEY_dup(ecdhp)) == NULL)
 				{
 				SSLerr(SSL_F_SSL3_SEND_SERVER_KEY_EXCHANGE,ERR_R_ECDH_LIB);
@@ -1852,17 +1865,51 @@ post_dh:
 				}
 
 			s->s3->tmp.ecdh=ecdh;
+					}
+
 			if ((EC_KEY_get0_public_key(ecdh) == NULL) ||
 			    (EC_KEY_get0_private_key(ecdh) == NULL) ||
 			    (s->options & SSL_OP_SINGLE_ECDH_USE))
 				{
-				if(!EC_KEY_generate_key(ecdh))
+					if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+						{
+						s->s3->pkeystate = -1;
+						if ((ECDH_generate_key_asynch(ecdh,
+													  (int (*)(unsigned char *, size_t,  void *, int))
+													  ssl3_send_server_key_exchange_ecdh_gen_post, s)) <= 0)
+							{
+							int error = 0;
+							s->s3->pkeystate = 0;
+							error = ERR_get_error();
+							if (ERR_R_RETRY == ERR_GET_REASON(error))
+								{
+								s->s3->pkeystate = 2;
+								goto err;
+								}
+							else
+								{
+								if (s->s3->tmp.ecdh != NULL)
+									{
+									EC_KEY_free(s->s3->tmp.ecdh);
+									s->s3->tmp.ecdh = NULL;
+									}
+								SSLerr(SSL_F_SSL3_SEND_SERVER_KEY_EXCHANGE,ERR_R_ECDH_LIB);
+								goto err;
+								}
+							}
+						EVP_MD_CTX_cleanup(&md_ctx);
+						return -1;
+						}
+
+					/* Synch mode */
+					if(!ECDH_generate_key(ecdh))
 				    {
 				    SSLerr(SSL_F_SSL3_SEND_SERVER_KEY_EXCHANGE,ERR_R_ECDH_LIB);
 				    goto err;
 				    }
 				}
 
+post_ecdh_gen_key:
 			if (((group = EC_KEY_get0_group(ecdh)) == NULL) ||
 			    (EC_KEY_get0_public_key(ecdh)  == NULL) ||
 			    (EC_KEY_get0_private_key(ecdh) == NULL))
@@ -1882,9 +1929,7 @@ post_dh:
 			 * keys over named (not generic) curves. For 
 			 * supported named curves, curve_id is non-zero.
 			 */
-			if ((curve_id = 
-			    tls1_ec_nid2curve_id(EC_GROUP_get_curve_name(group)))
-			    == 0)
+				if ((curve_id = tls1_ec_nid2curve_id(EC_GROUP_get_curve_name(group))) == 0)
 				{
 				SSLerr(SSL_F_SSL3_SEND_SERVER_KEY_EXCHANGE,SSL_R_UNSUPPORTED_ELLIPTIC_CURVE);
 				goto err;
@@ -1899,8 +1944,7 @@ post_dh:
 			    POINT_CONVERSION_UNCOMPRESSED, 
 			    NULL, 0, NULL);
 
-			encodedPoint = (unsigned char *) 
-			    OPENSSL_malloc(encodedlen*sizeof(unsigned char)); 
+				encodedPoint = (unsigned char *)OPENSSL_malloc(encodedlen*sizeof(unsigned char));
 			bn_ctx = BN_CTX_new();
 			if ((encodedPoint == NULL) || (bn_ctx == NULL))
 				{
@@ -2126,6 +2170,7 @@ post_dh:
 				post_rsa_md_1:
 				if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 					{
+					EVP_MD_CTX_cleanup(&s->s3->send_server_key_exchange.md_ctx);
 					s->s3->pkeystate = -1;
 					s->s3->send_server_key_exchange.d = d;
 					s->s3->send_server_key_exchange.p = p;
@@ -3067,7 +3112,7 @@ post_dh:
 			s->s3->get_client_key_exchange.pkey = pkey_ecdh;
 			s->s3->get_client_key_exchange.p = p;
 			s->s3->get_client_key_exchange.n = (field_size+7)/8;
-			i = ECDH_compute_key_asynch(p, (size_t *) &s->s3->get_client_key_exchange.n, clnt_ecpoint, srvr_ecdh, NULL,
+			i = ECDH_compute_key_asynch(p, (size_t)s->s3->get_client_key_exchange.n, clnt_ecpoint, srvr_ecdh, NULL,
 					(int (*)(unsigned char *, size_t, void *, int))
 					ssl3_get_client_key_exchange_post, s);
 			if (i <= 0)

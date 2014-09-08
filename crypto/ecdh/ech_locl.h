@@ -67,7 +67,7 @@ struct ecdh_method
 	const char *name;
 	int (*compute_key)(void *key, size_t outlen, const EC_POINT *pub_key, EC_KEY *ecdh,
 	                   void *(*KDF)(const void *in, size_t inlen, void *out, size_t *outlen));
-	int (*compute_key_asynch)(void *key, size_t *outlen, const EC_POINT *pub_key, EC_KEY *ecdh,
+	int (*compute_key_asynch)(void *key, size_t outlen, const EC_POINT *pub_key, EC_KEY *ecdh,
 			void *(*KDF)(const void *in, size_t inlen, void *out, size_t *outlen),
 			int (*cb)(unsigned char *res, size_t reslen,void *cb_data, int status),
 			void *cb_data);
@@ -77,6 +77,10 @@ struct ecdh_method
 #endif
 	int flags;
 	char *app_data;
+	int (*generate_key)(EC_KEY *key);
+	int (*generate_key_asynch)(EC_KEY *key,
+							   int (*cb)(unsigned char *res, size_t reslen,void *cb_data, int status),
+							   void *cb_data);
 	};
 
 /* If this flag is set the ECDH method is FIPS compliant and can be used

@@ -92,7 +92,9 @@ static ECDH_METHOD openssl_ecdh_meth = {
 	NULL, /* finish   */
 #endif
 	0,    /* flags    */
-	NULL  /* app_data */
+	NULL,  /* app_data */
+	EC_KEY_generate_key, /* generate key */
+	NULL                 /* generate key asynch */
 };
 
 const ECDH_METHOD *ECDH_OpenSSL(void)
