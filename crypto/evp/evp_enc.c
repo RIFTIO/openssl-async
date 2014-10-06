@@ -163,7 +163,7 @@ static int evp_CIPHER_CTX_expand(EVP_CIPHER_CTX *ctx)
 	ctx->internal = OPENSSL_malloc(sizeof(struct evp_cipher_ctx_internal_st));
 	if (!ctx->internal) return 0;
 	memset(ctx->internal,0,sizeof(struct evp_cipher_ctx_internal_st));
-	ctx->flags = EVP_CIPH_CTX_FLAG_EXPANDED;
+	EVP_CIPHER_CTX_set_flags(ctx,EVP_CIPH_CTX_FLAG_EXPANDED);
 	return 1;
 	}
 
@@ -308,7 +308,6 @@ int EVP_CipherInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher, ENGINE *imp
 			ctx->cipher_data = NULL;
 			}
 		ctx->key_len = cipher->key_len;
-		ctx->flags &= EVP_CIPH_CTX_FLAG_EXPANDED;
 		if(ctx->cipher->flags & EVP_CIPH_CTRL_INIT)
 			{
 			if(!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_INIT, 0, NULL))

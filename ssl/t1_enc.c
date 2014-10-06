@@ -543,7 +543,7 @@ printf("which = %04X\nmac key=",which);
 	    if (!EVP_CIPHER_CTX_ctrl_ex(dd, EVP_CTRL_SETUP_ASYNCH_CALLBACK,
 	                    0, NULL, (void(*)(void))ssl3_asynch_handle_cipher_callbacks))
 	        goto err2;
-	    if (s->version == TLS1_1_VERSION
+	    if (s->version >= TLS1_1_VERSION
 	        && EVP_CIPHER_mode(c) == EVP_CIPH_CBC_MODE)
 	            EVP_CIPHER_CTX_set_flags(dd, EVP_CIPH_CTX_FLAG_CAN_IGNORE_IV);
 	    }

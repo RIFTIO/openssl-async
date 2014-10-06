@@ -553,6 +553,7 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 			if (trans)
 				{
 				memcpy(&s->s3->rbuf, &trans->buf, sizeof(SSL3_BUFFER));
+				memcpy(&s->s3->rrec, &trans->rec, sizeof(SSL3_RECORD));
 				ssl3_remove_last_transmission(s, SSL_READING);
 				CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
 				s->s3->outstanding_read_crypto--;
@@ -975,9 +976,13 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
 			trans = ssl3_get_transmission(s);
 			if (trans == NULL)
 				{
+				BIO *bio;
 				ssl3_release_write_buffer(s);
 				memset(&s->s3->wbuf, 0, sizeof(SSL3_BUFFER)); 
 				s->rwstate=SSL_WRITING;
+				bio = SSL_get_wbio(s);
+				BIO_clear_retry_flags(bio);
+				BIO_set_retry_special(bio);
 				SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_RETRY);
 				return -1; /* treat it like a non-blocking I/O that
 					      couldn't transmit for the moment */
