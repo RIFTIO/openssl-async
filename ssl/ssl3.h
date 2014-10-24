@@ -600,7 +600,8 @@ typedef struct ssl3_state_st
         unsigned char *md_buf;
         unsigned char *q;
         unsigned char *p;
-        int i, j;
+        unsigned char *param;
+        int i, j, n, param_len;
         EVP_PKEY *pkey;
         } key_exchange_cache;
     struct
@@ -614,6 +615,7 @@ typedef struct ssl3_state_st
         unsigned char *tmp_buf;
         EC_KEY *clnt_ecdh;
         const EC_GROUP *srvr_group;
+        const EC_POINT *srvr_ecpoint;
         DH *dh_srvr, *dh_clnt;
         } send_client_key_exchange;
     struct

@@ -639,12 +639,12 @@ static int EVP_check_ctx( EVP_MD_CTX *ctx )
 	{
 	if (!ctx->digest)
 		{
-		EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_NO_DIGEST_SET);
+		EVPerr(EVP_F_EVP_CHECK_CTX, EVP_R_NO_DIGEST_SET);
 		return 0;
 		}
 	if (!(ctx->flags & EVP_MD_CTX_FLAG_EXPANDED))
 		{
-		EVPerr(EVP_F_EVP_MD_CTX_CTRL_EX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
+		EVPerr(EVP_F_EVP_CHECK_CTX, EVP_R_ASYNCH_CALLBACK_NOT_SETUP);
 		return 0;
 		}
 	return 1;

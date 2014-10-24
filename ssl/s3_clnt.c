@@ -1323,6 +1323,7 @@ int ssl3_get_key_exchange(SSL *s)
 		case 10:		/* In post for MD */
 			s->s3->pkeystate = 0; /* No longer needed, reset it */
 			pkey = s->s3->key_exchange_cache.pkey;
+			p = s->s3->key_exchange_cache.p;
 			switch (pkey->type)
 				{
 #ifndef OPENSSL_NO_RSA
@@ -1330,6 +1331,10 @@ int ssl3_get_key_exchange(SSL *s)
 				i = s->s3->key_exchange_cache.i;
 				s->s3->key_exchange_cache.q += i;
 				s->s3->key_exchange_cache.j += i;
+				j = s->s3->key_exchange_cache.j;
+				n = s->s3->key_exchange_cache.n;
+				param = s->s3->key_exchange_cache.param;
+				param_len = s->s3->key_exchange_cache.param_len;
 				s->s3->key_exchange_cache.num--;
 				goto post_rsa_md;
 #endif
@@ -1837,9 +1842,19 @@ fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 				{
 				s->s3->key_exchange_cache.num = 2;
+				s->s3->key_exchange_cache.md_buf =
+					BUF_memdup(md_buf, sizeof(md_buf)); 
 				s->s3->key_exchange_cache.q =
 					s->s3->key_exchange_cache.md_buf;
+				s->s3->key_exchange_cache.n = n;
+				s->s3->key_exchange_cache.p = p;
+				s->s3->key_exchange_cache.j = 0;
+				s->s3->key_exchange_cache.pkey = pkey;
+				s->s3->key_exchange_cache.param = param;
+				s->s3->key_exchange_cache.param_len = param_len;
 				EVP_MD_CTX_init(&s->s3->key_exchange_cache.md_ctx);
+				EVP_MD_CTX_ctrl_ex(&s->s3->key_exchange_cache.md_ctx, EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK,
+					0, s, (void (*)(void))ssl3_get_key_exchange_md_post);
 			post_rsa_md:
 				if (s->s3->key_exchange_cache.num > 0)
 					{
@@ -1850,8 +1865,6 @@ fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 
 					s->s3->pkeystate = -1;
 
-					EVP_MD_CTX_ctrl_ex(ctx, EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK,
-						0, s, (void (*)(void))ssl3_get_key_exchange_md_post);
 					EVP_MD_CTX_set_flags(ctx,
 						EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
 					EVP_DigestInit_ex(ctx,(num == 2)
@@ -1889,10 +1902,6 @@ fprintf(stderr, "USING TLSv1.2 HASH %s\n", EVP_MD_name(md));
 			if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 				{
 				s->s3->pkeystate = -1;
-				s->s3->key_exchange_cache.md_buf =
-					BUF_memdup(md_buf, sizeof(md_buf)); 
-				s->s3->key_exchange_cache.p = p;
-				s->s3->key_exchange_cache.pkey = pkey;
 				i=RSA_verify_asynch(NID_md5_sha1,
 					s->s3->key_exchange_cache.md_buf, j, p, n,
 					pkey->pkey.rsa,
@@ -2416,8 +2425,11 @@ static int ssl3_send_client_key_exchange_ecdh_post(unsigned char *res, size_t re
 static int ssl3_send_client_key_exchange_post(unsigned char *res, size_t reslen, SSL *s, int status)
 	{
 	s->s3->send_client_key_exchange.status = status;
+	if (res)
+		{
 	s->s3->send_client_key_exchange.p = res;
 	s->s3->send_client_key_exchange.n = (int)reslen;
+		}
 	s->s3->pkeystate = 1;
 	return 1;
 	}
@@ -2872,6 +2884,7 @@ post_dh_generate:
 						s->s3->pkeystate = 0; /* No longer needed, reset it */
 						clnt_ecdh = s->s3->send_client_key_exchange.clnt_ecdh;
 						srvr_group = s->s3->send_client_key_exchange.srvr_group;
+						srvr_ecpoint = s->s3->send_client_key_exchange.srvr_ecpoint;
 						goto post_ecdh_generate;
 					case 3:
 						s->s3->pkeystate = 0; /* No longer needed, reset it */
@@ -2983,6 +2996,7 @@ post_dh_generate:
 					s->s3->pkeystate = -1;
 					s->s3->send_client_key_exchange.clnt_ecdh = clnt_ecdh;
 					s->s3->send_client_key_exchange.srvr_group = srvr_group;
+					s->s3->send_client_key_exchange.srvr_ecpoint = srvr_ecpoint;
 
 					if (!ECDH_generate_key_asynch(s->s3->send_client_key_exchange.clnt_ecdh,
 												  (int (*)(unsigned char *, size_t, void *, int))

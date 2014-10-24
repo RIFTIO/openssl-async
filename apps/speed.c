@@ -1437,6 +1437,7 @@ int MAIN(int argc, char **argv)
 #endif
 #ifndef OPENSSL_NO_ENGINE
 	/*Now that we are after the fork, each child can init the engine.*/
+	if (engine_id != NULL)
 	engine = ENGINE_by_id(engine_id);
 	if (engine != NULL)
 		{
