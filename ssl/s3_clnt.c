@@ -1290,7 +1290,8 @@ static int ssl3_get_key_exchange_verify_post(SSL *s, int status)
 int ssl3_get_key_exchange(SSL *s)
 	{
 #ifndef OPENSSL_NO_RSA
-	unsigned char *q,md_buf[EVP_MAX_MD_SIZE*2];
+	unsigned char *q = NULL;
+	unsigned char md_buf[EVP_MAX_MD_SIZE*2] = {0};
 #endif
 	EVP_MD_CTX md_ctx;
 	unsigned char *param = NULL,*p = NULL;

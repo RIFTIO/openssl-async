@@ -498,6 +498,7 @@ void HMAC_CTX_init(HMAC_CTX *ctx)
 
 int HMAC_CTX_copy(HMAC_CTX *dctx, HMAC_CTX *sctx)
 	{
+	HMAC_CTX_init(dctx);
 	if (!EVP_MD_CTX_copy(&dctx->i_ctx, &sctx->i_ctx))
 		goto err;
 	if (!EVP_MD_CTX_copy(&dctx->o_ctx, &sctx->o_ctx))
