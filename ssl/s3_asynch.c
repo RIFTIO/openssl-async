@@ -257,6 +257,14 @@ SSL3_TRANSMISSION *ssl3_get_transmission_before(SSL *s, SSL3_TRANSMISSION *t)
 		{
 		p = (SSL3_TRANSMISSION_POOL *)
 			OPENSSL_malloc(sizeof(SSL3_TRANSMISSION_POOL));
+		if (!p)
+			{
+#ifdef ASYNCH_DEBUG
+			fprintf(stderr, "OPENSSL_malloc failed to get memory\n");
+#endif
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+			return NULL;
+			}
 		p->head = p->tail = p->free_head = p->free_tail = (void*)0; 
 		p->pool_break = 0; 
 		p->postprocessing = 0; 
@@ -384,6 +392,14 @@ int ssl3_get_record_asynch_cb(SSL3_TRANSMISSION *trans, int status)
 		{
 		p = (SSL3_READ_RECORD_POOL *)
 			OPENSSL_malloc(sizeof(SSL3_READ_RECORD_POOL));
+		if (!p)
+			{
+#ifdef ASYNCH_DEBUG
+			fprintf(stderr, "OPENSSL_malloc failed to get memory\n");
+#endif
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+			return 0;
+			}
 		memset(p, 0, sizeof(SSL3_READ_RECORD_POOL));
 		trans->s->s3->read_record_pool = p;
 		}

@@ -517,7 +517,7 @@ int ssl3_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post)
 	SSL3_RECORD *rec;
 	EVP_CIPHER_CTX *ds;
 	unsigned long l;
-	int bs=0,i,mac_size=0;
+	int bs=0,i,mac_size=0,ret=0;
 	const EVP_CIPHER *enc;
 
 	if (send)
@@ -585,7 +585,8 @@ int ssl3_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post)
 				return 0;
 			/* otherwise, rec->length >= bs */
 			}
-        if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+		if ((s->s3->flags & SSL3_FLAGS_ASYNCH)
+			&& (trans || (EVP_CIPHER_CTX_flags(ds) & EVP_CIPH_FLAG_ASYNCH)))
             {
             OPENSSL_assert(trans != NULL);
             trans->post = 0;
@@ -606,10 +607,10 @@ int ssl3_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post)
 				{
 				memcpy(ds->iv, &s->s3->backup_iv, ds->cipher->iv_len);
 				}
-            if (!EVP_Cipher(ds, trans->rec.data, trans->rec.input, l))
-				{
+			ret = EVP_Cipher(ds, trans->rec.data, trans->rec.input, l);
+			if(!ret)
                 return 0;
-				}
+			else if(ret < 0 || (EVP_CIPHER_CTX_flags(ds) & EVP_CIPH_FLAG_ASYNCH))
             return(-1); /* same kind of indication as no data
                          * in non-blocking I/O */
             }

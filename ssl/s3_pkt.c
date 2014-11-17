@@ -509,7 +509,9 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 	/* decrypt in place in 'rr->input' */
 	rr->data=rr->input;
 
-	if (!clear_enc && (s->s3->flags & SSL3_FLAGS_ASYNCH))
+	if (!clear_enc 
+		&& (s->s3->flags & SSL3_FLAGS_ASYNCH) 
+		&& (s->enc_read_ctx && (EVP_CIPHER_CTX_flags(s->enc_read_ctx) & EVP_CIPH_FLAG_ASYNCH)))
         {
         trans = ssl3_get_transmission(s);
 
@@ -559,7 +561,6 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 				s->s3->outstanding_read_crypto--;
 				s->s3->outstanding_read_records--;
 				CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
-				s->rwstate=SSL_READING;
 				if (s->s3->rrec.type == SSL3_RT_APPLICATION_DATA)
 					{
 					s->rstate=SSL_ST_READ_BODY;
@@ -579,10 +580,8 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 			}
 		else 
 			{
-			s->rwstate=SSL_READING;
 			s->s3->read_retry_data_available=0;
 			}
-		return(-1);
 		}
 
 	if (trans)
@@ -969,7 +968,8 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
 		}
 
 	if (!((sess == NULL) || (s->enc_write_ctx == NULL))
-		&& s->s3->flags & SSL3_FLAGS_ASYNCH)
+		&& (s->s3->flags & SSL3_FLAGS_ASYNCH)
+		&& (s->enc_write_ctx && (EVP_CIPHER_CTX_flags(s->enc_write_ctx) & EVP_CIPH_FLAG_ASYNCH)))  
 		{
 		if (!trans)
 			{
