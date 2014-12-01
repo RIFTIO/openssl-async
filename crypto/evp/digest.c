@@ -417,7 +417,6 @@ int EVP_DigestUpdate(EVP_MD_CTX *ctx, const void *data, size_t count)
 		actx = alloc_asynch_ctx();
 		if (actx == NULL)
 			{
-			EVPerr(EVP_F_EVP_DIGESTUPDATE,ERR_R_MALLOC_FAILURE);
 			return 0;
 			}
 		actx->ctx = ctx;
@@ -491,7 +490,6 @@ int EVP_DigestFinal_ex(EVP_MD_CTX *ctx, unsigned char *md, unsigned int *size)
 		actx = alloc_asynch_ctx();
 		if (actx == NULL)
 			{
-			EVPerr(EVP_F_EVP_DIGESTFINAL_EX,ERR_R_MALLOC_FAILURE);
 			return 0;
 			}
 		actx->ctx = ctx;

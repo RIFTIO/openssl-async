@@ -2525,7 +2525,7 @@ int ssl3_send_client_key_exchange(SSL *s)
 				s->s3->send_client_key_exchange.rsa = rsa;
 				s->s3->send_client_key_exchange.tmp_buf = tmp_buf;
 				s->s3->send_client_key_exchange.q = q;
-				n=RSA_public_encrypt_asynch(tmp_buf_size,
+				n=RSA_public_encrypt_asynch((int) tmp_buf_size,
 					tmp_buf,p,rsa,RSA_PKCS1_PADDING,
 					(int (*)(unsigned char *, size_t,  void *, int))ssl3_send_client_key_exchange_post,
 					s);
@@ -2548,7 +2548,7 @@ int ssl3_send_client_key_exchange(SSL *s)
 					}
 				return -1;
 				}
-			n=RSA_public_encrypt(tmp_buf_size,
+			n=RSA_public_encrypt((int) tmp_buf_size,
 				tmp_buf,p,rsa,RSA_PKCS1_PADDING);
 		post_rsa:
 #ifdef PKCS1_CHECK

@@ -314,9 +314,8 @@ int ssl3_asynch_read_pending(const SSL *s)
 static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION *trans);
 int ssl3_get_record_check_mac_cb(SSL3_TRANSMISSION *trans, int status)
 	{
-	if (status > 0)
+    trans->status = status;
 		return ssl3_get_record_inner(trans->s, trans);
-	return status;
 	}
 /* Call this to get a new input record.
  * It will return <= 0 if more data is needed, normally due to an error
@@ -402,7 +401,7 @@ again:
 
 			memcpy(&_mac,arr->mac, mac_size);
 			mac = _mac;
-			enc_err = (arr->status==0 ? -1 : 1);
+			enc_err = (arr->status<=0 ? -1 : 1);
 
 			if (s->enc_read_ctx && EVP_CIPHER_CTX_mode(s->enc_read_ctx) == EVP_CIPH_CBC_MODE)
 				OPENSSL_free(arr->mac);
@@ -550,7 +549,7 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 	if (!((sess == NULL) || (s->enc_read_ctx == NULL))
 		&& s->s3->flags & SSL3_FLAGS_ASYNCH)
 		{
-		if (enc_err == 0)
+		if (enc_err <= 0)
 			{
 			if (trans)
 				{
@@ -677,7 +676,7 @@ printf("\n");
 		/* This callback will be called immediately */
 		ssl3_asynch_push_callback(trans,
 		                          ssl3_get_record_asynch_cb);
-		return 1;
+        return (enc_err <= 0) ? -1 : 1;
 		}
 
 post_mac:

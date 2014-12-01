@@ -715,7 +715,6 @@ int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 		actx = alloc_asynch_ctx();
 		if (actx == NULL)
 			{
-			EVPerr(EVP_F_EVP_ENCRYPTFINAL_EX,ERR_R_MALLOC_FAILURE);
 			return 0;
 			}
 		actx->ctx = ctx;
@@ -958,7 +957,6 @@ int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
 		int ret = 0;
 		if (actx == NULL)
 			{
-			EVPerr(EVP_F_EVP_DECRYPTUPDATE,ERR_R_MALLOC_FAILURE);
 			return 0;
 			}
 		actx->ctx = ctx;
@@ -1148,7 +1146,6 @@ int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 		int ret = 0;
 		if (actx == NULL)
 			{
-			EVPerr(EVP_F_EVP_DECRYPTFINAL_EX,ERR_R_MALLOC_FAILURE);
 			return 0;
 			}
 		actx->ctx = ctx;

@@ -3763,7 +3763,7 @@ show_res:
 			j=0;
 			}
 		if (mr)
-			fprintf(stdout,"+F5:%u:%u:%f:%f\n",
+			fprintf(stdout,"+F6:%u:%u:%f:%f\n",
 				k, dh_bits[k],
 				dh_results[k][0], 1.0/dh_results[k][0]);
 
@@ -3974,7 +3974,7 @@ static int do_multi(int multi)
 		const EVP_MD *evp_digest = NULL;
 
 		f=fdopen(fds[n],"r");
-		while(fgets(buf,sizeof buf,f))
+		while(fgets(buf,(int) sizeof buf,f))
 			{
 			p=strchr(buf,'\n');
 			if(p)
@@ -4106,7 +4106,7 @@ static int do_multi(int multi)
 #endif 
 
 #ifndef OPENSSL_NO_DH
-			else if(!strncmp(buf,"+F5:",4))
+			else if(!strncmp(buf,"+F6:",4))
 				{
 				int k;
 				double d;

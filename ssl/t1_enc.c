@@ -923,11 +923,7 @@ static int tls1_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post)
 				}
 
 			status = EVP_Cipher(ds, trans->rec.data, trans->rec.input, l);
-			if(!status)
-                return 0;
-			else if(status < 0 || (EVP_CIPHER_CTX_flags(ds) & EVP_CIPH_FLAG_ASYNCH))
-            return -1; /* same kind of indication as no data
-                        * in non-blocking I/O */
+            return status;
             }
         else
             {

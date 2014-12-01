@@ -607,16 +607,12 @@ int ssl3_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post)
 				{
 				memcpy(ds->iv, &s->s3->backup_iv, ds->cipher->iv_len);
 				}
-			ret = EVP_Cipher(ds, trans->rec.data, trans->rec.input, l);
-			if(!ret)
-                return 0;
-			else if(ret < 0 || (EVP_CIPHER_CTX_flags(ds) & EVP_CIPH_FLAG_ASYNCH))
-            return(-1); /* same kind of indication as no data
-                         * in non-blocking I/O */
+			ret = EVP_Cipher(ds, trans->rec.data, trans->rec.input, (unsigned int) l);
+            return ret;
             }
 		else
 			{
-				EVP_Cipher(ds,rec->data,rec->input,l);
+				EVP_Cipher(ds,rec->data,rec->input,(unsigned int) l);
 			}
 
 post:

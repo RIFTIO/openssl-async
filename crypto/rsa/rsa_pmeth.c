@@ -342,7 +342,7 @@ static int pkey_rsa_sign_asynch(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *s
 		if (rctx->pad_mode == RSA_PKCS1_PADDING)
 			{
 			ret = RSA_sign_asynch(EVP_MD_type(rctx->md),
-						tbs, tbslen, sig, (unsigned int*) siglen, rsa, cb, cb_data);
+						tbs, (unsigned int) tbslen, sig, (unsigned int*) siglen, rsa, cb, cb_data);
 			}
 		else if (rctx->pad_mode == RSA_PKCS1_PSS_PADDING)
 			{
@@ -367,7 +367,7 @@ static int pkey_rsa_sign_asynch(EVP_PKEY_CTX *ctx, unsigned char *sig, size_t *s
 			}
 		}
 	else
-		ret = RSA_private_encrypt_asynch(tbslen, tbs, sig, ctx->pkey->pkey.rsa,
+		ret = RSA_private_encrypt_asynch((int) tbslen, tbs, sig, ctx->pkey->pkey.rsa,
 							rctx->pad_mode, cb, cb_data);
 	return ret;
 	}
@@ -554,7 +554,7 @@ static int pkey_rsa_verify_asynch(EVP_PKEY_CTX *ctx,
 		if (rctx->pad_mode == RSA_PKCS1_PADDING)
 			{
 			ret = RSA_verify_asynch(EVP_MD_type(rctx->md),
-						tbs, tbslen, sig, siglen, rsa, cb, cb_data);
+						tbs, (unsigned int) tbslen, sig, (unsigned int) siglen, rsa, cb, cb_data);
 			}
 		else if (rctx->pad_mode == RSA_X931_PADDING)
 			{
@@ -582,7 +582,7 @@ static int pkey_rsa_verify_asynch(EVP_PKEY_CTX *ctx,
 				free_RSA_ASYNCH_PKEY_CB_CTX(apkcbctx);
 				return ret;
 				}
-			ret = RSA_public_decrypt_asynch(siglen, sig, rctx->tbuf,
+			ret = RSA_public_decrypt_asynch((int) siglen, sig, rctx->tbuf,
 				rsa, RSA_NO_PADDING, pkey_rsa_verify_asynch_post, apkcbctx);
 			}
 		else
@@ -610,7 +610,7 @@ static int pkey_rsa_verify_asynch(EVP_PKEY_CTX *ctx,
 			free_RSA_ASYNCH_PKEY_CB_CTX(apkcbctx);
 			return ret;
 			}
-		ret = RSA_public_decrypt_asynch(siglen, sig, rctx->tbuf,
+		ret = RSA_public_decrypt_asynch((int) siglen, sig, rctx->tbuf,
 						rsa, rctx->pad_mode, pkey_rsa_verify_asynch_post, apkcbctx);
 		}
 	return ret;

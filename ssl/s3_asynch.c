@@ -84,8 +84,21 @@ static int ssl3_process_transmissions(SSL *s, int status)
 			{
 			SSL3_TRANSMISSION *trans = &head->trans;
 			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
-			status = 1;
+            if (status < 0)
+                {
 			if (trans->s->asynch_completion_callback)
+				{
+				if (trans->flags & SSL3_TRANS_FLAGS_SEND)
+                        return trans->s->asynch_completion_callback(
+                                1, status, NULL, 0, NULL,
+                                trans->s->asynch_completion_callback_arg);
+                    else
+                        return trans->s->asynch_completion_callback(
+                                0, status, NULL, 0, NULL,
+                                trans->s->asynch_completion_callback_arg);
+                    }
+                }
+			else if (trans->s->asynch_completion_callback)
 				{
 				if (trans->flags & SSL3_TRANS_FLAGS_SEND)
 					{
@@ -154,25 +167,6 @@ int ssl3_asynch_handle_cipher_callbacks(unsigned char *data, int datalen,
 #endif
 	if (NULL == userdata)
 		{
-		return status;
-		}
-	if (status < 0)
-		{
-		SSL3_TRANSMISSION *trans = (SSL3_TRANSMISSION *)userdata;
-
-		if (trans->s->asynch_completion_callback)
-			{
-			if (trans->flags & SSL3_TRANS_FLAGS_SEND)
-				return trans->s->asynch_completion_callback(
-					1, status, NULL, 0, NULL,
-					trans->s->asynch_completion_callback_arg);
-			else
-				return trans->s->asynch_completion_callback(
-					0, status, NULL, 0, NULL,
-					trans->s->asynch_completion_callback_arg);
-			}
-		else
-			SSLerr(SSL_F_SSL3_ASYNCH_HANDLE_CIPHER_CALLBACKS,SSL_R_ASYNCH_COMPL_CALLBACK_NOT_DEFINED);
 		return status;
 		}
 
