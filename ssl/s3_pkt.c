@@ -317,6 +317,13 @@ int ssl3_get_record_check_mac_cb(SSL3_TRANSMISSION *trans, int status)
     trans->status = status;
 		return ssl3_get_record_inner(trans->s, trans);
 	}
+
+/* MAX_EMPTY_RECORDS defines the number of consecutive, empty records that will
+ * be processed per call to ssl3_get_record. Without this limit an attacker
+ * could send empty records at a faster rate than we can process and cause
+ * ssl3_get_record to loop forever. */
+#define MAX_EMPTY_RECORDS 32
+
 /* Call this to get a new input record.
  * It will return <= 0 if more data is needed, normally due to an error
  * or non-blocking IO.
@@ -342,6 +349,7 @@ static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION *trans)
 	unsigned mac_size=0, orig_len;
 	int clear_enc=0, clear_mac=0;
 	size_t extra;
+	unsigned empty_record_count = 0;
 	unsigned char *mac = NULL;
 	unsigned char _mac[EVP_MAX_MD_SIZE];
 
@@ -735,7 +743,17 @@ post_mac:
 	s->packet_length=0;
 
 	/* just read a 0 length packet */
-	if (rr->length == 0) goto again;
+	if (rr->length == 0)
+		{
+		empty_record_count++;
+		if (empty_record_count > MAX_EMPTY_RECORDS)
+			{
+			al=SSL_AD_UNEXPECTED_MESSAGE;
+			SSLerr(SSL_F_SSL3_GET_RECORD_INNER,SSL_R_RECORD_TOO_SMALL);
+			goto f_err;
+			}
+		goto again;
+		}
 
 #if 0
 fprintf(stderr, "Ultimate Record type=%d, Length=%d\n", rr->type, rr->length);
@@ -1458,7 +1476,7 @@ int ssl3_read_bytes(SSL *s, int type, unsigned char *buf, int len, int peek)
 		if (!ssl3_setup_read_buffer(s))
 			return(-1);
 
-	if ((type && (type != SSL3_RT_APPLICATION_DATA) && (type != SSL3_RT_HANDSHAKE) && type) ||
+	if ((type && (type != SSL3_RT_APPLICATION_DATA) && (type != SSL3_RT_HANDSHAKE)) ||
 	    (peek && (type != SSL3_RT_APPLICATION_DATA)))
 		{
 		SSLerr(SSL_F_SSL3_READ_BYTES, ERR_R_INTERNAL_ERROR);

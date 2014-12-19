@@ -222,7 +222,7 @@ $ LIB_SSL = "s2_meth,s2_srvr,s2_clnt,s2_lib,s2_enc,s2_pkt,"+ -
 	    "ssl_lib,ssl_err2,ssl_cert,ssl_sess,"+ -
 	    "ssl_ciph,ssl_stat,ssl_rsa,"+ -
 	    "ssl_asn1,ssl_txt,ssl_algs,"+ -
-	    "bio_ssl,ssl_err,kssl,tls_srp,t1_reneg"
+	    "bio_ssl,ssl_err,kssl,tls_srp,t1_reneg,ssl_utst"
 $!
 $ COMPILEWITH_CC5 = ""
 $!
@@ -240,7 +240,7 @@ $ NEXT_FILE:
 $!
 $! O.K, Extract The File Name From The File List.
 $!
-$ FILE_NAME = F$ELEMENT(FILE_COUNTER,",",LIB_SSL)
+$ FILE_NAME = F$EDIT(F$ELEMENT(FILE_COUNTER,",",LIB_SSL),"COLLAPSE")
 $!
 $! Check To See If We Are At The End Of The File List.
 $!
@@ -858,8 +858,11 @@ $ IF F$TYPE(USER_CCDEFS) .NES. "" THEN CCDEFS = CCDEFS + "," + USER_CCDEFS
 $ CCEXTRAFLAGS = ""
 $ IF F$TYPE(USER_CCFLAGS) .NES. "" THEN CCEXTRAFLAGS = USER_CCFLAGS
 $ CCDISABLEWARNINGS = "" !!! "MAYLOSEDATA3" !!! "LONGLONGTYPE,LONGLONGSUFX,FOUNDCR"
-$ IF F$TYPE(USER_CCDISABLEWARNINGS) .NES. "" THEN -
-	CCDISABLEWARNINGS = CCDISABLEWARNINGS + "," + USER_CCDISABLEWARNINGS
+$ IF F$TYPE(USER_CCDISABLEWARNINGS) .NES. ""
+$ THEN
+$     IF CCDISABLEWARNINGS .NES. "" THEN CCDISABLEWARNINGS = CCDISABLEWARNINGS + ","
+$     CCDISABLEWARNINGS = CCDISABLEWARNINGS + USER_CCDISABLEWARNINGS
+$ ENDIF
 $!
 $! Check To See If We Have A ZLIB Option.
 $!

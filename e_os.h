@@ -375,6 +375,15 @@ static unsigned int _strlen31(const char *str)
 #  define check_winnt() (GetVersion() < 0x80000000)
 #endif 
 
+/*
+ * Visual Studio: inline is available in C++ only, however
+ * __inline is available for C, see
+ * http://msdn.microsoft.com/en-us/library/z8y1yy88.aspx
+ */
+#if defined(_MSC_VER) && !defined(__cplusplus) && !defined(inline)
+#  define inline __inline
+#endif
+
 #else /* The non-microsoft world */
 
 #  ifdef OPENSSL_SYS_VMS

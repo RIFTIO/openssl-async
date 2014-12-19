@@ -180,7 +180,6 @@ int ssl3_asynch_handle_cipher_callbacks(unsigned char *data, int datalen,
 		{
 		SSL3_TRANSMISSION *trans = (SSL3_TRANSMISSION *)userdata;
 
-		memcpy(trans->rec.data, data, datalen);
 		trans->rec.off = 0;
 		trans->rec.length = datalen;
 		trans->post = 1;

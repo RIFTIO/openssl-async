@@ -1459,6 +1459,11 @@ int ssl_cipher_list_to_bytes(SSL *s,STACK_OF(SSL_CIPHER) *sk,unsigned char *p,
 		    s->psk_client_callback == NULL)
 			continue;
 #endif /* OPENSSL_NO_PSK */
+#ifndef OPENSSL_NO_SRP
+		if (((c->algorithm_mkey & SSL_kSRP) || (c->algorithm_auth & SSL_aSRP)) &&
+		    !(s->srp_ctx.srp_Mask & SSL_kSRP))
+		    continue;
+#endif /* OPENSSL_NO_SRP */
 		j = put_cb(c,p);
 		p+=j;
 		}
@@ -3104,15 +3109,26 @@ SSL_CTX *SSL_get_SSL_CTX(const SSL *ssl)
 
 SSL_CTX *SSL_set_SSL_CTX(SSL *ssl, SSL_CTX* ctx)
 	{
+	CERT *ocert = ssl->cert;
 	if (ssl->ctx == ctx)
 		return ssl->ctx;
 #ifndef OPENSSL_NO_TLSEXT
 	if (ctx == NULL)
 		ctx = ssl->initial_ctx;
 #endif
-	if (ssl->cert != NULL)
-		ssl_cert_free(ssl->cert);
 	ssl->cert = ssl_cert_dup(ctx->cert);
+	if (ocert != NULL)
+		{
+		int i;
+		/* Copy negotiated digests from original */
+		for (i = 0; i < SSL_PKEY_NUM; i++)
+			{
+			CERT_PKEY *cpk = ocert->pkeys + i;
+			CERT_PKEY *rpk = ssl->cert->pkeys + i;
+			rpk->digest = cpk->digest;
+			}
+		ssl_cert_free(ocert);
+		}
 	CRYPTO_add(&ctx->references,1,CRYPTO_LOCK_SSL_CTX);
 	if (ssl->ctx != NULL)
 		SSL_CTX_free(ssl->ctx); /* decrement reference count */

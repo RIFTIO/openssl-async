@@ -383,7 +383,7 @@ evp_enc.o: ../../include/openssl/pkcs7.h ../../include/openssl/rand.h
 evp_enc.o: ../../include/openssl/safestack.h ../../include/openssl/sha.h
 evp_enc.o: ../../include/openssl/stack.h ../../include/openssl/symhacks.h
 evp_enc.o: ../../include/openssl/x509.h ../../include/openssl/x509_vfy.h
-evp_enc.o: ../cryptlib.h evp_enc.c evp_locl.h
+evp_enc.o: ../constant_time_locl.h ../cryptlib.h evp_enc.c evp_locl.h
 evp_err.o: ../../include/openssl/asn1.h ../../include/openssl/bio.h
 evp_err.o: ../../include/openssl/crypto.h ../../include/openssl/e_os2.h
 evp_err.o: ../../include/openssl/err.h ../../include/openssl/evp.h
@@ -420,7 +420,7 @@ evp_lib.o: ../../include/openssl/lhash.h ../../include/openssl/obj_mac.h
 evp_lib.o: ../../include/openssl/objects.h ../../include/openssl/opensslconf.h
 evp_lib.o: ../../include/openssl/opensslv.h ../../include/openssl/ossl_typ.h
 evp_lib.o: ../../include/openssl/safestack.h ../../include/openssl/stack.h
-evp_lib.o: ../../include/openssl/symhacks.h ../cryptlib.h evp_lib.c evp_locl.h
+evp_lib.o: ../../include/openssl/symhacks.h ../cryptlib.h evp_lib.c
 evp_pbe.o: ../../e_os.h ../../include/openssl/asn1.h
 evp_pbe.o: ../../include/openssl/bio.h ../../include/openssl/buffer.h
 evp_pbe.o: ../../include/openssl/crypto.h ../../include/openssl/e_os2.h
