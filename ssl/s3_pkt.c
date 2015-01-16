@@ -340,7 +340,7 @@ static int ssl3_get_record(SSL *s)
 static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION *trans)
 	{
 	int ssl_major,ssl_minor,al=0;
-	int enc_err,n,i=0,ret= -1;
+	int enc_err,n,i=0,ret= -1, seqpos;
 	SSL3_RECORD *rr;
 	SSL_SESSION *sess;
 	unsigned char *p;
@@ -565,6 +565,18 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 				memcpy(&s->s3->rrec, &trans->rec, sizeof(SSL3_RECORD));
 				ssl3_remove_last_transmission(s, SSL_READING);
 				CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+				if (EVP_CIPHER_flags(s->enc_read_ctx->cipher)&EVP_CIPH_FLAG_AEAD_CIPHER){
+				    for (seqpos=7; seqpos>=0; seqpos--)
+				       {
+				           if (0 == s->s3->read_sequence[seqpos])
+				               s->s3->read_sequence[seqpos] = 0xFF;
+				           else
+				           {
+				               s->s3->read_sequence[seqpos]--;
+				               break;
+				           }
+				       }
+				}
 				s->s3->outstanding_read_crypto--;
 				s->s3->outstanding_read_records--;
 				CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
@@ -577,7 +589,6 @@ fprintf(stderr, "Record type=%d, Length=%d\n", rr->type, rr->length);
 					s->rstate=SSL_ST_READ_HEADER;
 				s->s3->read_retry_data_available=1;
 				BIO_clear_retry_flags(SSL_get_rbio(s));
-				BIO_set_retry_read(SSL_get_rbio(s));
 				}
 			else
 				{
@@ -881,13 +892,6 @@ static int ssl3_write_pending2(SSL *s, SSL3_BUFFER *wb);
 static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
 	unsigned int len, int create_empty_fragment,
 	SSL3_TRANSMISSION *trans, int post);
-static int do_ssl3_write_post_mac(SSL3_TRANSMISSION *trans, int status)
-	{
-	trans->status = status;
-	return do_ssl3_write_inner(trans->s, trans->dsw_type,
-		trans->dsw_buf, trans->dsw_len,
-		trans->dsw_create_empty_fragment, trans, 1);
-	}
 static int do_ssl3_write_post_enc(SSL3_TRANSMISSION *trans, int status)
 	{
 	CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
@@ -922,10 +926,27 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
 		{
 		wb=&(s->s3->wbuf);
 
+#ifndef DISABLE_ASYNCH_BULK_PERF
 		/* first check if there is a SSL3_BUFFER still being written
 		 * out.  This will happen with non blocking IO */
+                if((s->s3->flags & SSL3_FLAGS_ASYNCH) &&
+			(!s->enc_write_ctx || (EVP_CIPHER_CTX_flags(s->enc_write_ctx) & EVP_CIPH_FLAG_ASYNCH)))  
+                {
+                	i=ssl3_asynch_send_skt_queued_data(s);
+			/* If all data not successfully sent return now */
+                	if(i<0)
+			{
+				return i;
+			}
+                }
+                else
+#endif
+		{
 		if (wb->left != 0)
+				{
 			return(ssl3_write_pending(s,type,buf,len));
+		}
+              	}
 		}
 
 	/* If we have an alert to send, lets send it */
@@ -1016,7 +1037,6 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
 			memcpy(&trans->buf, wb, sizeof(SSL3_BUFFER));
 			memset(wb, 0, sizeof(SSL3_BUFFER));
 			memcpy(&(trans->rec), wr, sizeof(SSL3_RECORD));
-			memset(wr, 0, sizeof(SSL3_RECORD));
 			trans->dsw_sibling = NULL;
 			}
 		wb = &trans->buf;
@@ -1201,17 +1221,19 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
 
 	if (mac_size != 0)
 		{
+		/*Call the mac function(ssl3_mac/tls1_mac) synchronously, s->s3->wrec is needed to
+		 * be updated */
 		if (trans)
 		    {
 		    trans->post = 0;
-		    ssl3_asynch_push_callback(trans, do_ssl3_write_post_mac);
+			s->s3->wrec.type = wr->type;
+			s->s3->wrec.length = wr->length;       
+			s->s3->wrec.input = wr->input;
+			s->s3->wrec.data = wr->data;
 		    }
-		if (s->method->ssl3_enc->mac(s,&(p[wr->length + eivlen]),1, trans) < 0)
+		/* Passing NULL to call it synchronously */
+		if (s->method->ssl3_enc->mac(s,&(p[wr->length + eivlen]),1, NULL) < 0)
 			goto err;
-		if (trans)
-		    {
-		    return len;
-		    }
 		}
 
 post_mac:
@@ -1250,6 +1272,8 @@ post_mac:
 			/* Cleanup transmission pool entry here as we had an error*/
 			ssl3_remove_last_transmission(s, SSL_WRITING);
 			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+			s->rwstate=SSL_WRITING;
+			BIO_clear_retry_flags(SSL_get_wbio(s));
 			trans->s->s3->outstanding_write_crypto--;
 			s->s3->outstanding_write_records--;
 			/* On an error where the message never got sent we should
@@ -1259,7 +1283,7 @@ post_mac:
 			seqzeropos = 8; /* length of sequence number */
 			do {
 				seqzeropos--;
-			} while ((seqzeropos > 0) && (0 != s->s3->write_sequence[seqzeropos]));
+			} while ((seqzeropos > 0) && (0 == s->s3->write_sequence[seqzeropos]));
 			if (0 != s->s3->write_sequence[seqzeropos])
 			{
 			for (seqpos=7; seqpos>=0; seqpos--)
@@ -1340,18 +1364,29 @@ post_enc:
 			 */
 			int f = BIO_get_retry_flags(s->wbio);
 			if (trans->dsw_ef_buf.buf)
+			{
 				i = ssl3_write_pending2(s, &trans->dsw_ef_buf);
-			ssl3_write_pending2(s, wb);
-			s->s3->outstanding_write_records--;
-			(void)BIO_flush(s->wbio);
-			if (trans->dsw_ef_buf.buf)
+				if (i < 0)
+				{
+					CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
+					CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+					return i;
+				}
+				else 
 				{
 				ssl3_release_buffer(trans->s, &trans->dsw_ef_buf,
 					!!(trans->flags & SSL3_TRANS_FLAGS_SEND));
 				memset(&trans->dsw_ef_buf, 0, sizeof(SSL3_BUFFER));
 				}
+			}
+			i = ssl3_write_pending2(s, wb);
+                        if(i > 0) /* successfully sent all data to socket */
+                        {
+				s->s3->outstanding_write_records--;
+				(void)BIO_flush(s->wbio);
 			BIO_clear_retry_flags(s->wbio);
 			BIO_set_flags(s->wbio, f);
+			}
 			}
 		CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
 		CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
@@ -1392,6 +1427,17 @@ int ssl3_write_pending(SSL *s, int type, const unsigned char *buf,
 static int ssl3_write_pending2(SSL *s, SSL3_BUFFER *wb)
 	{
 	int i;
+
+#ifndef DISABLE_ASYNCH_BULK_PERF
+	/* In asynch case check to see if there is already a queue for write socket */
+	if((s->s3->flags & SSL3_FLAGS_ASYNCH) && 
+		(!s->enc_write_ctx || (EVP_CIPHER_CTX_flags(s->enc_write_ctx) & EVP_CIPH_FLAG_ASYNCH)))
+		{
+		/* Queue of data waiting to be written to socket */
+		if (ssl3_asynch_check_write_socket_trans(s))
+			return(-1);
+		}
+#endif
 	for (;;)
 		{
 		clear_sys_error();
@@ -1429,6 +1475,14 @@ static int ssl3_write_pending2(SSL *s, SSL3_BUFFER *wb)
 				}
 			if(!(s->s3->flags & SSL3_FLAGS_ASYNCH) || !BIO_should_retry(s->wbio))
 				return(i);
+#ifndef DISABLE_ASYNCH_BULK_PERF
+			else if (!s->enc_write_ctx || EVP_CIPHER_CTX_flags(s->enc_write_ctx) & EVP_CIPH_FLAG_ASYNCH)
+			{
+				/* Queue transmission for socket write later */
+				ssl3_asynch_queue_write_socket_trans(s);
+				return(i);
+			}
+#endif
 			}
 		else /* i > 0 */
 			{

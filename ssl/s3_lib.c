@@ -4152,6 +4152,18 @@ int ssl3_shutdown(SSL *s)
 
 	if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 		{
+#ifndef DISABLE_ASYNCH_BULK_PERF
+		if(!s->enc_write_ctx || EVP_CIPHER_CTX_flags(s->enc_write_ctx) & EVP_CIPH_FLAG_ASYNCH)
+		{
+			/* Data still on skt queue need to be pushed to socket */
+			ret=ssl3_asynch_send_skt_queued_data(s);
+			/* If all data not successfully sent return now */
+			if(ret<0)
+			{
+				return ret;
+			}
+		}
+#endif
 		if (SSL_crypto_pending(s))
 			{
 			return(-1);
@@ -4205,6 +4217,18 @@ int ssl3_shutdown(SSL *s)
 		!s->s3->alert_dispatch) {
 		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 		{
+#ifndef DISABLE_ASYNCH_BULK_PERF
+			if(!s->enc_write_ctx || EVP_CIPHER_CTX_flags(s->enc_write_ctx) & EVP_CIPH_FLAG_ASYNCH)
+			{
+				/* Data still on skt queue need to be pushed to socket */
+				ret=ssl3_asynch_send_skt_queued_data(s);
+				/* If all data not successfully sent return now */
+				if(ret<0)
+				{
+					return ret;
+				}
+			}
+#endif
 			if (SSL_crypto_pending(s))
 			{
 			return(-1);

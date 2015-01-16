@@ -62,9 +62,9 @@
  * [including the GNU Public Licence.]
  */
 
-#define NUM_NID 920
-#define NUM_SN 913
-#define NUM_LN 913
+#define NUM_NID 921
+#define NUM_SN 914
+#define NUM_LN 914
 #define NUM_OBJ 857
 
 static const unsigned char lvalues[5974]={
@@ -2399,6 +2399,7 @@ static const ASN1_OBJECT nid_objs[NUM_NID]={
 {"AES-256-CBC-HMAC-SHA1","aes-256-cbc-hmac-sha1",
 	NID_aes_256_cbc_hmac_sha1,0,NULL,0},
 {"RSAES-OAEP","rsaesOaep",NID_rsaesOaep,9,&(lvalues[5964]),0},
+{"PRF","prf",NID_prf,0,NULL,0},
 };
 
 static const unsigned int sn_objs[NUM_SN]={
@@ -2537,6 +2538,7 @@ static const unsigned int sn_objs[NUM_SN]={
 69,	/* "PBKDF2" */
 162,	/* "PBMAC1" */
 127,	/* "PKIX" */
+920,	/* "PRF" */
 98,	/* "RC2-40-CBC" */
 166,	/* "RC2-64-CBC" */
 37,	/* "RC2-CBC" */
@@ -3966,6 +3968,7 @@ static const unsigned int ln_objs[NUM_LN]={
 683,	/* "ppBasis" */
 872,	/* "preferredDeliveryMethod" */
 873,	/* "presentationAddress" */
+920,	/* "prf" */
 406,	/* "prime-field" */
 409,	/* "prime192v1" */
 410,	/* "prime192v2" */

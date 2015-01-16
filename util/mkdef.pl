@@ -85,7 +85,7 @@ my @known_algorithms = ( "RC2", "RC4", "RC5", "IDEA", "DES", "BF",
 			 "CAST", "MD2", "MD4", "MD5", "SHA", "SHA0", "SHA1",
 			 "SHA256", "SHA512", "RIPEMD",
 			 "MDC2", "WHIRLPOOL", "RSA", "DSA", "DH", "EC", "ECDH", "ECDSA", "EC2M",
-			 "HMAC", "AES", "CAMELLIA", "SEED", "GOST",
+			 "HMAC", "PRF", "AES", "CAMELLIA", "SEED", "GOST",
 			 # EC_NISTP_64_GCC_128
 			 "EC_NISTP_64_GCC_128",
 			 # Envelope "algorithms"
@@ -135,7 +135,7 @@ close(IN);
 my $no_rc2; my $no_rc4; my $no_rc5; my $no_idea; my $no_des; my $no_bf;
 my $no_cast; my $no_whirlpool; my $no_camellia; my $no_seed;
 my $no_md2; my $no_md4; my $no_md5; my $no_sha; my $no_ripemd; my $no_mdc2;
-my $no_rsa; my $no_dsa; my $no_dh; my $no_hmac=0; my $no_aes; my $no_krb5;
+my $no_rsa; my $no_dsa; my $no_dh; my $no_hmac=0; my $no_prf=0; my $no_aes; my $no_krb5;
 my $no_ec; my $no_ecdsa; my $no_ecdh; my $no_engine; my $no_hw;
 my $no_fp_api; my $no_static_engine=1; my $no_gmp; my $no_deprecated;
 my $no_rfc3779; my $no_psk; my $no_tlsext; my $no_cms; my $no_capieng;
@@ -213,6 +213,7 @@ foreach (@ARGV, split(/ /, $options))
 	elsif (/^no-ecdsa$/)	{ $no_ecdsa=1; }
 	elsif (/^no-ecdh$/) 	{ $no_ecdh=1; }
 	elsif (/^no-hmac$/)	{ $no_hmac=1; }
+	elsif (/^no-prf$/)	{ $no_prf=1; }
 	elsif (/^no-aes$/)	{ $no_aes=1; }
 	elsif (/^no-camellia$/)	{ $no_camellia=1; }
 	elsif (/^no-seed$/)     { $no_seed=1; }
@@ -311,6 +312,7 @@ $crypto.=" crypto/ec/ec.h" ; # unless $no_ec;
 $crypto.=" crypto/ecdsa/ecdsa.h" ; # unless $no_ecdsa;
 $crypto.=" crypto/ecdh/ecdh.h" ; # unless $no_ecdh;
 $crypto.=" crypto/hmac/hmac.h" ; # unless $no_hmac;
+$crypto.=" crypto/prf/prf.h" ; # unless $no_prf;
 $crypto.=" crypto/cmac/cmac.h" ; # unless $no_hmac;
 
 $crypto.=" crypto/engine/engine.h"; # unless $no_engine;
@@ -1182,6 +1184,7 @@ sub is_valid
 			if ($keyword eq "ECDSA" && $no_ecdsa) { return 0; }
 			if ($keyword eq "ECDH" && $no_ecdh) { return 0; }
 			if ($keyword eq "HMAC" && $no_hmac) { return 0; }
+			if ($keyword eq "PRF" && $no_prf) { return 0; }
 			if ($keyword eq "AES" && $no_aes) { return 0; }
 			if ($keyword eq "CAMELLIA" && $no_camellia) { return 0; }
 			if ($keyword eq "SEED" && $no_seed) { return 0; }

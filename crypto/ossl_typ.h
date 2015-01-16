@@ -144,6 +144,8 @@ typedef struct dsa_method DSA_METHOD;
 typedef struct rsa_st RSA;
 typedef struct rsa_meth_st RSA_METHOD;
 
+typedef struct prf_st PRF;
+
 typedef struct rand_meth_st RAND_METHOD;
 
 typedef struct ecdh_method ECDH_METHOD;

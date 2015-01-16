@@ -1284,6 +1284,8 @@ kisa 1 6                : SEED-OFB      : seed-ofb
 			: HMAC				: hmac
 # Nor CMAC either
 			: CMAC				: cmac
+# Nor PRF either
+			: PRF				: prf
 
 # Synthetic composite ciphersuites
 			: RC4-HMAC-MD5			: rc4-hmac-md5

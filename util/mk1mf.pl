@@ -1109,6 +1109,7 @@ sub read_options
 		"no-dsa" => \$no_dsa,
 		"no-dh" => \$no_dh,
 		"no-hmac" => \$no_hmac,
+		"no-prf" => \$no_prf,
 		"no-asm" => \$no_asm,
 		"nasm" => \$nasm,
 		"nw-nasm" => \$nw_nasm,

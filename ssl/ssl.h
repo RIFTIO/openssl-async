@@ -2140,6 +2140,7 @@ void ERR_load_SSL_strings(void);
 #define SSL_F_GET_CLIENT_FINISHED			 105
 #define SSL_F_GET_CLIENT_HELLO				 106
 #define SSL_F_GET_CLIENT_MASTER_KEY			 107
+#define SSL_F_GET_PRF_MD_LIST				 317
 #define SSL_F_GET_SERVER_FINISHED			 108
 #define SSL_F_GET_SERVER_HELLO				 109
 #define SSL_F_GET_SERVER_VERIFY				 110
@@ -2325,6 +2326,7 @@ void ERR_load_SSL_strings(void);
 #define SSL_F_TLS1_PRF					 284
 #define SSL_F_TLS1_SETUP_KEY_BLOCK			 211
 #define SSL_F_WRITE_PENDING				 212
+#define SSL_F_SSL3_ASYNCH_SEND_SKT_QUEUED_DATA		 376
 
 /* Reason codes. */
 #define SSL_R_APP_DATA_IN_HANDSHAKE			 100

@@ -46,6 +46,7 @@ MD2TEST=	md2test
 MD4TEST=	md4test
 MD5TEST=	md5test
 HMACTEST=	hmactest
+PRFTEST=	prftest
 # This is a test outside of the normal, and will only be executed when 'test_hmac2' is 
 # explicitely included in the TESTS variable.  It requires having the rsaref engine
 # (../demos/engines/rsaref) built.
@@ -76,7 +77,7 @@ TESTS=		alltests
 
 EXE=	$(BNTEST)$(EXE_EXT) $(ECTEST)$(EXE_EXT)  $(ECDSATEST)$(EXE_EXT) $(ECDHTEST)$(EXE_EXT) $(IDEATEST)$(EXE_EXT) \
 	$(MD2TEST)$(EXE_EXT)  $(MD4TEST)$(EXE_EXT) $(MD5TEST)$(EXE_EXT) $(HMACTEST)$(EXE_EXT) $(WPTEST)$(EXE_EXT) \
-	$(RC2TEST)$(EXE_EXT) $(RC4TEST)$(EXE_EXT) $(RC5TEST)$(EXE_EXT) \
+	$(RC2TEST)$(EXE_EXT) $(RC4TEST)$(EXE_EXT) $(RC5TEST)$(EXE_EXT) $(PRFTEST)$(EXE_EXT) \
 	$(DESTEST)$(EXE_EXT) $(SHATEST)$(EXE_EXT) $(SHA1TEST)$(EXE_EXT) $(SHA256TEST)$(EXE_EXT) $(SHA512TEST)$(EXE_EXT) \
 	$(MDC2TEST)$(EXE_EXT) $(RMDTEST)$(EXE_EXT) \
 	$(RANDTEST)$(EXE_EXT) $(DHTEST)$(EXE_EXT) $(ENGINETEST)$(EXE_EXT) \
@@ -91,7 +92,7 @@ OBJ=	$(BNTEST).o $(ECTEST).o  $(ECDSATEST).o $(ECDHTEST).o $(IDEATEST).o \
 	$(HMACTEST).o $(HMACTEST2).o $(WPTEST).o \
 	$(RC2TEST).o $(RC4TEST).o $(RC5TEST).o \
 	$(DESTEST).o $(SHATEST).o $(SHA1TEST).o $(SHA256TEST).o $(SHA512TEST).o \
-	$(MDC2TEST).o $(RMDTEST).o \
+	$(MDC2TEST).o $(RMDTEST).o $(PRFTEST).o \
 	$(RANDTEST).o $(DHTEST).o $(ENGINETEST).o $(CASTTEST).o \
 	$(BFTEST).o  $(SSLTEST).o  $(DSATEST).o  $(EXPTEST).o $(RSATEST).o \
 	$(EVPTEST).o $(IGETEST).o $(JPAKETEST).o $(ASN1TEST).o \
@@ -99,7 +100,7 @@ OBJ=	$(BNTEST).o $(ECTEST).o  $(ECDSATEST).o $(ECDHTEST).o $(IDEATEST).o \
 
 SRC=	$(BNTEST).c $(ECTEST).c  $(ECDSATEST).c $(ECDHTEST).c $(IDEATEST).c \
 	$(MD2TEST).c  $(MD4TEST).c $(MD5TEST).c \
-	$(HMACTEST).c $(HMACTEST2).c $(WPTEST).c \
+	$(HMACTEST).c $(HMACTEST2).c $(WPTEST).c $(PRFTEST).c \
 	$(RC2TEST).c $(RC4TEST).c $(RC5TEST).c \
 	$(DESTEST).c $(SHATEST).c $(SHA1TEST).c $(MDC2TEST).c $(RMDTEST).c \
 	$(RANDTEST).c $(DHTEST).c $(ENGINETEST).c $(CASTTEST).c \
@@ -141,7 +142,7 @@ apps:
 	@(cd ..; $(MAKE) DIRS=apps all)
 
 alltests: \
-	test_des test_idea test_sha test_md4 test_md5 test_hmac \
+	test_des test_idea test_sha test_md4 test_md5 test_hmac test_prf \
 	test_md2 test_mdc2 test_wp \
 	test_rmd test_rc2 test_rc4 test_rc5 test_bf test_cast test_aes \
 	test_rand test_bn test_ec test_ecdsa test_ecdh \
@@ -176,6 +177,9 @@ test_md4:
 
 test_hmac:
 	../util/shlib_wrap.sh ./$(HMACTEST)
+
+test_prf:
+	../util/shlib_wrap.sh ./$(PRFTEST)
 
 test_hmac2:
 	../util/shlib_wrap.sh ./$(HMACTEST2)
@@ -434,6 +438,9 @@ $(MD5TEST)$(EXE_EXT): $(MD5TEST).o $(DLIBCRYPTO)
 
 $(HMACTEST)$(EXE_EXT): $(HMACTEST).o $(DLIBCRYPTO)
 	@target=$(HMACTEST); $(BUILD_CMD)
+
+$(PRFTEST)$(EXE_EXT): $(PRFTEST).o $(DLIBCRYPTO)
+	@target=$(PRFTEST); $(BUILD_CMD)
 
 $(HMACTEST2)$(EXE_EXT): $(HMACTEST2).o $(DLIBCRYPTO)
 	@target=$(HMACTEST2); $(BUILD_CMD)

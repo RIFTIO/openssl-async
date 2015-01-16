@@ -9,7 +9,9 @@ struct transmission_queue_node
 struct ssl3_transmission_pool_st
 	{
 	struct transmission_queue_node pool[1024]; /* Arbitrary */
-	struct transmission_queue_node *head, *tail, *free_head, *free_tail;
+	struct transmission_queue_node *free_head, *free_tail; /* list of free trans */
+	struct transmission_queue_node *head, *tail; /* list of trans inflight to crypto */
+	struct transmission_queue_node *skt_head, *skt_tail; /* list of trans waiting to be written to socket */
 
 	/* Points at the top-most free trans.
 	 * Eventually reaches the top, at
@@ -139,6 +141,11 @@ static int ssl3_process_transmissions(SSL *s, int status)
 			}
 			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 
+			if(status > 0 ) 
+			{	
+				/* Only free transmission buffers if callback was 
+				   successful (i.e. data successfully sent to socket) */
+
 			if ((trans->s->asynch_completion_callback) && 
 			    (trans->flags & SSL3_TRANS_FLAGS_SEND) &&
 			    (trans->orig))
@@ -148,6 +155,7 @@ static int ssl3_process_transmissions(SSL *s, int status)
 			ssl3_release_buffer(trans->s, &trans->buf,
 				!!(trans->flags & SSL3_TRANS_FLAGS_SEND));
 			ssl3_release_transmission(trans);
+			}
 			}
 		else
 		{
@@ -258,7 +266,7 @@ SSL3_TRANSMISSION *ssl3_get_transmission_before(SSL *s, SSL3_TRANSMISSION *t)
 			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 			return NULL;
 			}
-		p->head = p->tail = p->free_head = p->free_tail = (void*)0; 
+		p->head = p->tail = p->free_head = p->free_tail = p->skt_head = p->skt_tail = (void*)0; 
 		p->pool_break = 0; 
 		p->postprocessing = 0; 
 		s->s3->transmission_pool = p;
@@ -333,6 +341,38 @@ void ssl3_release_transmission(SSL3_TRANSMISSION *trans)
 		p->head = tqn->next;
 	else
 		tqn->prev->next = tqn->next;
+	trans->callback_list_top = 0;
+	tqn->next = NULL;
+	tqn->prev = p->free_tail;
+	if (p->free_tail != NULL)
+		p->free_tail->next = tqn;
+	p->free_tail = tqn;
+	if (p->free_head == NULL)
+		p->free_head = tqn;
+	CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+	}
+
+/* This function returns a transmission from the socket list (skt_head,skt_tail)
+to the free transmission list (free_head,free_tail) */
+void ssl3_release_transmission_skt(SSL3_TRANSMISSION *trans)
+        {
+        /* This works because we know that SSL3_TRANSMISSION is at the start
+           of struct transmission_queue_node */
+        struct transmission_queue_node *tqn =
+                (struct transmission_queue_node *)trans;
+        SSL3_TRANSMISSION_POOL *p = trans->s->s3->transmission_pool;
+        OPENSSL_assert(tqn >= &(p->pool[0])
+                && tqn < &(p->pool[p->pool_break]));
+
+        CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+        if (tqn->next == NULL)
+                p->skt_tail = tqn->prev;
+        else
+                tqn->next->prev = tqn->prev;
+        if (tqn->prev == NULL)
+                p->skt_head = tqn->next;
+        else
+                tqn->prev->next = tqn->next;
 
 	tqn->next = NULL;
 	tqn->prev = p->free_tail;
@@ -510,3 +550,147 @@ void ssl3_cleanup_read_record_pool(SSL *s)
 		OPENSSL_free(s->s3->read_record_pool);
 		}
 	}
+
+/* This function checks the queue of transmissions waiting for submission to socket.
+   Starting at the head of the socket transmission queue this function starts sending data to the
+   write socket. 
+   If the data is successfully sent the transmission buffers are free-ed and the next transmission 
+   at the head of the socket transmission queue is processed. This function returns greater than 0
+   in case of success.
+   If data is not successfully sent (e.g. due to write socket becoming full) this function sets the 
+   ssl rwstate to WRITING and returns less than 0 to indicate that further progress cannot be made 
+   until write socket has more space.
+*/
+int ssl3_asynch_send_skt_queued_data(SSL *s)
+{
+        SSL3_TRANSMISSION_POOL *p = NULL;
+        struct transmission_queue_node *tqn = NULL;
+        SSL3_TRANSMISSION *trans = NULL;
+	SSL3_BUFFER *wb = NULL;
+        int i=0;
+
+        p=s->s3->transmission_pool;
+        if(p == NULL)
+	{
+		return 1;
+	}
+
+	tqn = p->skt_head;
+
+        while(tqn != NULL)
+        {
+            trans=&(tqn->trans);
+            if(trans->dsw_ef_buf.buf)
+		wb=&trans->dsw_ef_buf;
+            else
+                wb=&trans->buf;           
+            for (;;)
+                {
+                clear_sys_error();
+                if (s->wbio != NULL)
+                        {
+                        s->rwstate=SSL_WRITING;
+                        i=BIO_write(s->wbio,
+                                (char *)&(wb->buf[wb->offset]),
+                                (unsigned int)wb->left);
+                        }
+                else
+                        {
+                        SSLerr(SSL_F_SSL3_ASYNCH_SEND_SKT_QUEUED_DATA, SSL_R_BIO_NOT_SET);
+                        return -1;
+                        }
+                if (i == wb->left)
+			{
+			if(trans->dsw_ef_buf.buf)
+				{
+				ssl3_release_buffer(trans->s, &trans->dsw_ef_buf,
+						!!(trans->flags & SSL3_TRANS_FLAGS_SEND));
+				memset(&trans->dsw_ef_buf, 0, sizeof(SSL3_BUFFER));
+				wb=&trans->buf;
+				continue;
+				}
+                        wb->left=0;
+                        wb->offset+=i;
+                        s->rwstate=SSL_NOTHING;
+                        tqn = tqn->next; /* Next trans to send */
+			s->s3->outstanding_write_records--;  
+ 
+			ssl3_release_buffer(trans->s, &trans->buf,
+                                !!(trans->flags & SSL3_TRANS_FLAGS_SEND));
+                        ssl3_release_transmission_skt(trans);
+			(void)BIO_flush(s->wbio);
+			BIO_clear_retry_flags(s->wbio);
+                        break; /* break for() */
+			}
+                else if (i <= 0) {
+				/* Made no progress return an error */
+                               return(i);
+                        }
+                else /* i > 0 */
+                        {
+			/* Made some progress */
+                        wb->offset+=i;
+                        wb->left-=i;
+                        }
+                }
+        }
+	return i;
+}
+
+/* This function queues transmissions for submission to socket at a later time */
+void ssl3_asynch_queue_write_socket_trans(SSL *s)
+{
+        SSL3_TRANSMISSION_POOL *p = NULL;
+        struct transmission_queue_node *tqn = NULL;
+
+	p = s->s3->transmission_pool;
+	tqn = p->head;
+
+        p->head = tqn->next;
+        if(tqn->next != NULL)
+        	tqn->next->prev = tqn->prev; 
+        else
+		p->tail = tqn->prev; 
+     
+        if(p->skt_head == NULL)
+        {
+		/* First trans in socket queue */
+        	p->skt_head = tqn;
+                p->skt_tail = tqn;
+                tqn->next = NULL;
+		tqn->prev = NULL;
+        }
+        else
+        {
+		/* Add to tail of list */
+        	p->skt_tail->next = tqn;
+                tqn->next = NULL;
+		tqn->prev = p->skt_tail;
+                p->skt_tail = tqn;
+        }
+}
+
+/* This function checks if there is transmissions already queued waiting to be written out to the
+   socket. If there is no transmissions queued for the socket this function returns 0.
+   If there are transmissions queued for the socket this function adds the current transmission to 
+   this queue and returns 1 */  
+int ssl3_asynch_check_write_socket_trans(SSL *s)
+{
+        SSL3_TRANSMISSION_POOL *p = NULL;
+
+	p = s->s3->transmission_pool;
+	if(p == NULL)
+	{
+		return 0;
+	}
+
+        if(p->skt_head != NULL)
+        {
+		ssl3_asynch_queue_write_socket_trans(s);
+                return 1;
+	}
+	else
+	{
+		return 0;
+	}
+}

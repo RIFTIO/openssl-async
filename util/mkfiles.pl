@@ -15,6 +15,7 @@ my @dirs = (
 "crypto/sha",
 "crypto/mdc2",
 "crypto/hmac",
+"crypto/prf",
 "crypto/cmac",
 "crypto/ripemd",
 "crypto/des",

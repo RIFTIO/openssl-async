@@ -4014,6 +4014,10 @@
 #define LN_cmac		"cmac"
 #define NID_cmac		894
 
+#define SN_prf		"PRF"
+#define LN_prf		"prf"
+#define NID_prf		920
+
 #define SN_rc4_hmac_md5		"RC4-HMAC-MD5"
 #define LN_rc4_hmac_md5		"rc4-hmac-md5"
 #define NID_rc4_hmac_md5		915

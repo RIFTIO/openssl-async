@@ -117,6 +117,7 @@
 #define EVP_PKEY_EC	NID_X9_62_id_ecPublicKey
 #define EVP_PKEY_HMAC	NID_hmac
 #define EVP_PKEY_CMAC	NID_cmac
+#define EVP_PKEY_PRF	NID_prf
 
 #ifdef	__cplusplus
 extern "C" {
@@ -1230,6 +1231,18 @@ void EVP_PKEY_CTX_set0_keygen_info(EVP_PKEY_CTX *ctx, int *dat, int datlen);
 EVP_PKEY *EVP_PKEY_new_mac_key(int type, ENGINE *e,
 				const unsigned char *key, int keylen);
 
+int EVP_PKEY_derive_PRF(int type, ENGINE *e, const EVP_MD **md,int md_count, 
+                     const void *seed1, int seed1_len,
+                     const void *seed2, int seed2_len,
+                     const void *seed3, int seed3_len,
+                     const void *seed4, int seed4_len,
+                     const void *seed5, int seed5_len,
+                     const unsigned char *sec, int slen,
+                     unsigned char *out1,
+                     size_t *olen, int version,
+                     int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
+                     void *callbackData);
+
 void EVP_PKEY_CTX_set_data(EVP_PKEY_CTX *ctx, void *data);
 void *EVP_PKEY_CTX_get_data(EVP_PKEY_CTX *ctx);
 EVP_PKEY *EVP_PKEY_CTX_get0_pkey(EVP_PKEY_CTX *ctx);
@@ -1274,6 +1287,10 @@ int EVP_PKEY_decrypt(EVP_PKEY_CTX *ctx,
 int EVP_PKEY_derive_init(EVP_PKEY_CTX *ctx);
 int EVP_PKEY_derive_set_peer(EVP_PKEY_CTX *ctx, EVP_PKEY *peer);
 int EVP_PKEY_derive(EVP_PKEY_CTX *ctx, unsigned char *key, size_t *keylen);
+int EVP_PKEY_derive_asynch(EVP_PKEY_CTX *ctx, unsigned char *key, size_t *keylen,
+			int (*cb)(unsigned char *result, size_t resultlen,
+				void *cb_data, int status),
+			void *cb_data);
 
 typedef int EVP_PKEY_gen_cb(EVP_PKEY_CTX *ctx);
 typedef int EVP_PKEY_asynch_sign_cb(unsigned char *result, size_t resultlen, void *cb_data, int status);
@@ -1488,6 +1505,9 @@ void ERR_load_EVP_strings(void);
 #define EVP_F_EVP_PKEY_VERIFY_INIT			 143
 #define EVP_F_EVP_PKEY_VERIFY_RECOVER			 144
 #define EVP_F_EVP_PKEY_VERIFY_RECOVER_INIT		 145
+#define EVP_F_PRF_DERIVE_ASYNCH				 202
+#define EVP_F_PRF_DERIVE_SYNCH				 203
+#define EVP_F_PRF_DERIVE_INIT				 204
 #define EVP_F_EVP_RIJNDAEL				 126
 #define EVP_F_EVP_SIGNFINAL				 107
 #define EVP_F_EVP_VERIFYFINAL				 108

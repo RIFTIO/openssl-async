@@ -63,6 +63,7 @@
 #include <openssl/evp.h>
 #include <openssl/bn.h>
 #include "evp_locl.h"
+#include <openssl/prf.h>
 
 int EVP_PKEY_paramgen_init(EVP_PKEY_CTX *ctx)
 	{
@@ -219,3 +220,67 @@ EVP_PKEY *EVP_PKEY_new_mac_key(int type, ENGINE *e,
 		EVP_PKEY_CTX_free(mac_ctx);
 	return mac_key;
 	}
+
+
+int EVP_PKEY_derive_PRF(int type, ENGINE *e, const EVP_MD **md, int md_count,
+			const void *seed1, int seed1_len,
+			const void *seed2, int seed2_len,
+			const void *seed3, int seed3_len,
+			const void *seed4, int seed4_len,
+			const void *seed5, int seed5_len,
+			const unsigned char *sec, int slen,
+			unsigned char *out1,
+			size_t *olen, int version,
+			int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
+			void *cb_data)
+	{
+		EVP_PKEY_CTX *prf_ctx = NULL;
+		prf_ctx = EVP_PKEY_CTX_new_id(type, e);
+		int ret=-1;
+		if(!prf_ctx)
+			return ret;
+		
+		if(EVP_PKEY_derive_init(prf_ctx) <= 0)
+			goto perr;
+		
+		if(seed1 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+				EVP_PKEY_CTRL_SET_PRF_SEED1, seed1_len, (void*)seed1) <= 0)
+			goto perr;
+		
+		if(seed2 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+				EVP_PKEY_CTRL_SET_PRF_SEED2, seed2_len, (void *)seed2) <= 0)
+			goto perr;
+		
+		if(seed3 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+				EVP_PKEY_CTRL_SET_PRF_SEED3, seed3_len, (void *)seed3) <= 0)
+			goto perr;
+		
+		if(seed4 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+				EVP_PKEY_CTRL_SET_PRF_SEED4, seed4_len, (void *)seed4) <= 0)
+			goto perr;
+		
+		if(seed5 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+				EVP_PKEY_CTRL_SET_PRF_SEED5, seed5_len, (void *)seed5) <= 0)
+			goto perr;
+
+		if(sec && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+				EVP_PKEY_CTRL_SET_PRF_SECRET, slen, (void *)sec) <= 0)
+			goto perr;
+
+		if(md && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+				EVP_PKEY_CTRL_SET_PRF_DIGEST, md_count, (void *)md) <= 0)
+			goto perr;
+
+		if(version > 0 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+				EVP_PKEY_CTRL_SET_PRF_VERSION, version, NULL) <= 0)
+			goto perr;
+		if(cb)
+			return EVP_PKEY_derive_asynch(prf_ctx,out1, olen,cb, cb_data);
+		else
+			ret = EVP_PKEY_derive(prf_ctx, out1, olen);
+perr:
+        if (prf_ctx)
+                EVP_PKEY_CTX_free(prf_ctx);
+        return ret;
+	}
+
