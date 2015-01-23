@@ -141,7 +141,9 @@ static int ssl3_process_transmissions(SSL *s, int status)
 			}
 			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 
+#ifndef DISABLE_ASYNCH_BULK_PERF
 			if(status > 0 ) 
+#endif
 			{	
 				/* Only free transmission buffers if callback was 
 				   successful (i.e. data successfully sent to socket) */
