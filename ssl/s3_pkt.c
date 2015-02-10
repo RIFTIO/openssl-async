@@ -406,13 +406,9 @@ again:
 			i = mac_size = arr->mac_size;
 			memcpy(&_md, &arr->md, EVP_MAX_MD_SIZE);
 			md = _md;
+			mac = arr->mac;
 
-			memcpy(&_mac,arr->mac, mac_size);
-			mac = _mac;
 			enc_err = (arr->status<=0 ? -1 : 1);
-
-			if (s->enc_read_ctx && EVP_CIPHER_CTX_mode(s->enc_read_ctx) == EVP_CIPH_CBC_MODE)
-				OPENSSL_free(arr->mac);
 			ssl3_release_read_record(arr);
 
 			/* We're done with the actual reading */
@@ -661,7 +657,10 @@ printf("\n");
 			 * the MAC in constant time from within the record,
 			 * without leaking the contents of the padding bytes.
 			 * */
+			if(trans)
 			mac = OPENSSL_malloc(mac_size);
+			else
+				mac = _mac;
 			ssl3_cbc_copy_mac(mac, rr, mac_size, orig_len);
 			rr->length -= mac_size;
 			}
@@ -704,6 +703,13 @@ post_mac:
 		enc_err = -1;
 	if (rr->length > SSL3_RT_MAX_COMPRESSED_LENGTH+extra+mac_size)
 		enc_err = -1;
+
+	if (trans && mac != NULL && s->enc_read_ctx 
+		&& EVP_CIPHER_CTX_mode(s->enc_read_ctx) == EVP_CIPH_CBC_MODE)
+		{
+		OPENSSL_free(mac);
+		mac = NULL;
+		}
 
 	if (enc_err < 0)
 		{
@@ -1427,6 +1433,8 @@ int ssl3_write_pending(SSL *s, int type, const unsigned char *buf,
 static int ssl3_write_pending2(SSL *s, SSL3_BUFFER *wb)
 	{
 	int i;
+	int cipher_async;
+	int s3_async;
 
 #ifndef DISABLE_ASYNCH_BULK_PERF
 	/* In asynch case check to see if there is already a queue for write socket */
@@ -1438,12 +1446,18 @@ static int ssl3_write_pending2(SSL *s, SSL3_BUFFER *wb)
 			return(-1);
 		}
 #endif
+	s3_async = s->s3->flags & SSL3_FLAGS_ASYNCH;
+	cipher_async = 0;
+	if (s->enc_write_ctx && (EVP_CIPHER_CTX_flags(s->enc_write_ctx) & EVP_CIPH_FLAG_ASYNCH))
+		{
+		cipher_async = 1;
+		}
 	for (;;)
 		{
 		clear_sys_error();
 		if (s->wbio != NULL)
 			{
-			if(!(s->s3->flags & SSL3_FLAGS_ASYNCH))
+			if(!s3_async || (s3_async && !cipher_async))
 				s->rwstate=SSL_WRITING;
 			i=BIO_write(s->wbio,
 				(char *)&(wb->buf[wb->offset]),
@@ -1461,7 +1475,7 @@ static int ssl3_write_pending2(SSL *s, SSL3_BUFFER *wb)
 			if (s->mode & SSL_MODE_RELEASE_BUFFERS &&
 			    SSL_version(s) != DTLS1_VERSION && SSL_version(s) != DTLS1_BAD_VER)
 				ssl3_release_write_buffer(s);
-			if(!(s->s3->flags & SSL3_FLAGS_ASYNCH))
+			if(!s3_async || (s3_async && !cipher_async))
 				s->rwstate=SSL_NOTHING;
 			return(s->s3->wpend_ret);
 			}
@@ -1473,10 +1487,11 @@ static int ssl3_write_pending2(SSL *s, SSL3_BUFFER *wb)
 				wb->left = 0;
 				return(i);
 				}
-			if(!(s->s3->flags & SSL3_FLAGS_ASYNCH) || !BIO_should_retry(s->wbio))
+			if(!s3_async || (s3_async && !cipher_async) ||
+			    !BIO_should_retry(s->wbio))
 				return(i);
 #ifndef DISABLE_ASYNCH_BULK_PERF
-			else if (!s->enc_write_ctx || EVP_CIPHER_CTX_flags(s->enc_write_ctx) & EVP_CIPH_FLAG_ASYNCH)
+			else
 			{
 				/* Queue transmission for socket write later */
 				ssl3_asynch_queue_write_socket_trans(s);
