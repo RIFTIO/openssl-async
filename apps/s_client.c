@@ -196,6 +196,8 @@ extern int verify_error;
 extern int verify_return_error;
 extern int verify_quiet;
 
+static int async = 0;
+
 #ifdef FIONBIO
 static int c_nbio = 0;
 #endif
@@ -429,6 +431,8 @@ static void sc_usage(void)
                " -keymatexport label   - Export keying material using label\n");
     BIO_printf(bio_err,
                " -keymatexportlen len  - Export len bytes of keying material (default 20)\n");
+    BIO_printf(bio_err,
+               " -async                - Support asynchronous operation\n");
 }
 
 #ifndef OPENSSL_NO_TLSEXT
@@ -1113,6 +1117,8 @@ int MAIN(int argc, char **argv)
             keymatexportlen = atoi(*(++argv));
             if (keymatexportlen == 0)
                 goto bad;
+        } else if (strcmp(*argv, "-async") == 0) {
+            async = 1;
         } else {
             BIO_printf(bio_err, "unknown option %s\n", *argv);
             badop = 1;
@@ -1264,6 +1270,9 @@ int MAIN(int argc, char **argv)
         ERR_print_errors(bio_err);
         goto end;
     }
+    
+    if (async)
+        SSL_CTX_set_mode(ctx, SSL_MODE_ASYNC);
 
     if (!args_ssl_call(ctx, bio_err, cctx, ssl_args, 1, no_jpake)) {
         ERR_print_errors(bio_err);
@@ -1828,6 +1837,11 @@ int MAIN(int argc, char **argv)
                 write_ssl = 1;
                 read_tty = 0;
                 break;
+            case SSL_ERROR_WANT_ASYNC:
+                BIO_printf(bio_c_out, "write A BLOCK\n");
+                write_ssl = 1;
+                read_tty = 0;
+                break;
             case SSL_ERROR_WANT_READ:
                 BIO_printf(bio_c_out, "write R BLOCK\n");
                 write_tty = 0;
@@ -1909,6 +1923,13 @@ int MAIN(int argc, char **argv)
 
                 read_ssl = 0;
                 write_tty = 1;
+                break;
+            case SSL_ERROR_WANT_ASYNC:
+                BIO_printf(bio_c_out, "read A BLOCK\n");
+                write_tty = 0;
+                read_ssl = 1;
+                if ((read_tty == 0) && (write_ssl == 0))
+                    write_ssl = 1;
                 break;
             case SSL_ERROR_WANT_WRITE:
                 BIO_printf(bio_c_out, "read W BLOCK\n");

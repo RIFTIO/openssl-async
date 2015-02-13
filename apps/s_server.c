@@ -266,6 +266,8 @@ static int s_brief = 0;
 static char *keymatexportlabel = NULL;
 static int keymatexportlen = 20;
 
+static int async = 0;
+
 #ifndef OPENSSL_NO_ENGINE
 static char *engine_id = NULL;
 #endif
@@ -422,6 +424,7 @@ static void s_server_init(void)
     s_msg = 0;
     s_quiet = 0;
     s_brief = 0;
+    async = 0;
 # ifndef OPENSSL_NO_ENGINE
     engine_id = NULL;
 # endif
@@ -607,6 +610,7 @@ static void sv_usage(void)
     BIO_printf(bio_err,
                " -status_timeout n - status request responder timeout\n");
     BIO_printf(bio_err, " -status_url URL   - status request fallback URL\n");
+	BIO_printf(bio_err, " -async            - Operate in asynchronous mode\n");
 }
 
 static int local_argc = 0;
@@ -1494,6 +1498,8 @@ int MAIN(int argc, char *argv[])
             keymatexportlen = atoi(*(++argv));
             if (keymatexportlen == 0)
                 goto bad;
+        } else if (strcmp(*argv, "-async") == 0) {
+            async = 1;
         } else {
             BIO_printf(bio_err, "unknown option %s\n", *argv);
             badop = 1;
@@ -1722,6 +1728,9 @@ int MAIN(int argc, char *argv[])
     else
         SSL_CTX_sess_set_cache_size(ctx, 128);
 
+    if (async)
+        SSL_CTX_set_mode(ctx, SSL_MODE_ASYNC);
+
 #ifndef OPENSSL_NO_SRTP
     if (srtp_profiles != NULL) {
         /* Returns 0 on success!! */
@@ -1794,6 +1803,9 @@ int MAIN(int argc, char *argv[])
             init_session_cache_ctx(ctx2);
         else
             SSL_CTX_sess_set_cache_size(ctx2, 128);
+
+        if (async)
+			SSL_CTX_set_mode(ctx2, SSL_MODE_ASYNC);
 
         if ((!SSL_CTX_load_verify_locations(ctx2, CAfile, CApath)) ||
             (!SSL_CTX_set_default_verify_paths(ctx2))) {
@@ -2406,6 +2418,9 @@ static int sv_body(char *hostname, int s, int stype, unsigned char *context)
                 switch (SSL_get_error(con, k)) {
                 case SSL_ERROR_NONE:
                     break;
+                case SSL_ERROR_WANT_ASYNC:
+                    BIO_printf(bio_s_out, "Write BLOCK (Async)\n");
+                    break;
                 case SSL_ERROR_WANT_WRITE:
                 case SSL_ERROR_WANT_READ:
                 case SSL_ERROR_WANT_X509_LOOKUP:
@@ -2423,8 +2438,10 @@ static int sv_body(char *hostname, int s, int stype, unsigned char *context)
                     ret = 1;
                     goto err;
                 }
-                l += k;
-                i -= k;
+                if(k > 0) {
+					l += k;
+					i -= k;
+				}
                 if (i <= 0)
                     break;
             }
@@ -2466,6 +2483,7 @@ static int sv_body(char *hostname, int s, int stype, unsigned char *context)
                     if (SSL_pending(con))
                         goto again;
                     break;
+                case SSL_ERROR_WANT_ASYNC:
                 case SSL_ERROR_WANT_WRITE:
                 case SSL_ERROR_WANT_READ:
                     BIO_printf(bio_s_out, "Read BLOCK\n");
@@ -2524,32 +2542,35 @@ static int init_ssl_connection(SSL *con)
 #endif
     unsigned char *exportedkeymat;
 
-    i = SSL_accept(con);
+    do {
+        i = SSL_accept(con);
 #ifdef CERT_CB_TEST_RETRY
-    {
-        while (i <= 0 && SSL_get_error(con, i) == SSL_ERROR_WANT_X509_LOOKUP
-               && SSL_state(con) == SSL3_ST_SR_CLNT_HELLO_C) {
-            fprintf(stderr,
-                    "LOOKUP from certificate callback during accept\n");
+        {
+            while (i <= 0 && SSL_get_error(con, i) == SSL_ERROR_WANT_X509_LOOKUP
+                   && SSL_state(con) == SSL3_ST_SR_CLNT_HELLO_C) {
+                fprintf(stderr,
+                        "LOOKUP from certificate callback during accept\n");
+                i = SSL_accept(con);
+            }
+        }
+#endif
+
+#ifndef OPENSSL_NO_SRP
+        while (i <= 0 && SSL_get_error(con, i) == SSL_ERROR_WANT_X509_LOOKUP) {
+            BIO_printf(bio_s_out, "LOOKUP during accept %s\n",
+                       srp_callback_parm.login);
+            srp_callback_parm.user =
+                SRP_VBASE_get_by_user(srp_callback_parm.vb,
+                                      srp_callback_parm.login);
+            if (srp_callback_parm.user)
+                BIO_printf(bio_s_out, "LOOKUP done %s\n",
+                           srp_callback_parm.user->info);
+            else
+                BIO_printf(bio_s_out, "LOOKUP not successful\n");
             i = SSL_accept(con);
         }
-    }
 #endif
-#ifndef OPENSSL_NO_SRP
-    while (i <= 0 && SSL_get_error(con, i) == SSL_ERROR_WANT_X509_LOOKUP) {
-        BIO_printf(bio_s_out, "LOOKUP during accept %s\n",
-                   srp_callback_parm.login);
-        srp_callback_parm.user =
-            SRP_VBASE_get_by_user(srp_callback_parm.vb,
-                                  srp_callback_parm.login);
-        if (srp_callback_parm.user)
-            BIO_printf(bio_s_out, "LOOKUP done %s\n",
-                       srp_callback_parm.user->info);
-        else
-            BIO_printf(bio_s_out, "LOOKUP not successful\n");
-        i = SSL_accept(con);
-    }
-#endif
+    } while (i < 0 && SSL_waiting_for_async(con));
 
     if (i <= 0) {
         if (BIO_sock_should_retry(i)) {
