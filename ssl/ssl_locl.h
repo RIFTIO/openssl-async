@@ -163,6 +163,7 @@
 # endif
 # include <openssl/err.h>
 # include <openssl/ssl.h>
+# include <openssl/async.h>
 # include <openssl/symhacks.h>
 
 # ifdef OPENSSL_BUILD_SHLIBSSL
@@ -1217,6 +1218,8 @@ struct ssl_st {
      * basis, depending on the chosen cipher.
      */
     int (*not_resumable_session_cb) (SSL *ssl, int is_forward_secure);
+    /* Async Job info */
+    ASYNC_JOB *job;
 };
 
 typedef struct ssl3_record_st {
