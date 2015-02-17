@@ -157,7 +157,7 @@ static int bind_dasync(ENGINE *e)
     return 1;
 }
 
-#ifdef ENGINE_DYNAMIC_SUPPORT
+# ifndef OPENSSL_NO_DYNAMIC_ENGINE
 static int bind_helper(ENGINE *e, const char *id)
 {
     if (id && (strcmp(id, engine_dasync_id) != 0))
@@ -169,7 +169,7 @@ static int bind_helper(ENGINE *e, const char *id)
 
 IMPLEMENT_DYNAMIC_CHECK_FN()
     IMPLEMENT_DYNAMIC_BIND_FN(bind_helper)
-#else
+# else
 static ENGINE *engine_dasync(void)
 {
     ENGINE *ret = ENGINE_new();
@@ -192,7 +192,7 @@ void ENGINE_load_dasync(void)
     ENGINE_free(toadd);
     ERR_clear_error();
 }
-#endif
+# endif
 
 
 static int dasync_init(ENGINE *e)

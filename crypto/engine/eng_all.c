@@ -113,8 +113,8 @@ void ENGINE_load_builtin_engines(void)
 # if defined(OPENSSL_SYS_WIN32) && !defined(OPENSSL_NO_CAPIENG)
     ENGINE_load_capi();
 # endif
+    ENGINE_load_dasync();
 #endif
-	ENGINE_load_dasync();
     ENGINE_register_all_complete();
 }
 
