@@ -749,3 +749,6 @@
 -T ssl_trace_tbl
 -T _stdcall
 -T tls12_lookup
+-T ASYNC_FIBRE
+-T ASYNC_CTX
+-T ASYNC_JOB

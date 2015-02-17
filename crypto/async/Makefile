@@ -17,13 +17,13 @@ TEST=
 APPS=
 
 LIB=$(TOP)/libcrypto.a
-LIBSRC=async.c
-LIBOBJ=async.o
+LIBSRC=async.c arch/async_posix.c arch/async_win.c
+LIBOBJ=async.o arch/async_posix.o arch/async_win.o
 
 SRC= $(LIBSRC)
 
 EXHEADER= async.h
-HEADER=	$(EXHEADER)
+HEADER=	$(EXHEADER) async_locl.h arch/async_posix.h arch/async_win.h
 
 ALL=    $(GENERAL) $(SRC) $(HEADER)
 
@@ -71,6 +71,7 @@ dclean:
 
 clean:
 	rm -f *.o *.obj lib tags core .pure .nfs* *.old *.bak fluff
+	rm -f arch/*.o arch/*.obj arch/lib arch/tags arch/core arch/.pure arch/.nfs* arch/*.old arch/*.bak arch/fluff
 
 # DO NOT DELETE THIS LINE -- make depend depends on it.
 
