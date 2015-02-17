@@ -23,7 +23,7 @@ LIBOBJ=async.o arch/async_posix.o arch/async_win.o
 SRC= $(LIBSRC)
 
 EXHEADER= async.h
-HEADER=	$(EXHEADER) async_locl.h arch/async_posix.h arch/async_win.h
+HEADER=	$(EXHEADER) async_locl.h arch/async_posix.h arch/async_win.h arch/async_null.h
 
 ALL=    $(GENERAL) $(SRC) $(HEADER)
 
