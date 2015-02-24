@@ -80,7 +80,7 @@ static int pkey_prf_derive_init(EVP_PKEY_CTX *ctx)
 	prf_ctx = OPENSSL_malloc(sizeof(PRF));
 	if (!prf_ctx)
 		{
-		EVPerr(EVP_F_PRF_DERIVE_INIT, EVP_R_MALLOC_FAILURE);
+		EVPerr(EVP_F_PKEY_PRF_DERIVE_INIT, EVP_R_MALLOC_FAILURE);
 		return 0;
 		}
 	prf_ctx->seed1=NULL;
@@ -120,7 +120,7 @@ static int pkey_prf_ctrl(EVP_PKEY_CTX *ctx, int type, int p1, void *p2)
 	PRF *prf_ctx = ctx->data;
 	if (!prf_ctx)
 		{
-		EVPerr(EVP_F_PRF_DERIVE_SYNCH, EVP_R_INPUT_NOT_INITIALIZED);
+		EVPerr(EVP_F_PKEY_PRF_CTRL, EVP_R_INPUT_NOT_INITIALIZED);
 		return -1;
 		}
 	switch(type)
@@ -168,7 +168,7 @@ static int pkey_prf_derive_synch(EVP_PKEY_CTX *ctx, unsigned char *key, size_t *
 	int ret=  -1;
 	if (!prf_ctx) 
 		{
-		EVPerr(EVP_F_PRF_DERIVE_SYNCH, EVP_R_INPUT_NOT_INITIALIZED);
+		EVPerr(EVP_F_PKEY_PRF_DERIVE_SYNCH, EVP_R_INPUT_NOT_INITIALIZED);
 		return ret;
 		}
         ret = PRF_derive(prf_ctx, key, olen);
@@ -183,7 +183,7 @@ static int pkey_prf_derive_asynch(EVP_PKEY_CTX *ctx, unsigned char *key, size_t 
 	int ret=  -1;
 	if (!prf_ctx) 
 		{
-		EVPerr(EVP_F_PRF_DERIVE_ASYNCH, EVP_R_INPUT_NOT_INITIALIZED);
+		EVPerr(EVP_F_PKEY_PRF_DERIVE_ASYNCH, EVP_R_INPUT_NOT_INITIALIZED);
 		return -1;
 		}
         ret = PRF_derive(prf_ctx, key, olen);

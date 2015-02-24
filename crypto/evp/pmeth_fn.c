@@ -458,13 +458,13 @@ int EVP_PKEY_derive_asynch(EVP_PKEY_CTX *ctx, unsigned char *key, size_t *pkeyle
 	{
 	if (!ctx || !ctx->pmeth || !ctx->pmeth->derive.asynch)
 		{
-		EVPerr(EVP_F_EVP_PKEY_DERIVE,
+		EVPerr(EVP_F_EVP_PKEY_DERIVE_ASYNCH,
 			EVP_R_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE);
 		return -2;
 		}
 	if (ctx->operation != EVP_PKEY_OP_DERIVE)
 		{
-		EVPerr(EVP_F_EVP_PKEY_DERIVE, EVP_R_OPERATON_NOT_INITIALIZED);
+		EVPerr(EVP_F_EVP_PKEY_DERIVE_ASYNCH, EVP_R_OPERATON_NOT_INITIALIZED);
 		return -1;
 		}
 	M_check_autoarg(ctx, key, pkeylen, EVP_F_EVP_PKEY_DERIVE)

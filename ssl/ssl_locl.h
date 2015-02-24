@@ -1073,6 +1073,11 @@ void ssl3_cleanup_transmission_pool(SSL *s);
 int ssl3_asynch_read_pending(const SSL *s);
 int ssl3_asynch_send_skt_queued_data(SSL *s);
 
+void ssl3_set_conn_status(SSL *s, int status);
+int ssl3_get_conn_status(SSL *s);
+int ssl3_asynch_check_write_socket_trans(SSL *s);
+void ssl3_asynch_queue_write_socket_trans(SSL *s);
+
 #define SSL3_TRANS_FLAGS_SEND	0x01
 #define SSL3_TRANS_FLAGS_FINAL	0x02
 

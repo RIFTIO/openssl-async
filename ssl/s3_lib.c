@@ -4153,14 +4153,24 @@ int ssl3_shutdown(SSL *s)
 	if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 		{
 #ifndef DISABLE_ASYNCH_BULK_PERF
-		if(!s->enc_write_ctx || EVP_CIPHER_CTX_flags(s->enc_write_ctx) & EVP_CIPH_FLAG_ASYNCH)
+		if(s->enc_write_ctx && 
+			EVP_CIPHER_CTX_flags(s->enc_write_ctx) & EVP_CIPH_FLAG_ASYNCH)
 		{
 			/* Data still on skt queue need to be pushed to socket */
+			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+			CRYPTO_w_lock(CRYPTO_LOCK_SSL);
 			ret=ssl3_asynch_send_skt_queued_data(s);
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
 			/* If all data not successfully sent return now */
 			if(ret<0)
 			{
-				return ret;
+				/*Don't raise error until all the inflight request are processed*/
+				if(ssl3_get_conn_status(s) < 1 && !SSL_crypto_pending(s))
+					{
+					SSLerr(SSL_F_SSL3_SHUTDOWN, SSL_R_CONNECTION_LOST);
+					}
+				return -1;
 			}
 		}
 #endif
@@ -4218,13 +4228,23 @@ int ssl3_shutdown(SSL *s)
 		if (s->s3->flags & SSL3_FLAGS_ASYNCH)
 		{
 #ifndef DISABLE_ASYNCH_BULK_PERF
-			if(!s->enc_write_ctx || EVP_CIPHER_CTX_flags(s->enc_write_ctx) & EVP_CIPH_FLAG_ASYNCH)
+		if(s->enc_write_ctx && 
+			EVP_CIPHER_CTX_flags(s->enc_write_ctx) & EVP_CIPH_FLAG_ASYNCH)
 			{
 				/* Data still on skt queue need to be pushed to socket */
+			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+			CRYPTO_w_lock(CRYPTO_LOCK_SSL);
 				ret=ssl3_asynch_send_skt_queued_data(s);
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+			CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
 				/* If all data not successfully sent return now */
 				if(ret<0)
 				{
+				/*Don't raise error until all the inflight request are processed*/
+				if(ssl3_get_conn_status(s) < 1 && !SSL_crypto_pending(s))
+					{
+					SSLerr(SSL_F_SSL3_SHUTDOWN, SSL_R_CONNECTION_LOST);
+					}
 					return ret;
 				}
 			}

@@ -355,7 +355,7 @@ static void async_cb(unsigned char *out, unsigned int outl, void *vparams, int s
 {
     CallbackData_t *cbData = (CallbackData_t *)vparams;
 
-    if (status && outl != 0)
+	if (status && outl != 0 && cbData)
 		cbData->stats->resp++;
 }
 
@@ -364,7 +364,7 @@ static int async_cb_ex(unsigned char *out, size_t outl, void *vparams, int statu
 {
     CallbackData_t *cbData = (CallbackData_t *)vparams;
 
-    if (status && outl != 0)
+	if (status && outl != 0 && cbData)
 		{
 		cbData->stats->resp++;
 		cbData->outlen = outl;
@@ -376,7 +376,7 @@ static int async_cb_ex1(unsigned char *out, size_t outl, void *vparams, int stat
 	{
 	CallbackData_t *cbData = (CallbackData_t *)vparams;
 
-	if (status)
+	if (status && cbData)
 		{
 		cbData->stats->resp++;
 		cbData->outlen = outl;
@@ -388,7 +388,7 @@ static int async_verify_cb(void *vparams, int status)
 	{
 	CallbackData_t *cbData = (CallbackData_t *)vparams;
     
-	if (status != 0)
+	if (status != 0 && cbData)
 		cbData->stats->resp++;
     return 1;
 }

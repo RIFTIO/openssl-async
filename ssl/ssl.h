@@ -1173,6 +1173,8 @@ struct ssl_st
 	 * test instead of an "init" member.
 	 */
 
+	int conn_status;/*Connection status -1:On client Disconnect*/
+
 	int server;	/* are we the server side? - mostly used by SSL_clear*/
 
 	int new_session;/* Generate a new session or reuse an old one.
@@ -2171,6 +2173,7 @@ void ERR_load_SSL_strings(void);
 #define SSL_F_SSL3_ADD_CERT_TO_BUF			 296
 #define SSL_F_SSL3_ASYNCH_HANDLE_CIPHER_CALLBACKS	 374
 #define SSL_F_SSL3_ASYNCH_HANDLE_DIGEST_CALLBACKS	 375
+#define SSL_F_SSL3_ASYNCH_SEND_SKT_QUEUED_DATA		 376
 #define SSL_F_SSL3_CALLBACK_CTRL			 233
 #define SSL_F_SSL3_CHANGE_CIPHER_STATE			 129
 #define SSL_F_SSL3_CHECK_CERT_AND_ALGORITHM		 130
@@ -2215,6 +2218,7 @@ void ERR_load_SSL_strings(void);
 #define SSL_F_SSL3_SETUP_KEY_BLOCK			 157
 #define SSL_F_SSL3_SETUP_READ_BUFFER			 156
 #define SSL_F_SSL3_SETUP_WRITE_BUFFER			 291
+#define SSL_F_SSL3_SHUTDOWN				 320
 #define SSL_F_SSL3_WRITE_BYTES				 158
 #define SSL_F_SSL3_WRITE_PENDING			 159
 #define SSL_F_SSL3_WRITE_PENDING2			 319
@@ -2326,7 +2330,6 @@ void ERR_load_SSL_strings(void);
 #define SSL_F_TLS1_PRF					 284
 #define SSL_F_TLS1_SETUP_KEY_BLOCK			 211
 #define SSL_F_WRITE_PENDING				 212
-#define SSL_F_SSL3_ASYNCH_SEND_SKT_QUEUED_DATA		 376
 
 /* Reason codes. */
 #define SSL_R_APP_DATA_IN_HANDSHAKE			 100
@@ -2366,7 +2369,7 @@ void ERR_load_SSL_strings(void);
 #define SSL_R_BAD_SRP_B_LENGTH				 348
 #define SSL_R_BAD_SRP_G_LENGTH				 349
 #define SSL_R_BAD_SRP_N_LENGTH				 350
-#define SSL_R_BAD_SRP_PARAMETERS			 371
+#define SSL_R_BAD_SRP_PARAMETERS			 372
 #define SSL_R_BAD_SRP_S_LENGTH				 351
 #define SSL_R_BAD_SRTP_MKI_VALUE			 352
 #define SSL_R_BAD_SRTP_PROTECTION_PROFILE_LIST		 353
@@ -2393,6 +2396,7 @@ void ERR_load_SSL_strings(void);
 #define SSL_R_COMPRESSION_ID_NOT_WITHIN_PRIVATE_RANGE	 307
 #define SSL_R_COMPRESSION_LIBRARY_ERROR			 142
 #define SSL_R_CONNECTION_ID_IS_DIFFERENT		 143
+#define SSL_R_CONNECTION_LOST				 374
 #define SSL_R_CONNECTION_TYPE_NOT_SET			 144
 #define SSL_R_COOKIE_MISMATCH				 308
 #define SSL_R_DATA_BETWEEN_CCS_AND_FINISHED		 145

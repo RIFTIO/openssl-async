@@ -366,7 +366,6 @@ void ssl3_release_transmission_skt(SSL3_TRANSMISSION *trans)
         OPENSSL_assert(tqn >= &(p->pool[0])
                 && tqn < &(p->pool[p->pool_break]));
 
-        CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
         if (tqn->next == NULL)
                 p->skt_tail = tqn->prev;
         else
@@ -383,8 +382,8 @@ void ssl3_release_transmission_skt(SSL3_TRANSMISSION *trans)
 	p->free_tail = tqn;
 	if (p->free_head == NULL)
 		p->free_head = tqn;
-	CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 	}
+
 void ssl3_cleanup_transmission_pool(SSL *s)
 	{
 	if (s->s3->transmission_pool)
@@ -624,8 +623,27 @@ int ssl3_asynch_send_skt_queued_data(SSL *s)
 			BIO_clear_retry_flags(s->wbio);
                         break; /* break for() */
 			}
-                else if (i <= 0) {
+		else if (i <= 0) 
+			{
 				/* Made no progress return an error */
+			if(!BIO_should_retry(s->wbio))
+				{
+				ssl3_set_conn_status(s, i);	
+				if(trans->dsw_ef_buf.buf)
+					{
+					ssl3_release_buffer(trans->s, &trans->dsw_ef_buf,
+						!!(trans->flags & SSL3_TRANS_FLAGS_SEND));
+					memset(&trans->dsw_ef_buf, 0, sizeof(SSL3_BUFFER));
+					}
+				tqn = tqn->next;
+				s->s3->outstanding_write_records--;
+
+				ssl3_release_buffer(trans->s, &trans->buf,
+					!!(trans->flags & SSL3_TRANS_FLAGS_SEND));
+				ssl3_release_transmission_skt(trans);
+				break;
+				}
+			else
                                return(i);
                         }
                 else /* i > 0 */
@@ -696,3 +714,13 @@ int ssl3_asynch_check_write_socket_trans(SSL *s)
 		return 0;
 	}
 }
+
+void ssl3_set_conn_status(SSL *s, int status)
+	{
+	s->conn_status=status;
+	}
+
+int ssl3_get_conn_status(SSL *s)
+	{
+	return s->conn_status;
+	}

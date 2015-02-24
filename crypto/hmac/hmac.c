@@ -95,27 +95,32 @@ struct hmac_ctx_asynch_st
 	};
 
 
-static int HMAC_CTX_ASYNCH_copy(struct hmac_ctx_asynch_st *dest, struct hmac_ctx_asynch_st *src)
+static int HMAC_CTX_ASYNCH_copy(struct hmac_ctx_asynch_st **dest, struct hmac_ctx_asynch_st *src)
 	{
-	if (src == NULL)
-		{
-		dest = NULL;
-		return 1;
-		}
-	dest = OPENSSL_malloc(sizeof(struct hmac_ctx_asynch_st));
-	if (dest == NULL)
+	if(dest == NULL)
 		{
 		EVPerr(EVP_F_HMAC_CTX_ASYNCH_COPY, EVP_R_MALLOC_FAILURE);
 		return 0;
 		}
-	memset(dest, '\0', sizeof(struct hmac_ctx_asynch_st));
-	dest->cb = src->cb;
-	dest->cb_data = src->cb_data;
-	dest->next_state = src->next_state;
-	dest->ctx_i_done = src->ctx_i_done;
-	dest->ctx_o_done = src->ctx_o_done;
-	dest->md = src->md;
-	dest->impl = src->impl;
+	if (src == NULL)
+		{
+		*dest = NULL;
+		return 1;
+		}
+	*dest = OPENSSL_malloc(sizeof(struct hmac_ctx_asynch_st));
+	if (*dest == NULL)
+		{
+		EVPerr(EVP_F_HMAC_CTX_ASYNCH_COPY, EVP_R_MALLOC_FAILURE);
+		return 0;
+		}
+	memset((*dest), '\0', sizeof(struct hmac_ctx_asynch_st));
+	(*dest)->cb = src->cb;
+	(*dest)->cb_data = src->cb_data;
+	(*dest)->next_state = src->next_state;
+	(*dest)->ctx_i_done = src->ctx_i_done;
+	(*dest)->ctx_o_done = src->ctx_o_done;
+	(*dest)->md = src->md;
+	(*dest)->impl = src->impl;
 	return 1;
 	}
 
@@ -508,7 +513,7 @@ int HMAC_CTX_copy(HMAC_CTX *dctx, HMAC_CTX *sctx)
 	memcpy(dctx->key, sctx->key, HMAC_MAX_MD_CBLOCK);
 	dctx->key_length = sctx->key_length;
 	dctx->md = sctx->md;
-	if (!HMAC_CTX_ASYNCH_copy(dctx->ctx_asynch, sctx->ctx_asynch))
+	if (!HMAC_CTX_ASYNCH_copy(&dctx->ctx_asynch, sctx->ctx_asynch))
 		goto err;
 	return 1;
 	err:

@@ -342,6 +342,7 @@ SSL *SSL_new(SSL_CTX *ctx)
 	s->trust = ctx->trust;
 #endif
 	s->quiet_shutdown=ctx->quiet_shutdown;
+	s->conn_status=1;
 	s->max_send_fragment = ctx->max_send_fragment;
 
 	CRYPTO_add(&ctx->references,1,CRYPTO_LOCK_SSL_CTX);

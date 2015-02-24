@@ -122,15 +122,30 @@ static int ssl_new(BIO *bi)
 static int ssl_free(BIO *a)
 	{
 	BIO_SSL *bs;
+	const BIO *bio;
 
 	if (a == NULL) return(0);
 	bs=(BIO_SSL *)a->ptr;
 	if (bs->ssl != NULL)
 		{
-		SSL_shutdown(bs->ssl);
 		if (bs->ssl->s3 && bs->ssl->s3->flags & SSL3_FLAGS_ASYNCH)
-			while (bs->ssl->s3->outstanding_write_records > 0)
+			{
+
+			bio = SSL_get_wbio(bs->ssl);
+			/* Loop around shutdown until
+			 * all inflight request are processed
+			 * or all outstanding requests are sent and no sock errors */
+			while(SSL_crypto_pending(bs->ssl) || 
+			      (bs->ssl->s3->outstanding_write_records > 0 && 
+			       BIO_should_write(bio)))
+				{
+				SSL_shutdown(bs->ssl);
 				sleep(1);
+		}
+			}
+		else
+			SSL_shutdown(bs->ssl);
+	
 		}
 	if (a->shutdown)
 		{
