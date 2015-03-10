@@ -394,6 +394,10 @@ typedef struct ssl3_buffer_st
 #define TLS1_FLAGS_TLS_PADDING_BUG		0x0008
 #define TLS1_FLAGS_SKIP_CERT_VERIFY		0x0010
 #define TLS1_FLAGS_KEEP_HANDSHAKE		0x0020
+/*
+ * Set when the handshake is ready to process peer's ChangeCipherSpec message.
+ * Cleared after the message has been processed.
+ */
 #define SSL3_FLAGS_CCS_OK			0x0080
  
 /* SSL3_FLAGS_SGC_RESTART_DONE is set when we
@@ -469,8 +473,11 @@ typedef struct ssl3_state_st
 	 * and freed and MD_CTX-es for all required digests are stored in
 	 * this array */
 	EVP_MD_CTX **handshake_dgst;
-	/* this is set whenerver we see a change_cipher_spec message
-	 * come in when we are not looking for one */
+	/*
+	 * Set whenever an expected ChangeCipherSpec message is processed.
+	 * Unset when the peer's Finished message is received.
+	 * Unexpected ChangeCipherSpec messages trigger a fatal alert.
+	 */
 	int change_cipher_spec;
 
 	int warn_alert;
@@ -578,6 +585,7 @@ typedef struct ssl3_state_st
 	SSL3_TRANSMISSION *tmp_transmission;
 	int outstanding_write_crypto; /* Amount in engine */
 	int outstanding_write_records; /* Amount waiting to be written */
+	int crypto_retry; /* When set requires poll of engine before more cy operations can be submitted */
 	/* Additionally, we hold a queue of reading records. */
 	int outstanding_read_crypto; /* Amount in engine */
 	int outstanding_read_records; /* Amount waiting to be written */

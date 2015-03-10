@@ -268,7 +268,7 @@ static __inline__ unsigned long long rdtsc(void)
 	cb_stats.req = cb_stats.resp = cb_stats.polling_retries = \
 	cb_stats.submission_retries = cb_stats.gen_errors = 0;
 
-int run=0;
+static volatile int run=0;
 
 static int mr=0;
 static int usertime=1;
@@ -4015,27 +4015,6 @@ static int do_multi(int multi)
                                         	continue;
 					results[alg][j]+=atof(sstrsep(&p,sep));
 					}
-				}
-			else if(!strncmp(buf,"+F2:",4))
-				{
-				int k;
-				double d;
-				
-				p=buf+4;
-				k=atoi(sstrsep(&p,sep));
-				sstrsep(&p,sep);
-
-				d=atof(sstrsep(&p,sep));
-				if(n)
-					rsa_results[k][0]=1/(1/rsa_results[k][0]+1/d);
-				else
-					rsa_results[k][0]=d;
-
-				d=atof(sstrsep(&p,sep));
-				if(n)
-					rsa_results[k][1]=1/(1/rsa_results[k][1]+1/d);
-				else
-					rsa_results[k][1]=d;
 				}
 			else if(!strncmp(buf,"+F2:",4))
 				{

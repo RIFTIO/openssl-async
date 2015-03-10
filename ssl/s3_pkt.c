@@ -183,6 +183,8 @@ int ssl3_read_n(SSL *s, int n, int max, int extend)
 	 * at once (as long as it fits into the buffer). */
 	if (SSL_version(s) == DTLS1_VERSION || SSL_version(s) == DTLS1_BAD_VER)
 		{
+		if (left == 0 && extend)
+			return 0;
 		if (left > 0 && n > left)
 			n = left;
 		}
@@ -424,9 +426,21 @@ again:
 		(s->packet_length < SSL3_RT_HEADER_LENGTH)) 
 		{
 		n=ssl3_read_n(s, SSL3_RT_HEADER_LENGTH, s->s3->rbuf.len, 0);
-		if (n <= 0) return(n); /* error or non-blocking */
+			if (n <= 0) 
+			{
+				/* In asynch mode, not all decrypted data is extracted, 
+ 				   need retry to get them out before leaving */
+				if (s->s3->flags & SSL3_FLAGS_ASYNCH && s->s3->outstanding_read_records)
+				{
+					BIO *bio;
+					bio = SSL_get_rbio(s);
+					BIO_clear_retry_flags(bio);
+					BIO_set_retry_read(bio);
+					return -1;
+				}
+				return(n); /* error or non-blocking */
+			}
 		s->rstate=SSL_ST_READ_BODY;
-
 		p=s->packet;
 
 		/* Pull apart the header into the SSL3_RECORD */
@@ -1009,7 +1023,7 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
 			goto post_enc;
 			}
 		}
-
+	s->s3->crypto_retry = 0;
 	if (	(sess == NULL) ||
 		(s->enc_write_ctx == NULL) ||
 		(EVP_MD_CTX_md(s->write_hash) == NULL))
@@ -1271,7 +1285,6 @@ post_mac:
 		wr->length += eivlen;
 		}
 
-	/* ssl3_enc can only have an error on read */
 	if (trans)
 	    {
 	    trans->post = 0;
@@ -1290,7 +1303,12 @@ post_mac:
 	    }
 
 		encstate = s->method->ssl3_enc->enc(s,1,trans);
-		if (0 == encstate){
+
+    if (!trans && encstate < 1)
+        goto err;
+
+    if (0 == encstate)
+        {
 			/* Cleanup transmission pool entry here as we had an error*/
 			ssl3_remove_last_transmission(s, SSL_WRITING);
 			CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
@@ -1319,6 +1337,7 @@ post_mac:
 				}
 			}
 			}
+        s->s3->crypto_retry = 1;
 			CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
 			return -1;
  		}

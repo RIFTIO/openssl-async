@@ -68,7 +68,6 @@
 #ifdef OPENSSL_FIPS
 #include <openssl/fips.h>
 #endif
-#include "constant_time_locl.h"
 #include "evp_locl.h"
 
 #ifdef OPENSSL_FIPS
@@ -986,21 +985,21 @@ int EVP_DecryptFinal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 
 int _evp_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 	{
-	unsigned int i, b;
-        unsigned char pad, padding_good;
+	int i,n;
+	unsigned int b;
 	*outl=0;
 
 	if (ctx->cipher->flags & EVP_CIPH_FLAG_CUSTOM_CIPHER)
 		{
-		int ret = M_do_cipher(ctx, out, NULL, 0);
-		if (ret < 0)
+		i = M_do_cipher(ctx, out, NULL, 0);
+		if (i < 0)
 			return 0;
 		else
-			*outl = ret;
+			*outl = i;
 		return 1;
 		}
 
-	b=(unsigned int)(ctx->cipher->block_size);
+	b=ctx->cipher->block_size;
 	if (ctx->flags & EVP_CIPH_NO_PADDING)
 		{
 		if(ctx->buf_len)
@@ -1019,34 +1018,33 @@ int _evp_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 			return(0);
 			}
 		OPENSSL_assert(b <= sizeof ctx->final);
-		pad=ctx->final[b-1];
-
-		padding_good = (unsigned char)(~constant_time_is_zero_8(pad));
-		padding_good &= constant_time_ge_8(b, pad);
-
-                for (i = 1; i < b; ++i)
-				{
-			unsigned char is_pad_index = constant_time_lt_8(i, pad);
-			unsigned char pad_byte_good = constant_time_eq_8(ctx->final[b-i-1], pad);
-			padding_good &= constant_time_select_8(is_pad_index, pad_byte_good, 0xff);
-			}
 
 		/*
-		 * At least 1 byte is always padding, so we always write b - 1
-		 * bytes to avoid a timing leak. The caller is required to have |b|
-		 * bytes space in |out| by the API contract.
+		 * The following assumes that the ciphertext has been authenticated.
+		 * Otherwise it provides a padding oracle.
 		 */
-		for (i = 0; i < b - 1; ++i)
-			out[i] = ctx->final[i] & padding_good;
-		/* Safe cast: for a good padding, EVP_MAX_IV_LENGTH >= b >= pad */
-		*outl = padding_good & ((unsigned char)(b - pad));
-		return padding_good & 1;
+		n=ctx->final[b-1];
+		if (n == 0 || n > (int)b)
+			{
+			EVPerr(EVP_F_EVP_DECRYPTFINAL_EX,EVP_R_BAD_DECRYPT);
+			return(0);
+		}
+		for (i=0; i<n; i++)
+		{
+			if (ctx->final[--b] != n)
+				{
+				EVPerr(EVP_F_EVP_DECRYPTFINAL_EX,EVP_R_BAD_DECRYPT);
+				return(0);
+				}
+		}
+		n=ctx->cipher->block_size-n;
+		for (i=0; i<n; i++)
+			out[i]=ctx->final[i];
+		*outl=n;
 		}
 	else
-		{
 		*outl=0;
-		return 1;
-		}
+	return(1);
 	}
 
 static int _evp_DecryptFinal_post(unsigned char *out, unsigned int outl,
@@ -1113,36 +1111,34 @@ static int _evp_DecryptFinal_post(unsigned char *out, unsigned int outl,
 	{
 	if (status > 0)
 		{
-		unsigned int i,b;
-		unsigned char pad, padding_good;
-
-		b=(unsigned int) actx->ctx->cipher->block_size;
-		pad=out[b-1];
-
-		padding_good = (unsigned char)(~constant_time_is_zero_8(pad));
-		padding_good &= constant_time_ge_8(b, pad);
-
-		for (i = 1; i < b; ++i)
+        int b=actx->ctx->cipher->block_size;
+        int n=out[b-1];
+        if (n == 0 || n > (int)b)
 					{
-			unsigned char is_pad_index = constant_time_lt_8(i, pad);	
-			unsigned char pad_byte_good = constant_time_eq_8(out[b-i-1], pad);
-			padding_good &= constant_time_select_8(is_pad_index, pad_byte_good, 0xff);
-					}
-
-		/*
-		 * At least 1 byte is always padding, so we always write b - 1
-		 * bytes to avoid a timing leak. The caller is required to have |b|
-		 * bytes space in |out| by the API contract.
-		 */
-		for (i = 0; i < b - 1; ++i)
-			out[i] = out[i] & padding_good;
-
-		/* Safe cast: for a good padding, EVP_MAX_IV_LENGTH >= b >= pad */
-		outl = padding_good & ((unsigned char)(b - pad));
+           EVPerr(EVP_F__EVP_DECRYPTFINAL_POST,EVP_R_BAD_DECRYPT);
+           status = 0;
 				}
 	else
 				{
-		outl = 0;
+           int i;
+           for (i=0; i<n; i++)
+               {
+               if (out[--b] != n)
+                   {
+                   EVPerr(EVP_F__EVP_DECRYPTFINAL_POST,EVP_R_BAD_DECRYPT);
+                   status = 0;
+                   break;
+                   }
+               }
+            if (status > 0)
+                {
+                n=actx->ctx->cipher->block_size-n;
+                for (i=0; i<n; i++)
+                   actx->out[i]=out[i];
+                outl=n;
+               }
+            out = actx->out;
+            }
 		}
 	return _evp_EncryptDecrypt_post(out, outl, actx, status);
 	}

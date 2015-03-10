@@ -612,7 +612,8 @@ int ssl3_enc_inner(SSL *s, int send, SSL3_TRANSMISSION *trans, int post)
             }
 		else
 			{
-				EVP_Cipher(ds,rec->data,rec->input,(unsigned int) l);
+                if(EVP_Cipher(ds,rec->data,rec->input,(unsigned int) l)< 1)
+                    return -1;
 			}
 
 post:

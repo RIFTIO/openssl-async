@@ -386,13 +386,7 @@ SSL *SSL_new(SSL_CTX *ctx)
 	return(s);
 err:
 	if (s != NULL)
-		{
-		if (s->cert != NULL)
-			ssl_cert_free(s->cert);
-		if (s->ctx != NULL)
-			SSL_CTX_free(s->ctx); /* decrement reference count */
-		OPENSSL_free(s);
-		}
+		SSL_free(s);
 	SSLerr(SSL_F_SSL_NEW,ERR_R_MALLOC_FAILURE);
 	return(NULL);
 	}
@@ -1113,19 +1107,6 @@ long SSL_ctrl(SSL *s,int cmd,long larg,void *parg)
 		l=s->max_cert_list;
 		s->max_cert_list=larg;
 		return(l);
-	case SSL_CTRL_SET_MTU:
-#ifndef OPENSSL_NO_DTLS1
-		if (larg < (long)dtls1_min_mtu())
-			return 0;
-#endif
-
-		if (SSL_version(s) == DTLS1_VERSION ||
-		    SSL_version(s) == DTLS1_BAD_VER)
-			{
-			s->d1->mtu = larg;
-			return larg;
-			}
-		return 0;
 	case SSL_CTRL_SET_MAX_SEND_FRAGMENT:
 		if (larg < 512 || larg > SSL3_RT_MAX_PLAIN_LENGTH)
 			return 0;
@@ -1557,6 +1538,7 @@ STACK_OF(SSL_CIPHER) *ssl_bytes_to_cipher_list(SSL *s,unsigned char *p,int num,
 					ssl3_send_alert(s,SSL3_AL_FATAL,SSL_AD_INAPPROPRIATE_FALLBACK);
 				goto err;
 				}
+			p += n;
 			continue;
 			}
 
@@ -2162,7 +2144,7 @@ void ssl_set_cert_masks(CERT *c, const SSL_CIPHER *cipher)
 	
 
 #ifdef CIPHER_DEBUG
-	printf("rt=%d rte=%d dht=%d ecdht=%d re=%d ree=%d rs=%d ds=%d dhr=%d dhd=%d\n",
+	fprintf(stderr,"rt=%d rte=%d dht=%d ecdht=%d re=%d ree=%d rs=%d ds=%d dhr=%d dhd=%d\n",
 	        rsa_tmp,rsa_tmp_export,dh_tmp,have_ecdh_tmp,
 		rsa_enc,rsa_enc_export,rsa_sign,dsa_sign,dh_rsa,dh_dsa);
 #endif
@@ -2618,7 +2600,9 @@ int SSL_get_error(const SSL *s,int i)
 			}
 		else if (s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH)
 			{
-			if (s->s3->outstanding_read_crypto)
+			if (s->s3->crypto_retry)
+				return(SSL_ERROR_WAIT_ASYNCH_WRITE);
+			else if (s->s3->outstanding_read_crypto)
 				return(SSL_ERROR_WAIT_ASYNCH_READ);
 			else if (s->s3->outstanding_read_records)
 				return(SSL_ERROR_WANT_READ);
@@ -2644,7 +2628,9 @@ int SSL_get_error(const SSL *s,int i)
 				return(SSL_ERROR_WANT_ACCEPT);
 			else if (s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH)
 				{
-				if (s->s3->outstanding_write_crypto)
+				if (s->s3->crypto_retry)
+					return(SSL_ERROR_WAIT_ASYNCH_WRITE);
+				else if (s->s3->outstanding_write_crypto)
 					return(SSL_ERROR_WAIT_ASYNCH_WRITE);
 				else if (s->s3->outstanding_write_records)
 					return(SSL_ERROR_WANT_WRITE);
@@ -2656,7 +2642,9 @@ int SSL_get_error(const SSL *s,int i)
 			}
 		else if (s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH)
 			{
-			if (s->s3->outstanding_write_crypto)
+			if (s->s3->crypto_retry)
+				return(SSL_ERROR_WAIT_ASYNCH_WRITE);
+			else if (s->s3->outstanding_write_crypto)
 				return(SSL_ERROR_WAIT_ASYNCH_WRITE);
 			else if (s->s3->outstanding_write_records)
 				return(SSL_ERROR_WANT_WRITE);
@@ -2679,7 +2667,9 @@ int SSL_get_error(const SSL *s,int i)
 	   over SSL_ERROR_WANT_WRITE and the same for reads. */ 
 	if ((i < 0) && (s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH))
 		{
-		if (s->s3->outstanding_write_crypto)
+		if (s->s3->crypto_retry)
+			return(SSL_ERROR_WAIT_ASYNCH_WRITE);
+		else if (s->s3->outstanding_write_crypto)
 			return(SSL_ERROR_WAIT_ASYNCH_WRITE);
 		else if (s->s3->outstanding_write_records)
 			return(SSL_ERROR_WANT_WRITE);
@@ -3130,6 +3120,27 @@ SSL_CTX *SSL_set_SSL_CTX(SSL *ssl, SSL_CTX* ctx)
 			}
 		ssl_cert_free(ocert);
 		}
+
+	/*
+	 * Program invariant: |sid_ctx| has fixed size (SSL_MAX_SID_CTX_LENGTH),
+	 * so setter APIs must prevent invalid lengths from entering the system.
+	 */
+	OPENSSL_assert(ssl->sid_ctx_length <= sizeof(ssl->sid_ctx));
+
+	/*
+	 * If the session ID context matches that of the parent SSL_CTX,
+	 * inherit it from the new SSL_CTX as well. If however the context does
+	 * not match (i.e., it was set per-ssl with SSL_set_session_id_context),
+	 * leave it unchanged.
+	 */
+	if ((ssl->ctx != NULL) &&
+		(ssl->sid_ctx_length == ssl->ctx->sid_ctx_length) &&
+		(memcmp(ssl->sid_ctx, ssl->ctx->sid_ctx, ssl->sid_ctx_length) == 0))
+		{
+		ssl->sid_ctx_length = ctx->sid_ctx_length;
+		memcpy(&ssl->sid_ctx, &ctx->sid_ctx, sizeof(ssl->sid_ctx));
+		}
+
 	CRYPTO_add(&ctx->references,1,CRYPTO_LOCK_SSL_CTX);
 	if (ssl->ctx != NULL)
 		SSL_CTX_free(ssl->ctx); /* decrement reference count */

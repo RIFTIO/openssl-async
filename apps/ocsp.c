@@ -628,6 +628,7 @@ int MAIN(int argc, char **argv)
 		BIO_printf (bio_err, "-resp_key_id       identify reponse by signing certificate key ID\n");
 		BIO_printf (bio_err, "-nrequest n        number of requests to accept (default unlimited)\n");
 		BIO_printf (bio_err, "-<dgst alg>     use specified digest in the request\n");
+		BIO_printf (bio_err, "-timeout n           timeout connection to OCSP responder after n seconds\n");
 		goto end;
 		}
 
@@ -1398,16 +1399,7 @@ OCSP_RESPONSE *process_responder(BIO *err, OCSP_REQUEST *req,
 	if (use_ssl == 1)
 		{
 		BIO *sbio;
-#if !defined(OPENSSL_NO_SSL2) && !defined(OPENSSL_NO_SSL3)
 		ctx = SSL_CTX_new(SSLv23_client_method());
-#elif !defined(OPENSSL_NO_SSL3)
-		ctx = SSL_CTX_new(SSLv3_client_method());
-#elif !defined(OPENSSL_NO_SSL2)
-		ctx = SSL_CTX_new(SSLv2_client_method());
-#else
-		BIO_printf(err, "SSL is disabled\n");
-			goto end;
-#endif
 		if (ctx == NULL)
 			{
 			BIO_printf(err, "Error creating SSL context.\n");

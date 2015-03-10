@@ -60,11 +60,9 @@
    that handle _GNU_SOURCE and other similar macros.  Defining it later
    is simply too late, because those headers are protected from re-
    inclusion.  */
-#ifdef __linux
 # ifndef _GNU_SOURCE
 #  define _GNU_SOURCE	/* make sure dladdr is declared */
 # endif
-#endif
 
 #include <stdio.h>
 #include "cryptlib.h"
