@@ -1423,8 +1423,8 @@ post_enc:
 			i = ssl3_write_pending2(s, wb);
                         if(i > 0) /* successfully sent all data to socket */
                         {
-				s->s3->outstanding_write_records--;
 				(void)BIO_flush(s->wbio);
+				s->s3->outstanding_write_records--;
 			BIO_clear_retry_flags(s->wbio);
 			BIO_set_flags(s->wbio, f);
 			}

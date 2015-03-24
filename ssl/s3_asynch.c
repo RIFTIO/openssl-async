@@ -614,12 +614,12 @@ int ssl3_asynch_send_skt_queued_data(SSL *s)
                         wb->offset+=i;
                         s->rwstate=SSL_NOTHING;
                         tqn = tqn->next; /* Next trans to send */
-			s->s3->outstanding_write_records--;  
  
 			ssl3_release_buffer(trans->s, &trans->buf,
                                 !!(trans->flags & SSL3_TRANS_FLAGS_SEND));
                         ssl3_release_transmission_skt(trans);
 			(void)BIO_flush(s->wbio);
+			s->s3->outstanding_write_records--;
 			BIO_clear_retry_flags(s->wbio);
                         break; /* break for() */
 			}
