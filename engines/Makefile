@@ -137,7 +137,7 @@ errors:
 			-nostatic -staticloader -write e_$$l.c; \
 	done
 	(cd ccgost; $(MAKE) PERL=$(PERL) errors)
-        (cd qat_engine; $(MAKE) PERL=$(PERL) errors)
+	(cd qat_engine; $(MAKE) PERL=$(PERL) errors)
 
 tests:
 
