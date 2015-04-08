@@ -68,7 +68,7 @@
 # include "cpa_cy_drbg.h"
 
 # include "qat_sym_common.h"
-# include "qat_digests.h"
+//# include "qat_digests.h"
 # include "qat_ciphers.h"
 
 # define QAT_RETRY_BACKOFF_MODULO_DIVISOR 8
