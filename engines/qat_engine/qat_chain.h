@@ -71,4 +71,5 @@ int qat_aes_cbc_hmac_sha1_cipher_sync(EVP_CIPHER_CTX *ctx,
 int qat_aes_cbc_hmac_sha1_cleanup_sync(EVP_CIPHER_CTX *ctx);
 int qat_aes_cbc_hmac_sha1_ctrl_sync(EVP_CIPHER_CTX *ctx, int type, int arg,
                                      void *ptr);
+EVP_CIPHER qat_aes_128_cbc_hmac_sha1, qat_aes_256_cbc_hmac_sha1;
 #endif                          // QAT_CHAIN_H
