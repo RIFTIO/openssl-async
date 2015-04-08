@@ -251,6 +251,7 @@ static const char rnd_seed[] =
 static int rnd_fake = 0;
 #endif
 
+ENGINE* engine = NULL;
 #ifdef SIGALRM
 # if defined(__STDC__) || defined(sgi) || defined(_AIX)
 #  define SIGRETTYPE void
@@ -349,6 +350,9 @@ int MAIN(int argc, char **argv)
     int mret = 1;
     long count = 0, save_count = 0;
     int i, j, k;
+#ifndef OPENSSL_NO_ENGINE
+    char *engine_id = NULL;
+#endif
 #if !defined(OPENSSL_NO_RSA) || !defined(OPENSSL_NO_DSA)
     long rsa_count;
 #endif
@@ -721,7 +725,13 @@ int MAIN(int argc, char **argv)
                 BIO_printf(bio_err, "no engine given\n");
                 goto end;
             }
-            setup_engine(bio_err, *argv, 0);
+            /*
+             * In a forked execution, the engine needs to be
+             * initialised by each child process, not by the
+             * parent. So store the name here and run
+             * setup_engine() later on.
+             */
+            engine_id = *argv;
             /*
              * j will be increased again further down.  We just don't want
              * speed to confuse an engine with an algorithm, especially when
@@ -1203,6 +1213,14 @@ int MAIN(int argc, char **argv)
 #ifndef NO_FORK
     if (multi && do_multi(multi))
         goto show_res;
+#endif
+#ifndef OPENSSL_NO_ENGINE
+    /*
+     * Now that we are after the fork, each child can init the engine.
+     */
+    if (engine_id != NULL)
+        engine = ENGINE_by_id(engine_id);
+    engine = setup_engine(bio_err, engine_id, 0);
 #endif
 
     if (j == 0) {

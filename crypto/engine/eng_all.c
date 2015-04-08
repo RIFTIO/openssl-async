@@ -103,6 +103,9 @@ void ENGINE_load_builtin_engines(void)
 #  ifndef OPENSSL_NO_HW_PADLOCK
     ENGINE_load_padlock();
 #  endif
+#  ifndef OPENSSL_NO_HW_QAT     
+    ENGINE_load_qat();
+#  endif
 # endif
 # ifndef OPENSSL_NO_GOST
     ENGINE_load_gost();
@@ -114,6 +117,9 @@ void ENGINE_load_builtin_engines(void)
     ENGINE_load_capi();
 # endif
     ENGINE_load_dasync();
+#endif
+#ifndef OPENSSL_NO_HW_QAT 
+    return;
 #endif
     ENGINE_register_all_complete();
 }

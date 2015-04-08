@@ -378,7 +378,11 @@ struct evp_cipher_st {
 # define         EVP_CIPH_FLAG_CUSTOM_CIPHER     0x100000
 # define         EVP_CIPH_FLAG_AEAD_CIPHER       0x200000
 # define         EVP_CIPH_FLAG_TLS1_1_MULTIBLOCK 0x400000
-
+/* Signal to an engine that the next call to do_cipher can ignore the
+ * context IV.  This could give a performance boost for the engine if
+ * it doesn't have to queue packects in sequence.  Is for example used
+ * with TLS 1.1 and up when in CBC mode. */
+# define		 EVP_CIPH_CTX_FLAG_CAN_IGNORE_IV	0x1000000
 /*
  * Cipher context flag to indicate we can handle wrap mode: if allowed in
  * older applications it could overflow buffers.
