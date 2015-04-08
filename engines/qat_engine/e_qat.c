@@ -109,6 +109,7 @@
 //# include "qat_prf.h"
 
 /* OpenSSL Includes */
+#include <openssl/err.h>
 
 /* QAT includes */
 #ifdef USE_QAT_MEM
