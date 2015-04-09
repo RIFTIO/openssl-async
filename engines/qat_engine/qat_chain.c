@@ -966,7 +966,7 @@ int qat_aes_cbc_hmac_sha1_cipher_sync(EVP_CIPHER_CTX *ctx, unsigned char *out,
                             &(evp_ctx->srcBufferList),
                             &(evp_ctx->dstBufferList),
                             &(evp_ctx->session_data->verifyDigest))) !=
-         CPA_STATUS_SUCCESS)) {
+         CPA_STATUS_SUCCESS) {
         // || ((rc = waitForOpToComplete(&opDone)) != 0)) {
         if (!isZeroCopy()) {
             qaeCryptoMemFree(evp_ctx->srcFlatBuffer[1].pData);

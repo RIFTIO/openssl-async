@@ -723,7 +723,7 @@ static int qat_do_cipher_synch(EVP_CIPHER_CTX *ctx, unsigned char *out,
                             &OpData,
                             &srcBufferList,
                             &dstBufferList,
-                            CPA_FALSE)) != CPA_STATUS_SUCCESS)) {
+                            CPA_FALSE)) != CPA_STATUS_SUCCESS) {
        // ||
        // ((rc = waitForOpToComplete(&opDone)) != 0)) {
        // if (sts != CPA_STATUS_SUCCESS) {
