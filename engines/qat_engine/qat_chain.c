@@ -987,7 +987,7 @@ int qat_aes_cbc_hmac_sha1_cipher_sync(EVP_CIPHER_CTX *ctx, unsigned char *out,
         ASYNC_pause_job();
         if(!getEnableExternalPolling())
             poll_instance();
-    } while(!opDone->flag);
+    } while(!opDone.flag);
 
     if (ctx->encrypt)
         retVal = 1;

@@ -762,7 +762,7 @@ static int qat_do_cipher_synch(EVP_CIPHER_CTX *ctx, unsigned char *out,
         ASYNC_pause_job();
         if(!getEnableExternalPolling())
             poll_instances();
-    } while(!opDone->flag);
+    } while(!opDone.flag);
      
     cleanupOpDone(&opDone);
 
