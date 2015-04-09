@@ -77,6 +77,7 @@
 #include <openssl/err.h>
 #include <openssl/sha.h>
 #include <openssl/tls1.h>
+#include <openssl/async.h>
 #include <string.h>
 
 #ifdef OPENSSL_ENABLE_QAT_CIPHERS_SYNCH
@@ -717,19 +718,21 @@ static int qat_do_cipher_synch(EVP_CIPHER_CTX *ctx, unsigned char *out,
 
     initOpDone(&opDone);
 
-    if (((sts = myPerformOp(qat_context->instanceHandle,
+    if ((sts = myPerformOp(qat_context->instanceHandle,
                             &opDone,
                             &OpData,
                             &srcBufferList,
                             &dstBufferList,
-                            CPA_FALSE)) != CPA_STATUS_SUCCESS) ||
-        ((rc = waitForOpToComplete(&opDone)) != 0)) {
-        if (sts != CPA_STATUS_SUCCESS) {
+                            CPA_FALSE)) != CPA_STATUS_SUCCESS)) {
+       // ||
+       // ((rc = waitForOpToComplete(&opDone)) != 0)) {
+       // if (sts != CPA_STATUS_SUCCESS) {
             WARN("[%s] --- cpaCySymPerformOp failed sts=%d.\n", __func__,
                  sts);
-        } else {
-            WARN("[%s] --- cpaCySymPerformOp timed out.\n", __func__);
-        }
+        //}
+        //else {
+        //    WARN("[%s] --- cpaCySymPerformOp timed out.\n", __func__);
+        //}
         if (!isZeroCopy()) {
             if (NID_rc4 != cipherType) // RC4 is an inplace operation
             {
@@ -754,6 +757,13 @@ static int qat_do_cipher_synch(EVP_CIPHER_CTX *ctx, unsigned char *out,
         cleanupOpDone(&opDone);
         return 0;
     }
+
+    do {
+        ASYNC_pause_job();
+        if(!getEnableExternalPolling())
+            poll_instances();
+    } while(!opDone->flag);
+     
     cleanupOpDone(&opDone);
 
     /*

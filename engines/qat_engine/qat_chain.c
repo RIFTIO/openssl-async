@@ -76,6 +76,7 @@
 #include <openssl/err.h>
 #include <openssl/sha.h>
 #include <openssl/tls1.h>
+#include <openssl/async.h>
 #include <string.h>
 
 /* Qat cipher AES128-SHA1 function structure declaration */
@@ -959,27 +960,34 @@ int qat_aes_cbc_hmac_sha1_cipher_sync(EVP_CIPHER_CTX *ctx, unsigned char *out,
             evp_ctx->session_data, &(evp_ctx->srcBufferList),
             &(evp_ctx->dstBufferList));
 
-    if (((sts = myPerformOp(evp_ctx->instanceHandle,
+    if ((sts = myPerformOp(evp_ctx->instanceHandle,
                             &opDone,
                             &(evp_ctx->OpData),
                             &(evp_ctx->srcBufferList),
                             &(evp_ctx->dstBufferList),
                             &(evp_ctx->session_data->verifyDigest))) !=
-         CPA_STATUS_SUCCESS) || ((rc = waitForOpToComplete(&opDone)) != 0)) {
+         CPA_STATUS_SUCCESS)) {
+        // || ((rc = waitForOpToComplete(&opDone)) != 0)) {
         if (!isZeroCopy()) {
             qaeCryptoMemFree(evp_ctx->srcFlatBuffer[1].pData);
             evp_ctx->srcFlatBuffer[1].pData = NULL;
             evp_ctx->dstFlatBuffer[1].pData = NULL;
         }
         cleanupOpDone(&opDone);
-        if (sts != CPA_STATUS_SUCCESS) {
+        //if (sts != CPA_STATUS_SUCCESS) {
             WARN("[%s] --- cpaCySymPerformOp failed sts=%d.\n", __func__,
                  sts);
-        } else {
-            WARN("[%s] --- cpaCySymPerformOp timed out.\n", __func__);
-        }
+        //} else {
+        //    WARN("[%s] --- cpaCySymPerformOp timed out.\n", __func__);
+        //}
         return 0;
     }
+
+    do {
+        ASYNC_pause_job();
+        if(!getEnableExternalPolling())
+            poll_instance();
+    } while(!opDone->flag);
 
     if (ctx->encrypt)
         retVal = 1;

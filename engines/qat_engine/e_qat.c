@@ -1164,10 +1164,10 @@ static int bind_qat(ENGINE *e, const char *id)
     //    goto end;
     //}
 
-    //if (!ENGINE_set_ciphers(e, qat_ciphers_synch)) {
-    //    WARN("ENGINE_set_ciphers failed\n");
-    //    goto end;
-    //}
+    if (!ENGINE_set_ciphers(e, qat_ciphers_synch)) {
+        WARN("ENGINE_set_ciphers failed\n");
+        goto end;
+    }
 
     //if (!ENGINE_set_digests(e, qat_digests_synch)) {
     //    WARN("ENGINE_set_digests failed\n");
