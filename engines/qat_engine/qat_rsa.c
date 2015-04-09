@@ -59,6 +59,7 @@
 #define __USE_GNU
 
 #include <openssl/rsa.h>
+#include <openssl/async.h>
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -396,14 +397,18 @@ qat_rsa_decrypt(CpaCyRsaDecryptOpData * dec_op_data,
         sts = cpaCyRsaDecrypt(instanceHandle, qat_rsaCallbackFn, &op_done,
                               dec_op_data, output_buf);
         if (sts == CPA_STATUS_RETRY) {
-            usleep(ulPollInterval +
-                   (qatPerformOpRetries % QAT_RETRY_BACKOFF_MODULO_DIVISOR));
-            qatPerformOpRetries++;
+            //usleep(ulPollInterval +
+            //       (qatPerformOpRetries % QAT_RETRY_BACKOFF_MODULO_DIVISOR));
+            //qatPerformOpRetries++;
+            ASYNC_pause_job();
+            if(!getEnableExternalPolling())
+                poll_instances();
         }
     }
-    while (sts == CPA_STATUS_RETRY && ((qatPerformOpRetries < iMsgRetry)
-                                       || (iMsgRetry ==
-                                           QAT_INFINITE_MAX_NUM_RETRIES)));
+    while (sts == CPA_STATUS_RETRY);
+    //while (sts == CPA_STATUS_RETRY && ((qatPerformOpRetries < iMsgRetry)
+    //                                   || (iMsgRetry ==
+    //                                       QAT_INFINITE_MAX_NUM_RETRIES)));
 
     if (sts != CPA_STATUS_SUCCESS) {
         WARN("[%s] --- cpaCyRsaDecrypt failed, sts=%d.\n", __func__, sts);
@@ -412,12 +417,18 @@ qat_rsa_decrypt(CpaCyRsaDecryptOpData * dec_op_data,
         return 0;
     }
 
-    rc = waitForOpToComplete(&op_done);
-    cleanupOpDone(&op_done);
-    if (rc) {
-        WARN("[%s] --- cpaCyRsaDecrypt timed out.\n", __func__);
-        return 0;
+    //rc = waitForOpToComplete(&op_done);
+    do {
+        ASYNC_pause_job();
+        if(!getEnableExternalPolling())
+            poll_instances();
     }
+    while (!op_done->flag);
+    cleanupOpDone(&op_done);
+    //if (rc) {
+    //    WARN("[%s] --- cpaCyRsaDecrypt timed out.\n", __func__);
+    //    return 0;
+    //}
     return 1;
 }
 
@@ -580,14 +591,18 @@ qat_rsa_encrypt(CpaCyRsaEncryptOpData * enc_op_data,
         sts = cpaCyRsaEncrypt(instanceHandle, qat_rsaCallbackFn, &op_done,
                               enc_op_data, output_buf);
         if (sts == CPA_STATUS_RETRY) {
-            usleep(ulPollInterval +
-                   (qatPerformOpRetries % QAT_RETRY_BACKOFF_MODULO_DIVISOR));
-            qatPerformOpRetries++;
+            //usleep(ulPollInterval +
+            //       (qatPerformOpRetries % QAT_RETRY_BACKOFF_MODULO_DIVISOR));
+            //qatPerformOpRetries++;
+            ASYNC_pause_job();
+            if(!getEnableExternalPolling())
+                poll_instances();
         }
     }
-    while (sts == CPA_STATUS_RETRY && ((qatPerformOpRetries < iMsgRetry)
-                                       || (iMsgRetry ==
-                                           QAT_INFINITE_MAX_NUM_RETRIES)));
+    while (sts == CPA_STATUS_RETRY );
+    //while (sts == CPA_STATUS_RETRY && ((qatPerformOpRetries < iMsgRetry)
+    //                                   || (iMsgRetry ==
+    //                                       QAT_INFINITE_MAX_NUM_RETRIES)));
 
     if (sts != CPA_STATUS_SUCCESS) {
         WARN("[%s] --- cpaCyRsaEncrypt failed, sts=%d.\n", __func__, sts);
@@ -596,12 +611,18 @@ qat_rsa_encrypt(CpaCyRsaEncryptOpData * enc_op_data,
         return 0;
     }
 
-    rc = waitForOpToComplete(&op_done);
-    cleanupOpDone(&op_done);
-    if (rc) {
-        WARN("[%s] --- cpaCyRsaEncrypt timed out.\n", __func__);
-        return 0;
+    //rc = waitForOpToComplete(&op_done);
+    do {
+        ASYNC_pause_job();
+        if(!getEnableExternalPolling())
+            poll_instances();
     }
+    while (!op_done->flag);
+    cleanupOpDone(&op_done);
+//    if (rc) {
+//        WARN("[%s] --- cpaCyRsaEncrypt timed out.\n", __func__);
+//        return 0;
+//    }
     return 1;
 }
 

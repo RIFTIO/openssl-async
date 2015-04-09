@@ -110,6 +110,7 @@
 
 /* OpenSSL Includes */
 #include <openssl/err.h>
+#include <openssl/async.h>
 
 /* QAT includes */
 #ifdef USE_QAT_MEM
@@ -185,6 +186,11 @@ void setQatMsgRetryCount(int iRetryCount)
 int getQatMsgRetryCount()
 {
     return qat_msg_retry_count;
+}
+
+int getEnableExternalPolling()
+{
+    return enable_external_polling;
 }
 
 /*
@@ -492,7 +498,7 @@ void qat_crypto_callbackFn(void *callbackTag, CpaStatus status,
     }
     opDone->flag = 1;
     opDone->verifyResult = verifyResult;
-    sts = pthread_cond_signal(&(opDone->cond));
+    //sts = pthread_cond_signal(&(opDone->cond));
     if (sts != 0) {
         fprintf(stderr,
                 "pthread_cond_signal failed - sts = %d. Continuing anyway.\n",
@@ -543,15 +549,18 @@ CpaStatus myPerformOp(const CpaInstanceHandle instanceHandle,
                                    pOpData,
                                    pSrcBuffer, pDstBuffer, pVerifyResult);
         if (status == CPA_STATUS_RETRY) {
-            qatPerformOpRetries++;
-            pthread_yield();
-            if (uiRetry >= iMsgRetry
-                && iMsgRetry != QAT_INFINITE_MAX_NUM_RETRIES) {
-                break;
-            }
-            uiRetry++;
-            usleep(ulPollInterval +
-                   (uiRetry % QAT_RETRY_BACKOFF_MODULO_DIVISOR));
+            //qatPerformOpRetries++;
+            //pthread_yield();
+            //if (uiRetry >= iMsgRetry
+            //    && iMsgRetry != QAT_INFINITE_MAX_NUM_RETRIES) {
+            //    break;
+            //}
+            //uiRetry++;
+            //usleep(ulPollInterval +
+            //       (uiRetry % QAT_RETRY_BACKOFF_MODULO_DIVISOR));
+            ASYNC_pause_job();
+            if (!getEnableExternalPolling())
+                poll_instances();
         }
     }
     while (status == CPA_STATUS_RETRY);
@@ -658,7 +667,7 @@ static void *sendPoll_ns(void *ih)
 
 #endif
 
-static CpaStatus poll_instances(void)
+CpaStatus poll_instances(void)
 {
     unsigned int poll_loop;
     CpaStatus internal_status = CPA_STATUS_SUCCESS,
@@ -753,11 +762,11 @@ static int qat_engine_init(ENGINE *e)
     DEBUG("[%s] ---- Engine Initing\n\n", __func__);
     CRYPTO_INIT_QAT_LOG();
 
-    if (0 == enable_external_polling &&
-        (err = pthread_key_create(&qatInstanceForThread, NULL)) != 0) {
-        fprintf(stderr, "pthread_key_create: %s\n", strerror(err));
-        return 0;
-    }
+    //if (0 == enable_external_polling &&
+    //    (err = pthread_key_create(&qatInstanceForThread, NULL)) != 0) {
+    //    fprintf(stderr, "pthread_key_create: %s\n", strerror(err));
+    //    return 0;
+    //}
 
     checkLimitStatus =
         checkLimitDevAccessValue((int *)&limitDevAccess,
@@ -800,16 +809,16 @@ static int qat_engine_init(ENGINE *e)
     }
 
     /* Allocate memory for the polling threads */
-    if (0 == enable_external_polling) {
-        icp_polling_threads =
-            (pthread_t *) OPENSSL_malloc(((int)numInstances) *
-                                         sizeof(pthread_t));
-        if (NULL == icp_polling_threads) {
-            WARN("OPENSSL_malloc() failed for icp_polling_threads.\n");
-            qat_engine_finish(e);
-            return 0;
-        }
-    }
+    //if (0 == enable_external_polling) {
+    //    icp_polling_threads =
+    //        (pthread_t *) OPENSSL_malloc(((int)numInstances) *
+    //                                     sizeof(pthread_t));
+    //    if (NULL == icp_polling_threads) {
+    //        WARN("OPENSSL_malloc() failed for icp_polling_threads.\n");
+    //        qat_engine_finish(e);
+    //        return 0;
+    //    }
+    //}
 
     /* Get the Cy instances */
     status = cpaCyGetInstances(numInstances, qatInstanceHandles);
@@ -838,49 +847,49 @@ static int qat_engine_init(ENGINE *e)
             return 0;
         }
 
-        if (0 == enable_external_polling) {
+        //if (0 == enable_external_polling) {
             /* Create the polling threads */
-#ifdef USE_PTHREAD_YIELD
-            pthread_create(&icp_polling_threads[instNum], NULL, sendPoll,
-                           qatInstanceHandles[instNum]);
-#else
-            pthread_create(&icp_polling_threads[instNum], NULL, sendPoll_ns,
-                           qatInstanceHandles[instNum]);
-#endif
-#ifdef QAT_POLL_CORE_AFFINITY
-            {
-                int coreID = 0;
-                int sts = 1;
-                cpu_set_t cpuset;
-
-                CPU_ZERO(&cpuset);
-
-                CPU_SET(coreID, &cpuset);
-
-                sts =
-                    pthread_setaffinity_np(icp_polling_threads[instNum],
-                                           sizeof(cpu_set_t), &cpuset);
-                if (sts != 0) {
-                    DEBUG("pthread_setaffinity_np error, status = %d \n",
-                          sts);
-                    qat_engine_finish(e);
-                    return 0;
-                }
-                sts =
-                    pthread_getaffinity_np(icp_polling_threads[instNum],
-                                           sizeof(cpu_set_t), &cpuset);
-                if (sts != 0) {
-                    DEBUG("pthread_getaffinity_np error, status = %d \n",
-                          sts);
-                    qat_engine_finish(e);
-                    return 0;
-                }
-
-                if (CPU_ISSET(coreID, &cpuset))
-                    DEBUG("Polling thread assigned on CPU core %d\n", coreID);
-            }
-#endif
-        }
+//#ifdef USE_PTHREAD_YIELD
+//            pthread_create(&icp_polling_threads[instNum], NULL, sendPoll,
+//                           qatInstanceHandles[instNum]);
+//#else
+//            pthread_create(&icp_polling_threads[instNum], NULL, sendPoll_ns,
+//                           qatInstanceHandles[instNum]);
+//#endif
+//#ifdef QAT_POLL_CORE_AFFINITY
+//            {
+//                int coreID = 0;
+//                int sts = 1;
+//                cpu_set_t cpuset;
+//
+//                CPU_ZERO(&cpuset);
+//
+//                CPU_SET(coreID, &cpuset);
+//
+//                sts =
+//                    pthread_setaffinity_np(icp_polling_threads[instNum],
+//                                           sizeof(cpu_set_t), &cpuset);
+//                if (sts != 0) {
+//                    DEBUG("pthread_setaffinity_np error, status = %d \n",
+//                          sts);
+//                    qat_engine_finish(e);
+//                    return 0;
+//                }
+//                sts =
+//                    pthread_getaffinity_np(icp_polling_threads[instNum],
+//                                           sizeof(cpu_set_t), &cpuset);
+//                if (sts != 0) {
+//                    DEBUG("pthread_getaffinity_np error, status = %d \n",
+//                          sts);
+//                    qat_engine_finish(e);
+//                    return 0;
+//                }
+//
+//                if (CPU_ISSET(coreID, &cpuset))
+//                    DEBUG("Polling thread assigned on CPU core %d\n", coreID);
+//            }
+//#endif
+//        }
     }
 
     //status = qat_rand_initialise();
@@ -1054,18 +1063,18 @@ static int qat_engine_finish(ENGINE *e)
             return 0;
         }
 
-        if (0 == enable_external_polling)
-            pthread_join(icp_polling_threads[i], NULL);
+        //if (0 == enable_external_polling)
+        //    pthread_join(icp_polling_threads[i], NULL);
 
     }
 
     if (qatInstanceHandles)
         OPENSSL_free(qatInstanceHandles);
 
-    if (0 == enable_external_polling) {
-        if (icp_polling_threads)
-            OPENSSL_free(icp_polling_threads);
-    }
+    //if (0 == enable_external_polling) {
+    //    if (icp_polling_threads)
+    //        OPENSSL_free(icp_polling_threads);
+    //}
 
     icp_sal_userStop();
 
@@ -1155,10 +1164,10 @@ static int bind_qat(ENGINE *e, const char *id)
     //    goto end;
     //}
 
-    if (!ENGINE_set_ciphers(e, qat_ciphers_synch)) {
-        WARN("ENGINE_set_ciphers failed\n");
-        goto end;
-    }
+    //if (!ENGINE_set_ciphers(e, qat_ciphers_synch)) {
+    //    WARN("ENGINE_set_ciphers failed\n");
+    //    goto end;
+    //}
 
     //if (!ENGINE_set_digests(e, qat_digests_synch)) {
     //    WARN("ENGINE_set_digests failed\n");

@@ -207,6 +207,7 @@ struct op_done_asynch {
 };
 
 CpaInstanceHandle get_next_inst(void);
+CpaStatus poll_instances(void);
 void initOpDone(struct op_done *opDone);
 void cleanupOpDone(struct op_done *opDone);
 int waitForOpToComplete(struct op_done *opDone);
@@ -221,4 +222,5 @@ CpaStatus myPerformOp(const CpaInstanceHandle instanceHandle,
 int isZeroCopy();
 useconds_t getQatPollInterval();
 int getQatMsgRetryCount();
+int getEnableExternalPolling();
 #endif                          // E_QAT_H
