@@ -269,9 +269,9 @@ CpaInstanceHandle get_next_inst(void)
 {
     CpaInstanceHandle instanceHandle;
 
-    if (1 == enable_external_polling ||
-        (instanceHandle = pthread_getspecific(qatInstanceForThread)) == NULL)
-    {
+    //if (1 == enable_external_polling ||
+    //    (instanceHandle = pthread_getspecific(qatInstanceForThread)) == NULL)
+    //{
 
         if (qatInstanceHandles) {
             instanceHandle = qatInstanceHandles[currInst];
@@ -279,7 +279,7 @@ CpaInstanceHandle get_next_inst(void)
         } else {
             instanceHandle = NULL;
         }
-    }
+    //}
     return instanceHandle;
 }
 

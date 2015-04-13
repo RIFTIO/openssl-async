@@ -60,7 +60,7 @@ QATLIBSRC_SHARED = e_qat.c\
 	 qat_asym_common.c\
 	 qat_sym_common.c\
 	 e_qat_err.c\
-	 qat_parseconf.c\
+	 qat_parseconf.c
 #	 qat_rand.c\
 #	 qat_prf.c
 

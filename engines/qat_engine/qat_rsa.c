@@ -60,6 +60,7 @@
 
 #include <openssl/rsa.h>
 #include <openssl/async.h>
+#include <openssl/err.h>
 #include <string.h>
 #include <pthread.h>
 #include <unistd.h>
@@ -102,7 +103,7 @@ static RSA_METHOD qat_rsa_method = {
     NULL,                       /* bn_mod_exp */
     NULL,                       /* init */
     NULL,                       /* finish */
-    RSA_FLAG_ASYNCH,            /* flags */
+    0,                          /* flags */
     NULL,                       /* app_data */
     NULL,                       /* rsa_sign */
     NULL,                       /* rsa_verify */
@@ -423,7 +424,7 @@ qat_rsa_decrypt(CpaCyRsaDecryptOpData * dec_op_data,
         if(!getEnableExternalPolling())
             poll_instances();
     }
-    while (!op_done->flag);
+    while (!op_done.flag);
     cleanupOpDone(&op_done);
     //if (rc) {
     //    WARN("[%s] --- cpaCyRsaDecrypt timed out.\n", __func__);
@@ -617,7 +618,7 @@ qat_rsa_encrypt(CpaCyRsaEncryptOpData * enc_op_data,
         if(!getEnableExternalPolling())
             poll_instances();
     }
-    while (!op_done->flag);
+    while (!op_done.flag);
     cleanupOpDone(&op_done);
 //    if (rc) {
 //        WARN("[%s] --- cpaCyRsaEncrypt timed out.\n", __func__);
