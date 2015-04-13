@@ -51,35 +51,21 @@ QATLIBSRC_SHARED = e_qat.c\
 	 qat_utils.c\
 	 qat_ciphers.c\
 	 qat_chain.c\
-#	 qat_digests.c\
 	 qat_rsa.c\
-#	 qat_dsa.c\
-#	 qat_dh.c\
-#         qat_ecdh.c\
-#         qat_ecdsa.c\
 	 qat_asym_common.c\
 	 qat_sym_common.c\
 	 e_qat_err.c\
 	 qat_parseconf.c
-#	 qat_rand.c\
-#	 qat_prf.c
 
 QATLIBOBJ_SHARED = e_qat.o \
 qat_utils.o \
 qat_ciphers.o \
 qat_chain.o \
-#qat_digests.o \
 qat_rsa.o \
-#qat_dsa.o \
-#qat_dh.o \
-#qat_ecdh.o \
-#qat_ecdsa.o \
 qat_asym_common.o \
 qat_sym_common.o \
 e_qat_err.o \
-qat_parseconf.o \
-#qat_rand.o \
-#qat_prf.o
+qat_parseconf.o 
 
 ifeq ($(CRYPTO_MEMORY_DRIVER),qat_mem)
 QATLIBSRC = $(QATLIBSRC_SHARED)  qae_mem_utils.c 
