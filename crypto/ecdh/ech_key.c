@@ -21,7 +21,7 @@
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -70,47 +70,50 @@
 #include "ech_locl.h"
 
 int ECDH_compute_key(void *out, size_t outlen, const EC_POINT *pub_key,
-	EC_KEY *eckey,
-	void *(*KDF)(const void *in, size_t inlen, void *out, size_t *outlen))
+                     EC_KEY *eckey,
+                     void *(*KDF) (const void *in, size_t inlen, void *out,
+                                   size_t *outlen))
 {
-	ECDH_DATA *ecdh = ecdh_check(eckey);
-	if (ecdh == NULL)
-		return 0;
-	return ecdh->meth->compute_key(out, outlen, pub_key, eckey, KDF);
+    ECDH_DATA *ecdh = ecdh_check(eckey);
+    if (ecdh == NULL)
+        return 0;
+    return ecdh->meth->compute_key(out, outlen, pub_key, eckey, KDF);
 }
 
 int ECDH_compute_key_asynch(void *out, size_t outlen, const EC_POINT *pub_key,
-	EC_KEY *eckey,
-	void *(*KDF)(const void *in, size_t inlen, void *out, size_t *outlen),
-	int (*cb)(unsigned char *res, size_t reslen,void *cb_data, int status),
-	void *cb_data)
-	{
-	ECDH_DATA *ecdh = ecdh_check(eckey);
-	if (ecdh == NULL)
-		return 0;
-	return ecdh->meth->compute_key_asynch(out, outlen, pub_key, eckey, KDF,
-						cb, cb_data);
-	}
-
+                            EC_KEY *eckey,
+                            void *(*KDF) (const void *in, size_t inlen,
+                                          void *out, size_t *outlen),
+                            int (*cb) (unsigned char *res, size_t reslen,
+                                       void *cb_data, int status),
+                            void *cb_data)
+{
+    ECDH_DATA *ecdh = ecdh_check(eckey);
+    if (ecdh == NULL)
+        return 0;
+    return ecdh->meth->compute_key_asynch(out, outlen, pub_key, eckey, KDF,
+                                          cb, cb_data);
+}
 
 int ECDH_generate_key(EC_KEY *eckey)
 {
-	ECDH_DATA *ecdh = ecdh_check(eckey);
-	if (ecdh == NULL)
-		return 0;
-	if ((ecdh->meth == NULL) || (ecdh->meth->generate_key == NULL))
-		return 0;
-	return ecdh->meth->generate_key(eckey);
+    ECDH_DATA *ecdh = ecdh_check(eckey);
+    if (ecdh == NULL)
+        return 0;
+    if ((ecdh->meth == NULL) || (ecdh->meth->generate_key == NULL))
+        return 0;
+    return ecdh->meth->generate_key(eckey);
 }
 
 int ECDH_generate_key_asynch(EC_KEY *eckey,
-							 int (*cb)(unsigned char *res, size_t reslen, void * cb_data, int status),
-							 void *cb_data)
+                             int (*cb) (unsigned char *res, size_t reslen,
+                                        void *cb_data, int status),
+                             void *cb_data)
 {
-	ECDH_DATA *ecdh = ecdh_check(eckey);
-	if (ecdh == NULL)
-		return 0;
-	if ((ecdh->meth == NULL) || (ecdh->meth->generate_key_asynch == NULL))
-		return 0;
-	return ecdh->meth->generate_key_asynch(eckey, cb, cb_data);
+    ECDH_DATA *ecdh = ecdh_check(eckey);
+    if (ecdh == NULL)
+        return 0;
+    if ((ecdh->meth == NULL) || (ecdh->meth->generate_key_asynch == NULL))
+        return 0;
+    return ecdh->meth->generate_key_asynch(eckey, cb, cb_data);
 }

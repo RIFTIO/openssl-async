@@ -136,7 +136,7 @@ Following options are supported by both by B<HMAC> and B<gost-mac>:
 =over 8
 
 =item B<key:string>
-	
+
 Specifies MAC key as alphnumeric string (use if key contain printable
 characters only). String length must conform to any restrictions of
 the MAC algorithm for example exactly 32 chars for gost-mac.

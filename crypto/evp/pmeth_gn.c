@@ -1,6 +1,7 @@
 /* pmeth_gn.c */
-/* Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
- * project 2006.
+/*
+ * Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL project
+ * 2006.
  */
 /* ====================================================================
  * Copyright (c) 2006 The OpenSSL Project.  All rights reserved.
@@ -10,7 +11,7 @@
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -66,221 +67,220 @@
 #include <openssl/prf.h>
 
 int EVP_PKEY_paramgen_init(EVP_PKEY_CTX *ctx)
-	{
-	int ret;
-	if (!ctx || !ctx->pmeth || !ctx->pmeth->paramgen)
-		{
-		EVPerr(EVP_F_EVP_PKEY_PARAMGEN_INIT,
-			EVP_R_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE);
-		return -2;
-		}
-	ctx->operation = EVP_PKEY_OP_PARAMGEN;
-	if (!ctx->pmeth->paramgen_init)
-		return 1;
-	ret = ctx->pmeth->paramgen_init(ctx);
-	if (ret <= 0)
-		ctx->operation = EVP_PKEY_OP_UNDEFINED;
-	return ret;
-	}
+{
+    int ret;
+    if (!ctx || !ctx->pmeth || !ctx->pmeth->paramgen) {
+        EVPerr(EVP_F_EVP_PKEY_PARAMGEN_INIT,
+               EVP_R_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE);
+        return -2;
+    }
+    ctx->operation = EVP_PKEY_OP_PARAMGEN;
+    if (!ctx->pmeth->paramgen_init)
+        return 1;
+    ret = ctx->pmeth->paramgen_init(ctx);
+    if (ret <= 0)
+        ctx->operation = EVP_PKEY_OP_UNDEFINED;
+    return ret;
+}
 
 int EVP_PKEY_paramgen(EVP_PKEY_CTX *ctx, EVP_PKEY **ppkey)
-	{
-	int ret;
-	if (!ctx || !ctx->pmeth || !ctx->pmeth->paramgen)
-		{
-		EVPerr(EVP_F_EVP_PKEY_PARAMGEN,
-			EVP_R_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE);
-		return -2;
-		}
+{
+    int ret;
+    if (!ctx || !ctx->pmeth || !ctx->pmeth->paramgen) {
+        EVPerr(EVP_F_EVP_PKEY_PARAMGEN,
+               EVP_R_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE);
+        return -2;
+    }
 
-	if (ctx->operation != EVP_PKEY_OP_PARAMGEN)
-		{
-		EVPerr(EVP_F_EVP_PKEY_PARAMGEN, EVP_R_OPERATON_NOT_INITIALIZED);
-		return -1;
-		}
+    if (ctx->operation != EVP_PKEY_OP_PARAMGEN) {
+        EVPerr(EVP_F_EVP_PKEY_PARAMGEN, EVP_R_OPERATON_NOT_INITIALIZED);
+        return -1;
+    }
 
-	if (!ppkey)
-		return -1;
+    if (!ppkey)
+        return -1;
 
-	if (!*ppkey)
-		*ppkey = EVP_PKEY_new();
+    if (!*ppkey)
+        *ppkey = EVP_PKEY_new();
 
-	ret = ctx->pmeth->paramgen(ctx, *ppkey);
-	if (ret <= 0)
-		{
-		EVP_PKEY_free(*ppkey);
-		*ppkey = NULL;
-		}
-	return ret;
-	}
+    ret = ctx->pmeth->paramgen(ctx, *ppkey);
+    if (ret <= 0) {
+        EVP_PKEY_free(*ppkey);
+        *ppkey = NULL;
+    }
+    return ret;
+}
 
 int EVP_PKEY_keygen_init(EVP_PKEY_CTX *ctx)
-	{
-	int ret;
-	if (!ctx || !ctx->pmeth || !ctx->pmeth->keygen)
-		{
-		EVPerr(EVP_F_EVP_PKEY_KEYGEN_INIT,
-			EVP_R_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE);
-		return -2;
-		}
-	ctx->operation = EVP_PKEY_OP_KEYGEN;
-	if (!ctx->pmeth->keygen_init)
-		return 1;
-	ret = ctx->pmeth->keygen_init(ctx);
-	if (ret <= 0)
-		ctx->operation = EVP_PKEY_OP_UNDEFINED;
-	return ret;
-	}
+{
+    int ret;
+    if (!ctx || !ctx->pmeth || !ctx->pmeth->keygen) {
+        EVPerr(EVP_F_EVP_PKEY_KEYGEN_INIT,
+               EVP_R_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE);
+        return -2;
+    }
+    ctx->operation = EVP_PKEY_OP_KEYGEN;
+    if (!ctx->pmeth->keygen_init)
+        return 1;
+    ret = ctx->pmeth->keygen_init(ctx);
+    if (ret <= 0)
+        ctx->operation = EVP_PKEY_OP_UNDEFINED;
+    return ret;
+}
 
 int EVP_PKEY_keygen(EVP_PKEY_CTX *ctx, EVP_PKEY **ppkey)
-	{
-	int ret;
+{
+    int ret;
 
-	if (!ctx || !ctx->pmeth || !ctx->pmeth->keygen)
-		{
-		EVPerr(EVP_F_EVP_PKEY_KEYGEN,
-			EVP_R_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE);
-		return -2;
-		}
-	if (ctx->operation != EVP_PKEY_OP_KEYGEN)
-		{
-		EVPerr(EVP_F_EVP_PKEY_KEYGEN, EVP_R_OPERATON_NOT_INITIALIZED);
-		return -1;
-		}
+    if (!ctx || !ctx->pmeth || !ctx->pmeth->keygen) {
+        EVPerr(EVP_F_EVP_PKEY_KEYGEN,
+               EVP_R_OPERATION_NOT_SUPPORTED_FOR_THIS_KEYTYPE);
+        return -2;
+    }
+    if (ctx->operation != EVP_PKEY_OP_KEYGEN) {
+        EVPerr(EVP_F_EVP_PKEY_KEYGEN, EVP_R_OPERATON_NOT_INITIALIZED);
+        return -1;
+    }
 
-	if (!ppkey)
-		return -1;
+    if (!ppkey)
+        return -1;
 
-	if (!*ppkey)
-		*ppkey = EVP_PKEY_new();
+    if (!*ppkey)
+        *ppkey = EVP_PKEY_new();
 
-	ret = ctx->pmeth->keygen(ctx, *ppkey);
-	if (ret <= 0)
-		{
-		EVP_PKEY_free(*ppkey);
-		*ppkey = NULL;
-		}
-	return ret;
-	}
+    ret = ctx->pmeth->keygen(ctx, *ppkey);
+    if (ret <= 0) {
+        EVP_PKEY_free(*ppkey);
+        *ppkey = NULL;
+    }
+    return ret;
+}
 
 void EVP_PKEY_CTX_set_cb(EVP_PKEY_CTX *ctx, EVP_PKEY_gen_cb *cb)
-	{
-	ctx->pkey_gencb = cb;
-	}
+{
+    ctx->pkey_gencb = cb;
+}
 
 EVP_PKEY_gen_cb *EVP_PKEY_CTX_get_cb(EVP_PKEY_CTX *ctx)
-	{
-	return ctx->pkey_gencb;
-	}
+{
+    return ctx->pkey_gencb;
+}
 
-/* "translation callback" to call EVP_PKEY_CTX callbacks using BN_GENCB
- * style callbacks.
+/*
+ * "translation callback" to call EVP_PKEY_CTX callbacks using BN_GENCB style
+ * callbacks.
  */
 
 static int trans_cb(int a, int b, BN_GENCB *gcb)
-	{
-	EVP_PKEY_CTX *ctx = gcb->arg;
-	ctx->keygen_info[0] = a;
-	ctx->keygen_info[1] = b;
-	return ctx->pkey_gencb(ctx);
-	}	
+{
+    EVP_PKEY_CTX *ctx = gcb->arg;
+    ctx->keygen_info[0] = a;
+    ctx->keygen_info[1] = b;
+    return ctx->pkey_gencb(ctx);
+}
 
 void evp_pkey_set_cb_translate(BN_GENCB *cb, EVP_PKEY_CTX *ctx)
-	{
-	BN_GENCB_set(cb, trans_cb, ctx)
-	}
+{
+    BN_GENCB_set(cb, trans_cb, ctx)
+}
 
 int EVP_PKEY_CTX_get_keygen_info(EVP_PKEY_CTX *ctx, int idx)
-	{
-	if (idx == -1)
-		return ctx->keygen_info_count; 
-	if (idx < 0 || idx > ctx->keygen_info_count)
-		return 0;
-	return ctx->keygen_info[idx];
-	}
+{
+    if (idx == -1)
+        return ctx->keygen_info_count;
+    if (idx < 0 || idx > ctx->keygen_info_count)
+        return 0;
+    return ctx->keygen_info[idx];
+}
 
 EVP_PKEY *EVP_PKEY_new_mac_key(int type, ENGINE *e,
-				const unsigned char *key, int keylen)
-	{
-	EVP_PKEY_CTX *mac_ctx = NULL;
-	EVP_PKEY *mac_key = NULL;
-	mac_ctx = EVP_PKEY_CTX_new_id(type, e);
-	if (!mac_ctx)
-		return NULL;
-	if (EVP_PKEY_keygen_init(mac_ctx) <= 0)
-		goto merr;
-	if (EVP_PKEY_CTX_ctrl(mac_ctx, -1, EVP_PKEY_OP_KEYGEN,
-				EVP_PKEY_CTRL_SET_MAC_KEY,
-				keylen, (void *)key) <= 0)
-		goto merr;
-	if (EVP_PKEY_keygen(mac_ctx, &mac_key) <= 0)
-		goto merr;
-	merr:
-	if (mac_ctx)
-		EVP_PKEY_CTX_free(mac_ctx);
-	return mac_key;
-	}
-
+                               const unsigned char *key, int keylen)
+{
+    EVP_PKEY_CTX *mac_ctx = NULL;
+    EVP_PKEY *mac_key = NULL;
+    mac_ctx = EVP_PKEY_CTX_new_id(type, e);
+    if (!mac_ctx)
+        return NULL;
+    if (EVP_PKEY_keygen_init(mac_ctx) <= 0)
+        goto merr;
+    if (EVP_PKEY_CTX_ctrl(mac_ctx, -1, EVP_PKEY_OP_KEYGEN,
+                          EVP_PKEY_CTRL_SET_MAC_KEY,
+                          keylen, (void *)key) <= 0)
+        goto merr;
+    if (EVP_PKEY_keygen(mac_ctx, &mac_key) <= 0)
+        goto merr;
+ merr:
+    if (mac_ctx)
+        EVP_PKEY_CTX_free(mac_ctx);
+    return mac_key;
+}
 
 int EVP_PKEY_derive_PRF(int type, ENGINE *e, const EVP_MD **md, int md_count,
-			const void *seed1, int seed1_len,
-			const void *seed2, int seed2_len,
-			const void *seed3, int seed3_len,
-			const void *seed4, int seed4_len,
-			const void *seed5, int seed5_len,
-			const unsigned char *sec, int slen,
-			unsigned char *out1,
-			size_t *olen, int version,
-			int (*cb)(unsigned char *res, size_t reslen, void *cb_data, int status),
-			void *cb_data)
-	{
-		EVP_PKEY_CTX *prf_ctx = NULL;
-		prf_ctx = EVP_PKEY_CTX_new_id(type, e);
-		int ret=-1;
-		if(!prf_ctx)
-			return ret;
-		
-		if(EVP_PKEY_derive_init(prf_ctx) <= 0)
-			goto perr;
-		
-		if(seed1 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
-				EVP_PKEY_CTRL_SET_PRF_SEED1, seed1_len, (void*)seed1) <= 0)
-			goto perr;
-		
-		if(seed2 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
-				EVP_PKEY_CTRL_SET_PRF_SEED2, seed2_len, (void *)seed2) <= 0)
-			goto perr;
-		
-		if(seed3 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
-				EVP_PKEY_CTRL_SET_PRF_SEED3, seed3_len, (void *)seed3) <= 0)
-			goto perr;
-		
-		if(seed4 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
-				EVP_PKEY_CTRL_SET_PRF_SEED4, seed4_len, (void *)seed4) <= 0)
-			goto perr;
-		
-		if(seed5 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
-				EVP_PKEY_CTRL_SET_PRF_SEED5, seed5_len, (void *)seed5) <= 0)
-			goto perr;
-
-		if(sec && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
-				EVP_PKEY_CTRL_SET_PRF_SECRET, slen, (void *)sec) <= 0)
-			goto perr;
-
-		if(md && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
-				EVP_PKEY_CTRL_SET_PRF_DIGEST, md_count, (void *)md) <= 0)
-			goto perr;
-
-		if(version > 0 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
-				EVP_PKEY_CTRL_SET_PRF_VERSION, version, NULL) <= 0)
-			goto perr;
-		if(cb)
-			return EVP_PKEY_derive_asynch(prf_ctx,out1, olen,cb, cb_data);
-		else
-			ret = EVP_PKEY_derive(prf_ctx, out1, olen);
-perr:
-        if (prf_ctx)
-                EVP_PKEY_CTX_free(prf_ctx);
+                        const void *seed1, int seed1_len,
+                        const void *seed2, int seed2_len,
+                        const void *seed3, int seed3_len,
+                        const void *seed4, int seed4_len,
+                        const void *seed5, int seed5_len,
+                        const unsigned char *sec, int slen,
+                        unsigned char *out1,
+                        size_t *olen, int version,
+                        int (*cb) (unsigned char *res, size_t reslen,
+                                   void *cb_data, int status), void *cb_data)
+{
+    EVP_PKEY_CTX *prf_ctx = NULL;
+    prf_ctx = EVP_PKEY_CTX_new_id(type, e);
+    int ret = -1;
+    if (!prf_ctx)
         return ret;
-	}
 
+    if (EVP_PKEY_derive_init(prf_ctx) <= 0)
+        goto perr;
+
+    if (seed1 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+                                   EVP_PKEY_CTRL_SET_PRF_SEED1, seed1_len,
+                                   (void *)seed1) <= 0)
+        goto perr;
+
+    if (seed2 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+                                   EVP_PKEY_CTRL_SET_PRF_SEED2, seed2_len,
+                                   (void *)seed2) <= 0)
+        goto perr;
+
+    if (seed3 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+                                   EVP_PKEY_CTRL_SET_PRF_SEED3, seed3_len,
+                                   (void *)seed3) <= 0)
+        goto perr;
+
+    if (seed4 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+                                   EVP_PKEY_CTRL_SET_PRF_SEED4, seed4_len,
+                                   (void *)seed4) <= 0)
+        goto perr;
+
+    if (seed5 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+                                   EVP_PKEY_CTRL_SET_PRF_SEED5, seed5_len,
+                                   (void *)seed5) <= 0)
+        goto perr;
+
+    if (sec && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+                                 EVP_PKEY_CTRL_SET_PRF_SECRET, slen,
+                                 (void *)sec) <= 0)
+        goto perr;
+
+    if (md && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+                                EVP_PKEY_CTRL_SET_PRF_DIGEST, md_count,
+                                (void *)md) <= 0)
+        goto perr;
+
+    if (version > 0 && EVP_PKEY_CTX_ctrl(prf_ctx, -1, EVP_PKEY_OP_DERIVE,
+                                         EVP_PKEY_CTRL_SET_PRF_VERSION,
+                                         version, NULL) <= 0)
+        goto perr;
+    if (cb)
+        return EVP_PKEY_derive_asynch(prf_ctx, out1, olen, cb, cb_data);
+    else
+        ret = EVP_PKEY_derive(prf_ctx, out1, olen);
+ perr:
+    if (prf_ctx)
+        EVP_PKEY_CTX_free(prf_ctx);
+    return ret;
+}

@@ -6,7 +6,6 @@ DIR=		apps
 TOP=		..
 CC=		cc
 INCLUDES=	-I$(TOP) -I../include $(KRB5_INCLUDES)
-
 CFLAG=		-g -static
 MAKEFILE=	Makefile
 PERL=		perl
@@ -29,6 +28,7 @@ DLIBCRYPTO=../libcrypto.a
 DLIBSSL=../libssl.a
 LIBCRYPTO=-L.. -lcrypto
 LIBSSL=-L.. -lssl
+
 LIBPTHREAD=-lpthread
 LIBRARIES=$(LIBSSL) $(LIBKRB5) $(LIBCRYPTO) $(LIBPTHREAD) 
 

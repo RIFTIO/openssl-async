@@ -1,6 +1,7 @@
 /* crypto/ui/ui.h -*- mode:C; c-file-style: "eay" -*- */
-/* Written by Richard Levitte (richard@levitte.org) for the OpenSSL
- * project 2013.
+/*
+ * Written by Richard Levitte (richard@levitte.org) for the OpenSSL project
+ * 2013.
  */
 /* ====================================================================
  * Copyright (c) 2001 The OpenSSL Project.  All rights reserved.
@@ -10,7 +11,7 @@
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -57,12 +58,12 @@
  */
 
 #ifndef HEADER_POOL_H
-#define HEADER_POOL_H
+# define HEADER_POOL_H
 
-#ifndef OPENSSL_NO_DEPRECATED
-#include <openssl/crypto.h>
-#endif
-#include <openssl/ossl_typ.h>
+# ifndef OPENSSL_NO_DEPRECATED
+#  include <openssl/crypto.h>
+# endif
+# include <openssl/ossl_typ.h>
 
 #ifdef  __cplusplus
 extern "C" {
@@ -71,45 +72,45 @@ extern "C" {
 typedef struct openssl_pool_st POOL;
 
 POOL *POOL_init(size_t itemsize, size_t maxitems);
-void POOL_free(POOL *p);
-void *POOL_alloc_item(POOL *p);
-void POOL_free_item(POOL *p, void *item);
+void POOL_free(POOL * p);
+void *POOL_alloc_item(POOL * p);
+void POOL_free_item(POOL * p, void *item);
 
-#define IMPLEMENT_TYPED_POOL(t,n)				\
-	static POOL *pool_##t = NULL;				\
-	static t* alloc_##t()					\
-		{						\
-		if (pool_##t == NULL)				\
-			{					\
-			pool_##t = POOL_init(sizeof(t),(n));	\
-			}					\
-		return (t *)POOL_alloc_item(pool_##t);		\
-		}						\
-	static void free_##t(t *item)				\
-		{						\
-		POOL_free_item(pool_##t, item);			\
-		}
+# define IMPLEMENT_TYPED_POOL(t,n)                               \
+        static POOL *pool_##t = NULL;                           \
+        static t* alloc_##t()                                   \
+                {                                               \
+                if (pool_##t == NULL)                           \
+                        {                                       \
+                        pool_##t = POOL_init(sizeof(t),(n));    \
+                        }                                       \
+                return (t *)POOL_alloc_item(pool_##t);          \
+                }                                               \
+        static void free_##t(t *item)                           \
+                {                                               \
+                POOL_free_item(pool_##t, item);                 \
+                }
 
-#define IMPLEMENT_TYPED_LOCKED_POOL(t,n,l)			\
-	static POOL *pool_##t = NULL;				\
-	static t* alloc_##t()					\
-		{						\
-		t *ret = NULL;					\
-		CRYPTO_w_lock(l);				\
-		if (pool_##t == NULL)				\
-			{					\
-			pool_##t = POOL_init(sizeof(t),(n));	\
-			}					\
-		ret = (t *)POOL_alloc_item(pool_##t);		\
-		CRYPTO_w_unlock(l);				\
-		return ret;					\
-		}						\
-	static void free_##t(t *item)				\
-		{						\
-		CRYPTO_w_lock(l);				\
-		POOL_free_item(pool_##t, item);			\
-		CRYPTO_w_unlock(l);				\
-		}
+# define IMPLEMENT_TYPED_LOCKED_POOL(t,n,l)                      \
+        static POOL *pool_##t = NULL;                           \
+        static t* alloc_##t()                                   \
+                {                                               \
+                t *ret = NULL;                                  \
+                CRYPTO_w_lock(l);                               \
+                if (pool_##t == NULL)                           \
+                        {                                       \
+                        pool_##t = POOL_init(sizeof(t),(n));    \
+                        }                                       \
+                ret = (t *)POOL_alloc_item(pool_##t);           \
+                CRYPTO_w_unlock(l);                             \
+                return ret;                                     \
+                }                                               \
+        static void free_##t(t *item)                           \
+                {                                               \
+                CRYPTO_w_lock(l);                               \
+                POOL_free_item(pool_##t, item);                 \
+                CRYPTO_w_unlock(l);                             \
+                }
 
 #ifdef  __cplusplus
 }

@@ -1,6 +1,7 @@
 /* crypto/ui/ui.h -*- mode:C; c-file-style: "eay" -*- */
-/* Written by Richard Levitte (richard@levitte.org) for the OpenSSL
- * project 2013.
+/*
+ * Written by Richard Levitte (richard@levitte.org) for the OpenSSL project
+ * 2013.
  */
 /* ====================================================================
  * Copyright (c) 2001 The OpenSSL Project.  All rights reserved.
@@ -10,7 +11,7 @@
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -57,7 +58,7 @@
  */
 
 #ifndef HEADER_POOL_LOCL_H
-#define HEADER_POOL_LOCL_H
+# define HEADER_POOL_LOCL_H
 
 #ifdef  __cplusplus
 extern "C" {
@@ -65,23 +66,25 @@ extern "C" {
 
 typedef struct openssl_pool_item_st POOL_ITEM;
 
-struct openssl_pool_item_st
-	{
-	POOL_ITEM *next_free;
-	/* The item itself is allocated in the same block,
-	 * and follows this structure */
-	};
+struct openssl_pool_item_st {
+    POOL_ITEM *next_free;
+    /*
+     * The item itself is allocated in the same block, and follows this
+     * structure
+     */
+};
 
-struct openssl_pool_st
-	{
-	size_t brk;		/* works like the break of a heap */
-	size_t items;		/* the max amount of items */
-	size_t itemsize;	/* The size of each item */
-	size_t totalsize;	/* The total size of the pool, with items */
-	POOL_ITEM *next_free;	/* pointer to the next that was freed */
-	/* The pool itself is allocated in the same block,
-	 * and follows this structure */
-	};
+struct openssl_pool_st {
+    size_t brk;                 /* works like the break of a heap */
+    size_t items;               /* the max amount of items */
+    size_t itemsize;            /* The size of each item */
+    size_t totalsize;           /* The total size of the pool, with items */
+    POOL_ITEM *next_free;       /* pointer to the next that was freed */
+    /*
+     * The pool itself is allocated in the same block, and follows this
+     * structure
+     */
+};
 
 #ifdef  __cplusplus
 }

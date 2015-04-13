@@ -1,6 +1,7 @@
 /* crypto/ui/ui.h -*- mode:C; c-file-style: "eay" -*- */
-/* Written by Richard Levitte (richard@levitte.org) for the OpenSSL
- * project 2013.
+/*
+ * Written by Richard Levitte (richard@levitte.org) for the OpenSSL project
+ * 2013.
  */
 /* ====================================================================
  * Copyright (c) 2001 The OpenSSL Project.  All rights reserved.
@@ -10,7 +11,7 @@
  * are met:
  *
  * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer. 
+ *    notice, this list of conditions and the following disclaimer.
  *
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in
@@ -61,61 +62,56 @@
 #include <stdlib.h>
 
 POOL *POOL_init(size_t itemsize, size_t maxitems)
-	{
-	/* Make sure the itemsize is a multiple of 8 */
-	size_t allocated_itemsize =
-		sizeof(POOL_ITEM) + ((itemsize + 7) / 8) * 8;
-	size_t poolsize =
-		sizeof(POOL) + allocated_itemsize * maxitems;
-	POOL *p = (POOL *)OPENSSL_malloc(poolsize);
-	if (p)
-		{
-		p->brk = 0;
-		p->items = maxitems;
-		p->itemsize = allocated_itemsize;
-		p->totalsize = poolsize;
-		p->next_free = NULL;
-		}
-	return p;
-	}
-void POOL_free(POOL *p)
-	{
-	OPENSSL_free(p);
-	}
+{
+    /* Make sure the itemsize is a multiple of 8 */
+    size_t allocated_itemsize = sizeof(POOL_ITEM) + ((itemsize + 7) / 8) * 8;
+    size_t poolsize = sizeof(POOL) + allocated_itemsize * maxitems;
+    POOL *p = (POOL *) OPENSSL_malloc(poolsize);
+    if (p) {
+        p->brk = 0;
+        p->items = maxitems;
+        p->itemsize = allocated_itemsize;
+        p->totalsize = poolsize;
+        p->next_free = NULL;
+    }
+    return p;
+}
 
-void *POOL_alloc_item(POOL *p)
-	{
-	POOL_ITEM *pi = NULL;
-	if (!p) return NULL;
-	if (p->next_free)
-		{
-		pi = p->next_free;
-		p->next_free = p->next_free->next_free;
-		}
-	else if (p->brk < p->items)
-		{
-		pi = (void*)((char *)(p + 1)
-			+ p->itemsize * (p->brk++));
-		}
-	if (pi)
-		return pi + 1;	/* This returns the content, which comes
-				   directly after the POOL_ITEM structure */
-	return NULL;
-	}
-void POOL_free_item(POOL *p, void *item)
-	{
-	if (p && item)
-		{
-		/* adjust item so that it points to POOL_ITEM */
-		item = item - sizeof(POOL_ITEM);
-		/* check that the position is correct and within the pool */
-		ssize_t poolpos = item - (void *)p;
-		if (poolpos > 0 && poolpos < p->totalsize
-			&& ((poolpos - sizeof(POOL)) % p->itemsize) == 0)
-			{
-			POOL_ITEM *pi = item;
-			pi->next_free = p->next_free;
-			p->next_free = pi;
-			}
-		}
-	}
+void POOL_free(POOL * p)
+{
+    OPENSSL_free(p);
+}
+
+void *POOL_alloc_item(POOL * p)
+{
+    POOL_ITEM *pi = NULL;
+    if (!p)
+        return NULL;
+    if (p->next_free) {
+        pi = p->next_free;
+        p->next_free = p->next_free->next_free;
+    } else if (p->brk < p->items) {
+        pi = (void *)((char *)(p + 1)
+                      + p->itemsize * (p->brk++));
+    }
+    if (pi)
+        return pi + 1;          /* This returns the content, which comes
+                                 * directly after the POOL_ITEM structure */
+    return NULL;
+}
+
+void POOL_free_item(POOL * p, void *item)
+{
+    if (p && item) {
+        /* adjust item so that it points to POOL_ITEM */
+        item = item - sizeof(POOL_ITEM);
+        /* check that the position is correct and within the pool */
+        ssize_t poolpos = item - (void *)p;
+        if (poolpos > 0 && poolpos < p->totalsize
+            && ((poolpos - sizeof(POOL)) % p->itemsize) == 0) {
+            POOL_ITEM *pi = item;
+            pi->next_free = p->next_free;
+            p->next_free = pi;
+        }
+    }
+}
