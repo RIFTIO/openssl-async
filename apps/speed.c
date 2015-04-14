@@ -180,6 +180,8 @@
 
 #include <openssl/bn.h>
 
+#include <openssl/async.h>
+
 #ifndef HAVE_FORK
 # if defined(OPENSSL_SYS_VMS) || defined(OPENSSL_SYS_WINDOWS) || defined(OPENSSL_SYS_OS2) || defined(OPENSSL_SYS_NETWARE)
 #  define HAVE_FORK 0
@@ -2003,8 +2005,13 @@ int MAIN(int argc, char **argv)
             /* RSA_blinding_on(rsa_key[j],NULL); */
             Time_F(START);
             for (count = 0, run = 1; COND(rsa_c[j][0]); count++) {
-                ret = RSA_sign(NID_md5_sha1, buf, 36, buf2,
+                //ret = RSA_sign(NID_md5_sha1, buf, 36, buf2,
+                //               &rsa_num, rsa_key[j]);
+                ret = RSA_sign_async(NID_md5_sha1, buf, 36, buf2,
                                &rsa_num, rsa_key[j]);
+                if (ret == -1 && rsa_key[j]->job != NULL) {
+                    count--; /*Retry detected so need to resubmit*/
+                }
                 if (ret == 0) {
                     BIO_printf(bio_err, "RSA sign failure\n");
                     ERR_print_errors(bio_err);
@@ -2032,13 +2039,19 @@ int MAIN(int argc, char **argv)
                                rsa_c[j][1], rsa_bits[j], RSA_SECONDS);
             Time_F(START);
             for (count = 0, run = 1; COND(rsa_c[j][1]); count++) {
-                ret = RSA_verify(NID_md5_sha1, buf, 36, buf2,
+                //ret = RSA_verify(NID_md5_sha1, buf, 36, buf2,
+                //                 rsa_num, rsa_key[j]);
+                ret = RSA_verify_async(NID_md5_sha1, buf, 36, buf2,
                                  rsa_num, rsa_key[j]);
-                if (ret <= 0) {
-                    BIO_printf(bio_err, "RSA verify failure\n");
-                    ERR_print_errors(bio_err);
-                    count = 1;
-                    break;
+                if (ret == -1 && rsa_key[j]->job != NULL) {
+                    count--;
+                } else {
+                    if (ret <= 0) {
+                        BIO_printf(bio_err, "RSA verify failure\n");
+                        ERR_print_errors(bio_err);
+                        count = 1;
+                        break;
+                   }
                 }
             }
             d = Time_F(STOP);

@@ -67,6 +67,25 @@
 /* Size of an SSL signature: MD5+SHA1 */
 #define SSL_SIG_LENGTH  36
 
+struct rsa_async_args {
+    int type;
+    const unsigned char *m;
+    unsigned int m_len;
+    unsigned char *sigret;
+    unsigned int *siglen;
+    RSA *rsa;
+};
+
+static int rsa_sign_async_int(void *vargs)
+{
+    struct rsa_async_args *args;
+    args = (struct rsa_async_args *)vargs;
+    if (!args)
+        return 0;
+    return RSA_sign(args->type, args->m, args->m_len,
+                    args->sigret, args->siglen, args->rsa); 
+}
+
 int RSA_sign(int type, const unsigned char *m, unsigned int m_len,
              unsigned char *sigret, unsigned int *siglen, RSA *rsa)
 {
@@ -136,6 +155,41 @@ int RSA_sign(int type, const unsigned char *m, unsigned int m_len,
         OPENSSL_free(tmps);
     }
     return (ret);
+}
+
+int RSA_sign_async(int type, const unsigned char *m, unsigned int m_len,
+             unsigned char *sigret, unsigned int *siglen, RSA *rsa)
+{
+    int ret;
+    struct rsa_async_args args;
+
+    args.type = type;
+    args.m = m;
+    args.m_len = m_len;
+    args.sigret = sigret;
+    args.siglen = siglen;
+    args.rsa = rsa;
+
+    if(!ASYNC_in_job()) {
+        switch(ASYNC_start_job(&rsa->job, &ret, rsa_sign_async_internal, &args,
+            sizeof(struct rsa_async_args))) {
+        case ASYNC_ERR:
+            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
+            return -1;
+        case ASYNC_PAUSE:
+            return -1;
+        case ASYNC_FINISH:
+            rsa->job = NULL;
+            return ret;
+        default:
+            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
+            /* Shouldn't happen */
+            return -1;
+        }
+    } else {
+        return RSA_sign(type, m, m_len, sigret, siglen, rsa);
+    }
+
 }
 
 /*
@@ -275,6 +329,16 @@ int int_rsa_verify(int dtype, const unsigned char *m,
     return (ret);
 }
 
+static int rsa_verify_async_int(void *vargs)
+{
+    struct rsa_async_args *args;
+    args = (struct rsa_async_args *)vargs;
+    if (!args)
+        return 0;
+    return RSA_verify(args->type, args->m, args->m_len,
+                    args->sigret, args->siglen, args->rsa); 
+}
+
 int RSA_verify(int dtype, const unsigned char *m, unsigned int m_len,
                const unsigned char *sigbuf, unsigned int siglen, RSA *rsa)
 {
@@ -284,4 +348,39 @@ int RSA_verify(int dtype, const unsigned char *m, unsigned int m_len,
     }
 
     return int_rsa_verify(dtype, m, m_len, NULL, NULL, sigbuf, siglen, rsa);
+}
+
+int RSA_verify_async(int type, const unsigned char *m, unsigned int m_len,
+             unsigned char *sigret, unsigned int *siglen, RSA *rsa)
+{
+    int ret;
+    struct rsa_async_args args;
+
+    args.type = type;
+    args.m = m;
+    args.m_len = m_len;
+    args.sigret = sigret;
+    args.siglen = siglen;
+    args.rsa = rsa;
+
+    if(!ASYNC_in_job()) {
+        switch(ASYNC_start_job(&rsa->job, &ret, rsa_sign_async_internal, &args,
+            sizeof(struct rsa_async_args))) {
+        case ASYNC_ERR:
+            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
+            return -1;
+        case ASYNC_PAUSE:
+            return -1;
+        case ASYNC_FINISH:
+            rsa->job = NULL;
+            return ret;
+        default:
+            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
+            /* Shouldn't happen */
+            return -1;
+        }
+    } else {
+        return RSA_verify(type, m, m_len, sigret, siglen, rsa);
+    }
+
 }

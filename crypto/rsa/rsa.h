@@ -64,6 +64,7 @@
 # include <openssl/bio.h>
 # include <openssl/crypto.h>
 # include <openssl/ossl_typ.h>
+# include <openssl/async.h>
 # ifdef OPENSSL_USE_DEPRECATED
 #  include <openssl/bn.h>
 # endif
@@ -160,6 +161,7 @@ struct rsa_st {
     char *bignum_data;
     BN_BLINDING *blinding;
     BN_BLINDING *mt_blinding;
+    ASYNC_JOB *job;
 };
 
 # ifndef OPENSSL_RSA_MAX_MODULUS_BITS
@@ -417,7 +419,11 @@ RSA *d2i_Netscape_RSA(RSA **a, const unsigned char **pp, long length,
  */
 int RSA_sign(int type, const unsigned char *m, unsigned int m_length,
              unsigned char *sigret, unsigned int *siglen, RSA *rsa);
+int RSA_sign_async(int type, const unsigned char *m, unsigned int m_length,
+             unsigned char *sigret, unsigned int *siglen, RSA *rsa);
 int RSA_verify(int type, const unsigned char *m, unsigned int m_length,
+               const unsigned char *sigbuf, unsigned int siglen, RSA *rsa);
+int RSA_verify_async(int type, const unsigned char *m, unsigned int m_length,
                const unsigned char *sigbuf, unsigned int siglen, RSA *rsa);
 
 /*
