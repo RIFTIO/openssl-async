@@ -357,7 +357,7 @@ int RSA_verify_async(int dtype, const unsigned char *m, unsigned int m_len,
     int ret;
     struct rsa_async_args args;
 
-    args.type = type;
+    args.type = dtype;
     args.m = m;
     args.m_len = m_len;
     args.verbuf = sigbuf;
@@ -382,5 +382,5 @@ int RSA_verify_async(int dtype, const unsigned char *m, unsigned int m_len,
         }
     }
  
-    return RSA_verify(type, m, m_len, sigbuf, siglen, rsa);
+    return RSA_verify(dtype, m, m_len, sigbuf, siglen, rsa);
 }
