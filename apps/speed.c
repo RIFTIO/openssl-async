@@ -2028,20 +2028,22 @@ int MAIN(int argc, char **argv)
     
 #ifndef OPENSSL_NO_RSA
     for (j = 0; j < RSA_NUM; j++) {
-        int ret, k, batch=8;
+        int ret, k, batch=16;
         int requestno = 0;
-        const unsigned char *p;
+        const unsigned char *prsa_data;
         RSA *rsa_inflights[batch];
-        p = rsa_data[j];
+        prsa_data = rsa_data[j];
         memset(rsa_inflights, 0, sizeof(rsa_inflights));
         for (k = 0; k < batch; k++) {
-            rsa_inflights[k] = d2i_RSAPrivateKey(NULL, &p, rsa_data_length[j]);
+            rsa_inflights[k] = d2i_RSAPrivateKey(NULL, &prsa_data, rsa_data_length[j]);
+            prsa_data = rsa_data[j];
         }
 
         if (!rsa_doit[j])
             continue;
         do {
             ret = RSA_sign_async(NID_md5_sha1, buf, 36, buf2, &rsa_num, rsa_key[j]);
+            poll_engine(engine, batch);
         } while (ret == -1 && rsa_key[j]->job != NULL);
         if (ret == 0) {
             BIO_printf(bio_err,
@@ -2083,7 +2085,8 @@ int MAIN(int argc, char **argv)
         }
 
         do {
-            ret = RSA_verify(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
+            ret = RSA_verify_async(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
+            poll_engine(engine, batch);
         } while (ret == -1 && rsa_key[j]->job != NULL);
         if (ret <= 0) {
             BIO_printf(bio_err,
@@ -2091,15 +2094,18 @@ int MAIN(int argc, char **argv)
             ERR_print_errors(bio_err);
             rsa_doit[j] = 0;
         } else {
+            requestno=0;
             pkey_print_message("public", "rsa",
                                rsa_c[j][1], rsa_bits[j], RSA_SECONDS);
             Time_F(START);
             for (count = 0, run = 1; COND(rsa_c[j][1]); count++) {
+                requestno++;
+                requestno=requestno%batch;
                 //ret = RSA_verify(NID_md5_sha1, buf, 36, buf2,
                 //                 rsa_num, rsa_key[j]);
                 ret = RSA_verify_async(NID_md5_sha1, buf, 36, buf2,
-                                 rsa_num, rsa_key[j]);
-                if (ret == -1 && rsa_key[j]->job != NULL) {
+                                 rsa_num, rsa_inflights[requestno]);
+                if (ret == -1 && rsa_inflights[requestno]->job != NULL) {
                     count--;
                 } else {
                     if (ret <= 0) {
@@ -2109,7 +2115,10 @@ int MAIN(int argc, char **argv)
                         break;
                    }
                 }
+                if (requestno == 0)
+                    poll_engine(engine, batch);
             }
+            poll_engine(engine, batch);
             d = Time_F(STOP);
             BIO_printf(bio_err,
                        mr ? "+R2:%ld:%d:%.2f\n"
