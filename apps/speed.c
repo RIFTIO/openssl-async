@@ -254,6 +254,19 @@ static int rnd_fake = 0;
 #endif
 
 ENGINE* engine = NULL;
+
+static int poll_engine(ENGINE *eng, unsigned int no_resp) 
+{
+    int poll_status = 0;
+    /* Poll for the responses */
+    if (!ENGINE_ctrl_cmd(eng, "POLL", 0, &poll_status, NULL, 0)) {
+        printf("CTRL command not supported or failed\n");
+        return 0;
+    }
+    return 1;
+}
+
+
 #ifdef SIGALRM
 # if defined(__STDC__) || defined(sgi) || defined(_AIX)
 #  define SIGRETTYPE void
@@ -1222,6 +1235,12 @@ int MAIN(int argc, char **argv)
      */
     if (engine_id != NULL)
         engine = ENGINE_by_id(engine_id);
+    if (!ENGINE_ctrl_cmd(engine, "ENABLE_POLLING", 0, NULL, NULL, 0)) {
+        BIO_printf(bio_err, "Unable to enabling polling on engine\n");
+        ENGINE_free(engine);
+        goto end;
+    }
+
     engine = setup_engine(bio_err, engine_id, 0);
 #endif
 
@@ -2009,7 +2028,16 @@ int MAIN(int argc, char **argv)
     
 #ifndef OPENSSL_NO_RSA
     for (j = 0; j < RSA_NUM; j++) {
-        int ret;
+        int ret, k, batch=8;
+        int requestno = 0;
+        const unsigned char *p;
+        RSA *rsa_inflights[batch];
+        p = rsa_data[j];
+        memset(rsa_inflights, 0, sizeof(rsa_inflights));
+        for (k = 0; k < batch; k++) {
+            rsa_inflights[k] = d2i_RSAPrivateKey(NULL, &p, rsa_data_length[j];
+        }
+
         if (!rsa_doit[j])
             continue;
         do {
@@ -2026,11 +2054,13 @@ int MAIN(int argc, char **argv)
             /* RSA_blinding_on(rsa_key[j],NULL); */
             Time_F(START);
             for (count = 0, run = 1; COND(rsa_c[j][0]); count++) {
+                requestno++;
+                requestno=requestno%batch;
                 //ret = RSA_sign(NID_md5_sha1, buf, 36, buf2,
                 //               &rsa_num, rsa_key[j]);
                 ret = RSA_sign_async(NID_md5_sha1, buf, 36, buf2,
-                               &rsa_num, rsa_key[j]);
-                if (ret == -1 && rsa_key[j]->job != NULL) {
+                               &rsa_num, rsa_inflights[requestno]);
+                if (ret == -1 && rsa_inflights[requestno]->job != NULL) {
                     count--; /*Retry detected so need to resubmit*/
                 }
                 if (ret == 0) {
@@ -2039,7 +2069,10 @@ int MAIN(int argc, char **argv)
                     count = 1;
                     break;
                 }
+                if (requestno == 0)
+                    poll_engine(engine, batch);
             }
+            poll_engine(engine, batch);
             d = Time_F(STOP);
             BIO_printf(bio_err,
                        mr ? "+R1:%ld:%d:%.2f\n"
