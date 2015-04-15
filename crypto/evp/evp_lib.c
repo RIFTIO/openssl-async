@@ -206,7 +206,7 @@ static int evp_cipher_async_internal(void *vargs)
     args = (struct evp_cipher_async_args *)vargs;
     if (!args)
         return 0;
-    return ctx->cipher->do_cipher(args->ctx, args->out, 
+    return args->ctx->cipher->do_cipher(args->ctx, args->out, 
                                   args->in, args->inl);
 }
 
