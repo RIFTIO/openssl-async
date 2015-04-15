@@ -2006,12 +2006,15 @@ int MAIN(int argc, char **argv)
 #ifndef OPENSSL_SYS_WIN32
 #endif
     RAND_bytes(buf, 36);
+    
 #ifndef OPENSSL_NO_RSA
     for (j = 0; j < RSA_NUM; j++) {
         int ret;
         if (!rsa_doit[j])
             continue;
-        ret = RSA_sign(NID_md5_sha1, buf, 36, buf2, &rsa_num, rsa_key[j]);
+        do {
+            ret = RSA_sign_async(NID_md5_sha1, buf, 36, buf2, &rsa_num, rsa_key[j]);
+        } while (ret == -1 && rsa_key[j]->job != NULL);
         if (ret == 0) {
             BIO_printf(bio_err,
                        "RSA sign failure.  No RSA sign will be done.\n");
@@ -2046,7 +2049,9 @@ int MAIN(int argc, char **argv)
             rsa_count = count;
         }
 
-        ret = RSA_verify(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
+        do {
+            ret = RSA_verify(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
+        } while (ret == -1 && rsa_key[j]->job != NULL);
         if (ret <= 0) {
             BIO_printf(bio_err,
                        "RSA verify failure.  No RSA verify will be done.\n");
