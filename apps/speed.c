@@ -1938,6 +1938,7 @@ int MAIN(int argc, char **argv)
             if (evp_cipher) {
                 EVP_CIPHER_CTX ctx;
                 int outl;
+                int ret;
 
                 names[D_EVP] = OBJ_nid2ln(evp_cipher->nid);
                 /*
@@ -1957,17 +1958,34 @@ int MAIN(int argc, char **argv)
                 if (decrypt)
                     for (count = 0, run = 1;
                          COND(save_count * 4 * lengths[0] / lengths[j]);
-                         count++)
-                        EVP_DecryptUpdate(&ctx, buf, &outl, buf, lengths[j]);
+                         count++) {
+                        ret = EVP_DecryptUpdate_async(&ctx, buf, &outl, buf, lengths[j]);
+                        //EVP_DecryptUpdate(&ctx, buf, &outl, buf, lengths[j]);
+                        if (ret == -1 && ctx.job != NULL) {
+                            count--;
+                        } 
+                    }
                 else
                     for (count = 0, run = 1;
                          COND(save_count * 4 * lengths[0] / lengths[j]);
-                         count++)
-                        EVP_EncryptUpdate(&ctx, buf, &outl, buf, lengths[j]);
-                if (decrypt)
-                    EVP_DecryptFinal_ex(&ctx, buf, &outl);
-                else
-                    EVP_EncryptFinal_ex(&ctx, buf, &outl);
+                         count++) {
+                        ret = EVP_EncryptUpdate_async(&ctx, buf, &outl, buf, lengths[j]);
+                        //EVP_EncryptUpdate(&ctx, buf, &outl, buf, lengths[j]);
+                        if (ret == -1 && ctx.job != NULL) {
+                            count--;
+                        } 
+                    }
+                if (decrypt) {
+                    do {
+                        ret = EVP_DecryptFinal_ex_async(&ctx, buf, &outl);
+                        //EVP_DecryptFinal_ex(&ctx, buf, &outl);
+                    } while(ret == -1 && ctx.job != NULL);
+                } else {
+                    do {
+                        ret = EVP_EncryptFinal_ex_async(&ctx, buf, &outl);
+                        //EVP_EncryptFinal_ex(&ctx, buf, &outl);
+                    } while(ret == -1 && ctx.job != NULL);
+                }
                 d = Time_F(STOP);
                 EVP_CIPHER_CTX_cleanup(&ctx);
             }

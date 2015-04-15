@@ -61,6 +61,13 @@
 #include <openssl/evp.h>
 #include <openssl/objects.h>
 
+struct evp_cipher_async_args {
+    EVP_CIPHER_CTX *ctx;
+    unsigned char *out;
+    const unsigned char *in;
+    unsigned int inl;
+};
+
 int EVP_CIPHER_param_to_asn1(EVP_CIPHER_CTX *c, ASN1_TYPE *type)
 {
     int ret;
@@ -193,9 +200,50 @@ int EVP_CIPHER_CTX_block_size(const EVP_CIPHER_CTX *ctx)
     return ctx->cipher->block_size;
 }
 
+static int evp_cipher_async_internal(void *vargs)
+{
+    struct evp_cipher_async_args *args;
+    args = (struct evp_cipher_async_args *)vargs;
+    if (!args)
+        return 0;
+    return ctx->cipher->do_cipher(args->ctx, args->out, 
+                                  args->in, args->inl);
+}
+
 int EVP_Cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
                const unsigned char *in, unsigned int inl)
 {
+    return ctx->cipher->do_cipher(ctx, out, in, inl);
+}
+
+int EVP_Cipher_async(EVP_CIPHER_CTX *ctx, unsigned char *out,
+               const unsigned char *in, unsigned int inl)
+{
+    int ret;
+    struct evp_cipher_async_args args;
+
+    args.ctx = ctx;
+    args.out = out;
+    args.in = in;
+    args.inl = inl;
+
+    if(!ASYNC_in_job()) {
+        switch(ASYNC_start_job(&ctx->job, &ret, evp_cipher_async_internal, &args,
+            sizeof(struct evp_cipher_async_args))) {
+        case ASYNC_ERR:
+            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
+            return -1;
+        case ASYNC_PAUSE:
+            return -1;
+        case ASYNC_FINISH:
+            ctx->job = NULL;
+            return ret;
+        default:
+            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
+            /* Shouldn't happen */
+            return -1;
+        }
+    }
     return ctx->cipher->do_cipher(ctx, out, in, inl);
 }
 

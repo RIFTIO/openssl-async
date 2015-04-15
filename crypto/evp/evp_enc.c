@@ -66,6 +66,40 @@
 #endif
 #include "evp_locl.h"
 
+struct evp_encrypt_async_args {
+    EVP_CIPHER_CTX *ctx;
+    unsigned char *out;
+    unsigned int *outl;
+    const unsigned char *in;
+    unsigned int inl;
+};
+
+struct evp_decrypt_async_args {
+    EVP_CIPHER_CTX *ctx;
+    unsigned char *out;
+    unsigned int *outl;
+    const unsigned char *in;
+    unsigned int inl;
+};
+
+const char EVP_version[] = "EVP" OPENSSL_VERSION_PTEXT;
+
+void EVP_CIPHER_CTX_init(EVP_CIPHER_CTX *ctx)
+{
+    memset(ctx, 0, sizeof(EVP_CIPHER_CTX));
+    /* ctx->cipher=NULL; */
+}
+
+EVP_CIPHER_CTX *EVP_CIPHER_CTX_new(void)
+{
+    EVP_CIPHER_CTX *ctx = OPENSSL_malloc(sizeof *ctx);
+    if (ctx)
+        EVP_CIPHER_CTX_init(ctx);
+    return ctx;
+}
+
+};
+
 const char EVP_version[] = "EVP" OPENSSL_VERSION_PTEXT;
 
 void EVP_CIPHER_CTX_init(EVP_CIPHER_CTX *ctx)
@@ -292,6 +326,16 @@ int EVP_DecryptInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
     return EVP_CipherInit_ex(ctx, cipher, impl, key, iv, 0);
 }
 
+static int evp_encrypt_update_async_internal(void *vargs)
+{
+    struct evp_encrypt_async_args *args;
+    args = (struct evp_encrypt_async_args *)vargs;
+    if (!args)
+        return 0;
+    return EVP_EncryptUpdate(args->ctx, args->out, args->outl,
+                             args->in, args->inl);
+}
+
 int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
                       const unsigned char *in, int inl)
 {
@@ -355,11 +399,52 @@ int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
     return 1;
 }
 
+int EVP_EncryptUpdate_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
+                      const unsigned char *in, int inl)
+{
+    int ret;
+    struct evp_encrypt_async_args args;
+
+    args.ctx = ctx;
+    args.out = out;
+    args.outl = outl;
+    args.in = in;
+    args.inl = inl;
+
+    if(!ASYNC_in_job()) {
+        switch(ASYNC_start_job(&ctx->job, &ret, evp_encrypt_update_async_internal, &args,
+            sizeof(struct evp_encrypt_async_args))) {
+        case ASYNC_ERR:
+            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
+            return -1;
+        case ASYNC_PAUSE:
+            return -1;
+        case ASYNC_FINISH:
+            ctx->job = NULL;
+            return ret;
+        default:
+            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
+            /* Shouldn't happen */
+            return -1;
+        }
+    }
+    return EVP_EncryptUpdate(ctx, out, outl, in, inl);
+}
+
 int EVP_EncryptFinal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 {
     int ret;
     ret = EVP_EncryptFinal_ex(ctx, out, outl);
     return ret;
+}
+
+static int evp_encrypt_finalex_async_internal(void *vargs)
+{
+    struct evp_encrypt_async_args *args;
+    args = (struct evp_encrypt_async_args *)vargs;
+    if (!args)
+        return 0;
+    return EVP_EncryptFinal_ex(args->ctx, args->out, args->outl);
 }
 
 int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
@@ -402,6 +487,45 @@ int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
         *outl = b;
 
     return ret;
+}
+
+int EVP_EncryptFinal_ex_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
+{
+    int ret;
+    struct evp_encrypt_async_args args;
+
+    args.ctx = ctx;
+    args.out = out;
+    args.outl = outl;
+
+    if(!ASYNC_in_job()) {
+        switch(ASYNC_start_job(&ctx->job, &ret, evp_encrypt_final_ex_async_internal, &args,
+            sizeof(struct evp_encrypt_async_args))) {
+        case ASYNC_ERR:
+            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
+            return -1;
+        case ASYNC_PAUSE:
+            return -1;
+        case ASYNC_FINISH:
+            ctx->job = NULL;
+            return ret;
+        default:
+            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
+            /* Shouldn't happen */
+            return -1;
+        }
+    }
+    return EVP_EncryptFinal_ex(ctx, out, outl);
+}
+
+static int evp_decrypt_update_async_internal(void *vargs)
+{
+    struct evp_decrypt_async_args *args;
+    args = (struct evp_decrypt_async_args *)vargs;
+    if (!args)
+        return 0;
+    return EVP_DecryptUpdate(args->ctx, args->out, args->outl,
+                             args->in, args->inl);
 }
 
 int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
@@ -458,11 +582,52 @@ int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
     return 1;
 }
 
+int EVP_DecryptUpdate_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
+                      const unsigned char *in, int inl)
+{
+    int ret;
+    struct evp_decrypt_async_args args;
+
+    args.ctx = ctx;
+    args.out = out;
+    args.outl = outl;
+    args.in = in;
+    args.inl = inl;
+
+    if(!ASYNC_in_job()) {
+        switch(ASYNC_start_job(&ctx->job, &ret, evp_decrypt_update_async_internal, &args,
+            sizeof(struct evp_decrypt_async_args))) {
+        case ASYNC_ERR:
+            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
+            return -1;
+        case ASYNC_PAUSE:
+            return -1;
+        case ASYNC_FINISH:
+            ctx->job = NULL;
+            return ret;
+        default:
+            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
+            /* Shouldn't happen */
+            return -1;
+        }
+    }
+    return EVP_DecryptUpdate(ctx, out, outl, in, inl);
+}
+
 int EVP_DecryptFinal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 {
     int ret;
     ret = EVP_DecryptFinal_ex(ctx, out, outl);
     return ret;
+}
+
+static int evp_decrypt_finalex_async_internal(void *vargs)
+{
+    struct evp_decrypt_async_args *args;
+    args = (struct evp_decrypt_async_args *)vargs;
+    if (!args)
+        return 0;
+    return EVP_DecryptFinal_ex(args->ctx, args->out, args->outl);
 }
 
 int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
@@ -519,6 +684,35 @@ int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
     } else
         *outl = 0;
     return (1);
+}
+
+int EVP_DecryptFinal_ex_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
+{
+    int ret;
+    struct evp_decrypt_async_args args;
+
+    args.ctx = ctx;
+    args.out = out;
+    args.outl = outl;
+
+    if(!ASYNC_in_job()) {
+        switch(ASYNC_start_job(&ctx->job, &ret, evp_decrypt_final_ex_async_internal, &args,
+            sizeof(struct evp_decrypt_async_args))) {
+        case ASYNC_ERR:
+            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
+            return -1;
+        case ASYNC_PAUSE:
+            return -1;
+        case ASYNC_FINISH:
+            ctx->job = NULL;
+            return ret;
+        default:
+            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
+            /* Shouldn't happen */
+            return -1;
+        }
+    }
+    return EVP_DecryptFinal_ex(ctx, out, outl);
 }
 
 void EVP_CIPHER_CTX_free(EVP_CIPHER_CTX *ctx)

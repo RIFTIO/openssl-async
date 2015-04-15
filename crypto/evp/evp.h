@@ -73,6 +73,8 @@
 
 # include <openssl/bio.h>
 
+# include <openssl/async.h>
+
 # define EVP_MAX_MD_SIZE                 64/* longest known is SHA512 */
 # define EVP_MAX_KEY_LENGTH              64
 # define EVP_MAX_IV_LENGTH               16
@@ -467,6 +469,7 @@ struct evp_cipher_ctx_st {
     int final_used;
     int block_mask;
     unsigned char final[EVP_MAX_BLOCK_LENGTH]; /* possible final block */
+    ASYNC_JOB *job;
 } /* EVP_CIPHER_CTX */ ;
 
 typedef struct evp_Encode_Ctx_st {
@@ -604,6 +607,9 @@ void BIO_set_md(BIO *, const EVP_MD *md);
 # define BIO_get_cipher_ctx(b,c_pp)      BIO_ctrl(b,BIO_C_GET_CIPHER_CTX,0,(char *)c_pp)
 
 /*__owur*/ int EVP_Cipher(EVP_CIPHER_CTX *c,
+                          unsigned char *out,
+                          const unsigned char *in, unsigned int inl);
+/*__owur*/ int EVP_Cipher_async(EVP_CIPHER_CTX *c,
                           unsigned char *out,
                           const unsigned char *in, unsigned int inl);
 
