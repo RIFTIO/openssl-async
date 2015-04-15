@@ -2035,7 +2035,7 @@ int MAIN(int argc, char **argv)
         p = rsa_data[j];
         memset(rsa_inflights, 0, sizeof(rsa_inflights));
         for (k = 0; k < batch; k++) {
-            rsa_inflights[k] = d2i_RSAPrivateKey(NULL, &p, rsa_data_length[j];
+            rsa_inflights[k] = d2i_RSAPrivateKey(NULL, &p, rsa_data_length[j]);
         }
 
         if (!rsa_doit[j])
