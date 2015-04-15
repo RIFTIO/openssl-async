@@ -98,8 +98,6 @@ EVP_CIPHER_CTX *EVP_CIPHER_CTX_new(void)
     return ctx;
 }
 
-};
-
 const char EVP_version[] = "EVP" OPENSSL_VERSION_PTEXT;
 
 void EVP_CIPHER_CTX_init(EVP_CIPHER_CTX *ctx)
