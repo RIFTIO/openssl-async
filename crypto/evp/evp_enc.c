@@ -98,22 +98,6 @@ EVP_CIPHER_CTX *EVP_CIPHER_CTX_new(void)
     return ctx;
 }
 
-const char EVP_version[] = "EVP" OPENSSL_VERSION_PTEXT;
-
-void EVP_CIPHER_CTX_init(EVP_CIPHER_CTX *ctx)
-{
-    memset(ctx, 0, sizeof(EVP_CIPHER_CTX));
-    /* ctx->cipher=NULL; */
-}
-
-EVP_CIPHER_CTX *EVP_CIPHER_CTX_new(void)
-{
-    EVP_CIPHER_CTX *ctx = OPENSSL_malloc(sizeof *ctx);
-    if (ctx)
-        EVP_CIPHER_CTX_init(ctx);
-    return ctx;
-}
-
 int EVP_CipherInit(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
                    const unsigned char *key, const unsigned char *iv, int enc)
 {
