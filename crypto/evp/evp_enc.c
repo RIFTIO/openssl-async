@@ -69,7 +69,7 @@
 struct evp_encrypt_async_args {
     EVP_CIPHER_CTX *ctx;
     unsigned char *out;
-    unsigned int *outl;
+    int *outl;
     const unsigned char *in;
     unsigned int inl;
 };
@@ -77,7 +77,7 @@ struct evp_encrypt_async_args {
 struct evp_decrypt_async_args {
     EVP_CIPHER_CTX *ctx;
     unsigned char *out;
-    unsigned int *outl;
+    int *outl;
     const unsigned char *in;
     unsigned int inl;
 };
@@ -420,7 +420,7 @@ int EVP_EncryptFinal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
     return ret;
 }
 
-static int evp_encrypt_finalex_async_internal(void *vargs)
+static int evp_encrypt_final_ex_async_internal(void *vargs)
 {
     struct evp_encrypt_async_args *args;
     args = (struct evp_encrypt_async_args *)vargs;
@@ -603,7 +603,7 @@ int EVP_DecryptFinal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
     return ret;
 }
 
-static int evp_decrypt_finalex_async_internal(void *vargs)
+static int evp_decrypt_final_ex_async_internal(void *vargs)
 {
     struct evp_decrypt_async_args *args;
     args = (struct evp_decrypt_async_args *)vargs;
