@@ -290,7 +290,7 @@ static SIGRETTYPE sig_done(int sig)
 # if !defined(SIGALRM)
 #  define SIGALRM
 # endif
-static unsigned int lapse, schlock;
+i
 static void alarm_win32(unsigned int secs)
 {
     lapse = secs * 1000;
@@ -1235,11 +1235,13 @@ int MAIN(int argc, char **argv)
      */
     if (engine_id != NULL)
         engine = ENGINE_by_id(engine_id);
+# ifndef OPENSSL_NO_HW_QAT
     if (!ENGINE_ctrl_cmd(engine, "ENABLE_POLLING", 0, NULL, NULL, 0)) {
         BIO_printf(bio_err, "Unable to enabling polling on engine\n");
         ENGINE_free(engine);
         goto end;
     }
+# endif
 
     engine = setup_engine(bio_err, engine_id, 0);
 #endif
@@ -1964,217 +1966,177 @@ int MAIN(int argc, char **argv)
                 print_message(names[D_EVP], save_count, lengths[j]);
 
 # ifndef OPENSSL_NO_HW_QAT
-                    EVP_CIPHER_CTX *ctxs;
-                    int k = 0;
-                    int requestno = 0;
-                    int num_ctx = 8;
+                EVP_CIPHER_CTX *ctxs;
+                int k = 0;
+                int requestno = 0;
+                int num_ctx = 8;
 # endif
-                    EVP_CIPHER_CTX *ctx;
-                    int outl;
-                    int retval = 0;
+                EVP_CIPHER_CTX *ctx;
+                int outl;
+                int retval = 0;
 
-                    ctx = (EVP_CIPHER_CTX *)
-                        OPENSSL_malloc(sizeof(EVP_CIPHER_CTX));
-                    if (NULL == ctx) {
-                        BIO_printf(bio_err,
-                                   "[%s] --- Failed to allocate ctx\n",
-                                   __func__);
-                        ERR_print_errors(bio_err);
-                        exit(EXIT_FAILURE);
-                    }
-# ifndef OPENSSL_NO_HW_QAT
-                    if (ctx)
-                        OPENSSL_free(ctx);
-                    ctxs =
-                        (EVP_CIPHER_CTX *)OPENSSL_malloc((num_ctx) *
-                                                         (sizeof
-                                                          (EVP_CIPHER_CTX)));
-                    if (NULL == ctxs) {
-                        BIO_printf(bio_err,
-                                   "[%s] --- Failed to allocate ctx\n",
-                                   __func__);
-                        ERR_print_errors(bio_err);
-                        exit(EXIT_FAILURE);
-                    }
-
-                    for (k = 0; k < num_ctx; k++) {
-                        ctx = ctxs + k;
-# endif
-                        EVP_CIPHER_CTX_init(ctx);
-
-                        if (decrypt)
-                            retval =
-                                EVP_DecryptInit_ex(ctx, evp_cipher, engine,
-                                                   key16, iv);
-                        else
-                            retval =
-                                EVP_EncryptInit_ex(ctx, evp_cipher, engine,
-                                                   key16, iv);
-                        if (!retval) {
-                            BIO_printf(bio_err,
-                                       "[%s] --- Failed to initialise cipher"
-                                       " with EVP_DecryptInit_ex/EVP_EncryptInit_ex\n",
-                                       __func__);
-                            ERR_print_errors(bio_err);
-                            if (ctx)
-                                OPENSSL_free(ctx);
-                            exit(EXIT_FAILURE);
-                        }
-                        EVP_CIPHER_CTX_set_padding(ctx, 0);
-                        EVP_CIPHER_CTX_set_flags(ctx,
-                                                 EVP_CIPH_CTX_FLAG_CAN_IGNORE_IV);
-# ifndef OPENSSL_NO_HW_QAT
-                    }
-# endif
-                    /*
-                     * Polling mode for speed measurements 1) Submit a
-                     * 'batch' number of requests to the engine or until
-                     * ERR_R_RETRY status is encountered 2) Poll the engine
-                     * once 3) Repeat steps 1-2 for the specified
-                     * duration/count
-                     */
-                    Time_F(START);
-                    if (decrypt) {
-                        for (count = 0, run = 1;
-                             COND(save_count * 4 * lengths[0] / lengths[j]);
-                             count++) {
-# ifndef OPENSSL_NO_HW_QAT
-                            requestno++;
-                            requestno=requestno%num_ctx;
-                            ctx = ctxs + requestno;
-# endif
-                            retval =
-                                EVP_DecryptUpdate_async(ctx, buf, &outl, buf,
-                                                  lengths[j]);
-                            if (retval == -1) { /* Assume this is a retry
-                                                * error and poll to free up
-                                                * TX space */
-                                count--; /* Decrement count as the request
-                                          * was not completed */
-                            } 
-
-# ifndef OPENSSL_NO_HW_QAT
-                            if (requestno == 0)
-                                poll_engine(engine, num_ctx);
-# endif
-                        }
-                        /*
-                         * No padding is set so the final request will not
-                         * produce a callback
-                         */
-# ifndef OPENSSL_NO_HW_QAT
-                        for (k = 0; k < num_ctx; k++) {
-                            ctx = ctxs + k;
-                            do {
-# endif
-                                retval = EVP_DecryptFinal_ex_async(ctx, buf, &outl);
-# ifndef OPENSSL_NO_HW_QAT
-                                poll_engine(engine, num_ctx);
-                            } while (retval == -1 && ctx->job != NULL);
-                        }
-                        poll_engine(engine, num_ctx);
-# endif
-                    } else {
-                        requestno = 0;
-                        for (count = 0, run = 1;
-                             COND(save_count * 4 * lengths[0] / lengths[j]);
-                             count++) {
-# ifndef OPENSSL_NO_HW_QAT
-                            requestno++;
-                            requestno=requestno%num_ctx;
-                            ctx = ctxs + requestno;
-# endif
-                            retval =
-                                EVP_EncryptUpdate_async(ctx, buf, &outl, buf,
-                                                  lengths[j]);
-                            if (retval == -1) { /* Assume this is a retry
-                                                * error and poll to free up
-                                                * TX space */
-                                count--; /* Decrement count as the request
-                                          * was not submitted */
-                            }
-# ifndef OPENSSL_NO_HW_QAT
-                            if (requestno == 0)
-                                poll_engine(engine, num_ctx);
-# endif
-                        }
-                        /*
-                         * No padding is set so the final request will not
-                         * produce a callback
-                         */
-# ifndef OPENSSL_NO_HW_QAT
-                        for (k = 0; k < num_ctx; k++) {
-                            ctx = ctxs + k;
-                            do {
-# endif
-                                retval = EVP_EncryptFinal_ex_async(ctx, buf, &outl);
-# ifndef OPENSSL_NO_HW_QAT
-                                poll_engine(engine, num_ctx);
-                            } while (retval == -1 && ctx->job != NULL);
-                        }
-                        poll_engine(engine, num_ctx);
-# endif
-                    }
-
-                    d = Time_F(STOP);
-
-# ifndef OPENSSL_NO_HW_QAT
-                    for (k = 0; k < num_ctx; k++) {
-                        ctx = ctxs + k;
-# endif
-                        EVP_CIPHER_CTX_cleanup(ctx);
-# ifndef OPENSSL_NO_HW_QAT
-                    }
-                    if (ctxs)
-                        OPENSSL_free(ctxs);
-                    ctx = NULL;
-# endif
-                    if (ctx)
-                        OPENSSL_free(ctx);
-
-                /*EVP_CIPHER_CTX_init(&ctx);
-
-                if (decrypt)
-                    EVP_DecryptInit_ex(&ctx, evp_cipher, NULL, key16, iv);
-                else
-                    EVP_EncryptInit_ex(&ctx, evp_cipher, NULL, key16, iv);
-                EVP_CIPHER_CTX_set_padding(&ctx, 0);
-
-                Time_F(START);
-                if (decrypt)
-                    for (count = 0, run = 1;
-                         COND(save_count * 4 * lengths[0] / lengths[j]);
-                         count++) {
-                        ret = EVP_DecryptUpdate_async(&ctx, buf, &outl, buf, lengths[j]);
-                        //EVP_DecryptUpdate(&ctx, buf, &outl, buf, lengths[j]);
-                        if (ret == -1 && ctx.job != NULL) {
-                            count--;
-                        } 
-                    }
-                else
-                    for (count = 0, run = 1;
-                         COND(save_count * 4 * lengths[0] / lengths[j]);
-                         count++) {
-                        ret = EVP_EncryptUpdate_async(&ctx, buf, &outl, buf, lengths[j]);
-                        //EVP_EncryptUpdate(&ctx, buf, &outl, buf, lengths[j]);
-                        if (ret == -1 && ctx.job != NULL) {
-                            count--;
-                        } 
-                    }
-                if (decrypt) {
-                    do {
-                        ret = EVP_DecryptFinal_ex_async(&ctx, buf, &outl);
-                        //EVP_DecryptFinal_ex(&ctx, buf, &outl);
-                    } while(ret == -1 && ctx.job != NULL);
-                } else {
-                    do {
-                        ret = EVP_EncryptFinal_ex_async(&ctx, buf, &outl);
-                        //EVP_EncryptFinal_ex(&ctx, buf, &outl);
-                    } while(ret == -1 && ctx.job != NULL);
+                ctx = (EVP_CIPHER_CTX *)
+                    OPENSSL_malloc(sizeof(EVP_CIPHER_CTX));
+                if (NULL == ctx) {
+                    BIO_printf(bio_err,
+                               "[%s] --- Failed to allocate ctx\n",
+                               __func__);
+                    ERR_print_errors(bio_err);
+                    exit(EXIT_FAILURE);
                 }
+# ifndef OPENSSL_NO_HW_QAT
+                if (ctx)
+                    OPENSSL_free(ctx);
+                ctxs =
+                    (EVP_CIPHER_CTX *)OPENSSL_malloc((num_ctx) *
+                                                      (sizeof
+                                                      (EVP_CIPHER_CTX)));
+                if (NULL == ctxs) {
+                    BIO_printf(bio_err,
+                               "[%s] --- Failed to allocate ctx\n",
+                               __func__);
+                    ERR_print_errors(bio_err);
+                    exit(EXIT_FAILURE);
+                }
+
+                for (k = 0; k < num_ctx; k++) {
+                     ctx = ctxs + k;
+# endif
+                    EVP_CIPHER_CTX_init(ctx);
+
+                    if (decrypt)
+                        retval =
+                            EVP_DecryptInit_ex(ctx, evp_cipher, engine,
+                                               key16, iv);
+                    else
+                        retval =
+                            EVP_EncryptInit_ex(ctx, evp_cipher, engine,
+                                               key16, iv);
+                    if (!retval) {
+                        BIO_printf(bio_err,
+                                   "[%s] --- Failed to initialise cipher"
+                                   " with EVP_DecryptInit_ex/EVP_EncryptInit_ex\n",
+                                   __func__);
+                        ERR_print_errors(bio_err);
+                        if (ctx)
+                            OPENSSL_free(ctx);
+                        exit(EXIT_FAILURE);
+                    }
+                    EVP_CIPHER_CTX_set_padding(ctx, 0);
+                    EVP_CIPHER_CTX_set_flags(ctx,
+                                             EVP_CIPH_CTX_FLAG_CAN_IGNORE_IV);
+# ifndef OPENSSL_NO_HW_QAT
+                }
+# endif
+                /*
+                 * Polling mode for speed measurements 1) Submit a
+                 * 'batch' number of requests to the engine or until
+                 * ERR_R_RETRY status is encountered 2) Poll the engine
+                 * once 3) Repeat steps 1-2 for the specified
+                 * duration/count
+                 */
+                Time_F(START);
+                if (decrypt) {
+                    for (count = 0, run = 1;
+                        COND(save_count * 4 * lengths[0] / lengths[j]);
+                        count++) {
+# ifndef OPENSSL_NO_HW_QAT
+                        requestno++;
+                        requestno=requestno%num_ctx;
+                        ctx = ctxs + requestno;
+# endif
+                        retval =
+                            EVP_DecryptUpdate_async(ctx, buf, &outl, buf,
+                                                    lengths[j]);
+                        if (retval == -1) { /* Assume this is a retry
+                                             * error and poll to free up
+                                             * TX space */
+                            count--; /* Decrement count as the request
+                                      * was not completed */
+                        } 
+
+# ifndef OPENSSL_NO_HW_QAT
+                        if (requestno == 0)
+                            poll_engine(engine, num_ctx);
+# endif
+                    }
+                    /*
+                     * No padding is set so the final request will not
+                     * produce a callback
+                     */
+# ifndef OPENSSL_NO_HW_QAT
+                    for (k = 0; k < num_ctx; k++) {
+                        ctx = ctxs + k;
+                        do {
+# endif
+                            retval = EVP_DecryptFinal_ex_async(ctx, buf, &outl);
+# ifndef OPENSSL_NO_HW_QAT
+                            poll_engine(engine, num_ctx);
+                        } while (retval == -1 && ctx->job != NULL);
+                    }
+                    poll_engine(engine, num_ctx);
+# endif
+                } else {
+# ifndef OPENSSL_NO_HW_QAT
+                    requestno = 0;
+# endif
+                    for (count = 0, run = 1;
+                         COND(save_count * 4 * lengths[0] / lengths[j]);
+                         count++) {
+# ifndef OPENSSL_NO_HW_QAT
+                         requestno++;
+                         requestno=requestno%num_ctx;
+                         ctx = ctxs + requestno;
+# endif
+                         retval =
+                            EVP_EncryptUpdate_async(ctx, buf, &outl, buf,
+                                                    lengths[j]);
+                         if (retval == -1) { /* Assume this is a retry
+                                              * error and poll to free up
+                                              * TX space */
+                             count--; /* Decrement count as the request
+                                       * was not submitted */
+                         }
+# ifndef OPENSSL_NO_HW_QAT
+                         if (requestno == 0)
+                             poll_engine(engine, num_ctx);
+# endif
+                    }
+                    /*
+                     * No padding is set so the final request will not
+                     * produce a callback
+                     */
+# ifndef OPENSSL_NO_HW_QAT
+                    for (k = 0; k < num_ctx; k++) {
+                        ctx = ctxs + k;
+                        do {
+# endif
+                            retval = EVP_EncryptFinal_ex_async(ctx, buf, &outl);
+# ifndef OPENSSL_NO_HW_QAT
+                            poll_engine(engine, num_ctx);
+                        } while (retval == -1 && ctx->job != NULL);
+                    }
+                    poll_engine(engine, num_ctx);
+# endif
+                }
+
                 d = Time_F(STOP);
-                EVP_CIPHER_CTX_cleanup(&ctx);
-            }*/
+
+# ifndef OPENSSL_NO_HW_QAT
+                for (k = 0; k < num_ctx; k++) {
+                    ctx = ctxs + k;
+# endif
+                    EVP_CIPHER_CTX_cleanup(ctx);
+# ifndef OPENSSL_NO_HW_QAT
+                }
+                if (ctxs)
+                    OPENSSL_free(ctxs);
+                ctx = NULL;
+# endif
+                if (ctx)
+                    OPENSSL_free(ctx);
+            }
+
             if (evp_md) {
                 names[D_EVP] = OBJ_nid2ln(evp_md->type);
                 print_message(names[D_EVP], save_count, lengths[j]);
