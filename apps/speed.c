@@ -2048,9 +2048,7 @@ int MAIN(int argc, char **argv)
                         retval =
                             EVP_DecryptUpdate_async(ctx, buf, &outl, buf,
                                                     lengths[j]);
-                        if (retval == -1) { /* Assume this is a retry
-                                             * error and poll to free up
-                                             * TX space */
+                        if (retval == -1 && ctx->job != NULL) { 
                             count--; /* Decrement count as the request
                                       * was not completed */
                         } 
@@ -2091,11 +2089,9 @@ int MAIN(int argc, char **argv)
                          retval =
                             EVP_EncryptUpdate_async(ctx, buf, &outl, buf,
                                                     lengths[j]);
-                         if (retval == -1) { /* Assume this is a retry
-                                              * error and poll to free up
-                                              * TX space */
+                         if (retval == -1 && ctx->job != NULL) { 
                              count--; /* Decrement count as the request
-                                       * was not submitted */
+                                       * was not completed */
                          }
 # ifndef OPENSSL_NO_HW_QAT
                          if (requestno == 0)
