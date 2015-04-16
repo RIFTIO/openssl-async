@@ -632,6 +632,9 @@ int MAIN(int argc, char **argv)
     const EVP_CIPHER *evp_cipher = NULL;
     const EVP_MD *evp_md = NULL;
     int decrypt = 0;
+# ifndef OPENSSL_NO_HW_QAT
+    int num_ctx = 1;
+# endif
 #ifndef NO_FORK
     int multi = 0;
 #endif
@@ -755,6 +758,23 @@ int MAIN(int argc, char **argv)
             j--;
         }
 #endif
+# ifndef OPENSSL_NO_HW_QAT
+        else if ((argc > 0) && (strcmp(*argv, "-num_ctx") == 0)) {
+            argc--;
+            argv++;
+            if (argc == 0) {
+                BIO_printf(bio_err, "no num_ctx value given\n");
+                goto end;
+            }
+            num_ctx = atoi(argv[0]);
+            if (num_ctx <= 0) {
+                BIO_printf(bio_err, "bad num_ctx value\n");
+                goto end;
+            }
+            j--;                /* Otherwise, -num_ctx gets confused with an
+                                 * algorithm. */
+        }
+# endif
 #ifndef NO_FORK
         else if ((argc > 0) && (strcmp(*argv, "-multi") == 0)) {
             argc--;
@@ -1200,6 +1220,11 @@ int MAIN(int argc, char **argv)
             BIO_printf(bio_err,
                        "-engine e       "
                        "use engine e, possibly a hardware device.\n");
+#  ifndef OPENSSL_NO_HW_QAT
+            BIO_printf(bio_err,
+                       "-num_ctx n      "
+                       "submit requests across n ctxs (only applicable in asynch mode).\n");
+#  endif
 #endif
             BIO_printf(bio_err, "-evp e          " "use EVP e.\n");
             BIO_printf(bio_err,
@@ -1969,7 +1994,6 @@ int MAIN(int argc, char **argv)
                 EVP_CIPHER_CTX *ctxs;
                 int k = 0;
                 int requestno = 0;
-                int num_ctx = 8;
 # endif
                 EVP_CIPHER_CTX *ctx;
                 int outl;
