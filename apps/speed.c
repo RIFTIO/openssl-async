@@ -2200,9 +2200,8 @@ int MAIN(int argc, char **argv)
         int requestno = 0;
         const unsigned char *prsa_data;
         prsa_data = rsa_data[j];
-        RSA *rsa_inflights = NULL;
-        RSA *rsa_inflight = NULL;
-        rsa_inflights = (RSA *)OPENSSL_malloc((batch) * (sizeof(RSA *)));
+        RSA **rsa_inflights = NULL;
+        rsa_inflights = (RSA **)OPENSSL_malloc((batch) * (sizeof(RSA *)));
         if (NULL == rsa_inflights) {
             BIO_printf(bio_err,
                        "[%s] --- Failed to allocate rsa structure\n", __func__);
@@ -2211,8 +2210,7 @@ int MAIN(int argc, char **argv)
         }
         memset(rsa_inflights, 0,batch * sizeof(RSA *));
         for (k = 0; k < batch; k++) {
-            rsa_inflight = rsa_inflights+k;
-            rsa_inflight = d2i_RSAPrivateKey(NULL, &prsa_data, rsa_data_length[j]);
+            rsa_inflights[k] = d2i_RSAPrivateKey(NULL, &prsa_data, rsa_data_length[j]);
             prsa_data = rsa_data[j];
         }
 
@@ -2235,12 +2233,11 @@ int MAIN(int argc, char **argv)
             for (count = 0, run = 1; COND(rsa_c[j][0]); count++) {
                 requestno++;
                 requestno=requestno%batch;
-                rsa_inflight=rsa_inflights+requestno;
                 //ret = RSA_sign(NID_md5_sha1, buf, 36, buf2,
                 //               &rsa_num, rsa_key[j]);
                 ret = RSA_sign_async(NID_md5_sha1, buf, 36, buf2,
-                               &rsa_num, rsa_inflight);
-                if (ret == -1 && rsa_inflight->job != NULL) {
+                               &rsa_num, rsa_inflights[requestno]);
+                if (ret == -1 && rsa_inflights[requestno]->job != NULL) {
                     count--; /*Retry detected so need to resubmit*/
                 }
                 if (ret == 0) {
@@ -2279,12 +2276,11 @@ int MAIN(int argc, char **argv)
             for (count = 0, run = 1; COND(rsa_c[j][1]); count++) {
                 requestno++;
                 requestno=requestno%batch;
-                rsa_inflight=rsa_inflights+requestno;
                 //ret = RSA_verify(NID_md5_sha1, buf, 36, buf2,
                 //                 rsa_num, rsa_key[j]);
                 ret = RSA_verify_async(NID_md5_sha1, buf, 36, buf2,
-                                 rsa_num, rsa_inflight);
-                if (ret == -1 && rsa_inflight->job != NULL) {
+                                 rsa_num, rsa_inflights[requestno]);
+                if (ret == -1 && rsa_inflights[requestno]->job != NULL) {
                     count--;
                 } else {
                     if (ret <= 0) {
@@ -2313,6 +2309,7 @@ int MAIN(int argc, char **argv)
         }
         if (rsa_inflights)
             OPENSSL_free(rsa_inflights);
+        /*Think we are leaking memory here on the rsa structure*/
     }
 #endif
 
