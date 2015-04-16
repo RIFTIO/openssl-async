@@ -2202,7 +2202,6 @@ int MAIN(int argc, char **argv)
         prsa_data = rsa_data[j];
         RSA *rsa_inflights = NULL;
         RSA *rsa_inflight = NULL;
-        memset(rsa_inflights, 0, sizeof(rsa_inflights));
         rsa_inflights = (RSA *)OPENSSL_malloc((batch) * (sizeof(RSA *)));
         if (NULL == rsa_inflights) {
             BIO_printf(bio_err,
