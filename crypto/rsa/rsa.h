@@ -352,6 +352,17 @@ int RSA_public_decrypt(int flen, const unsigned char *from,
                        unsigned char *to, RSA *rsa, int padding);
 int RSA_private_decrypt(int flen, const unsigned char *from,
                         unsigned char *to, RSA *rsa, int padding);
+
+/* Async version of the functions above */
+int RSA_public_encrypt_async(int flen, const unsigned char *from,
+                       unsigned char *to, RSA *rsa, int padding);
+int RSA_private_encrypt_async(int flen, const unsigned char *from,
+                        unsigned char *to, RSA *rsa, int padding);
+int RSA_public_decrypt_async(int flen, const unsigned char *from,
+                       unsigned char *to, RSA *rsa, int padding);
+int RSA_private_decrypt_async(int flen, const unsigned char *from,
+                        unsigned char *to, RSA *rsa, int padding);
+
 void RSA_free(RSA *r);
 /* "up" the RSA object's reference count */
 int RSA_up_ref(RSA *r);

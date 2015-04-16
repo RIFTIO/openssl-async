@@ -64,6 +64,15 @@
 #include <openssl/rsa.h>
 #include <openssl/rand.h>
 
+
+struct rsa_crpt_async_args {
+    int flen;
+    const unsigned char *from;
+    unsigned char *to; 
+    RSA *rsa; 
+    int padding;
+};
+
 int RSA_size(const RSA *r)
 {
     return (BN_num_bytes(r->n));
@@ -92,6 +101,56 @@ int RSA_public_decrypt(int flen, const unsigned char *from, unsigned char *to,
 {
     return (rsa->meth->rsa_pub_dec(flen, from, to, rsa, padding));
 }
+
+/* This code is replicated 4 times so at the moment I am just creating a macro
+ * Maybe I could add a single function with an additional parameter and a switch case...
+ */
+#define IMPLEMENT_RSA_CRPT_ASYNC(op)    \
+static int op##_async_internal(void *vargs) \
+{   \
+    struct rsa_crpt_async_args *args;   \
+    args = (struct rsa_crpt_async_args *)vargs; \
+    if (!args)  \
+        return 0;   \
+    return op(args->flen, args->from, args->to,   \
+                    args->rsa, args->padding);  \
+}   \
+int op##_async(int flen, const unsigned char *from, \
+                        unsigned char *to, RSA *rsa, int padding)   \
+{   \
+    int ret;    \
+    struct rsa_crpt_async_args args;    \
+    \
+    args.flen = flen;   \
+    args.from = from;   \
+    args.to = to;   \
+    args.rsa = rsa; \
+    args.padding = padding; \
+    \
+    if(!ASYNC_in_job()) {   \
+        switch(ASYNC_start_job(&rsa->job, &ret, op##_async_internal, &args, \
+            sizeof(struct rsa_crpt_async_args))) {  \
+        case ASYNC_ERR: \
+            /* SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);  */ \
+            return -1;  \
+        case ASYNC_PAUSE:   \
+            return -1;  \
+        case ASYNC_FINISH:  \
+            rsa->job = NULL;    \
+            return ret; \
+        default:    \
+            /* SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR); */ \
+            /* Shouldn't happen */  \
+            return -1;  \
+        }   \
+    }   \
+    return op(flen, from, to, rsa, padding); \
+}
+
+IMPLEMENT_RSA_CRPT_ASYNC(RSA_public_encrypt)
+IMPLEMENT_RSA_CRPT_ASYNC(RSA_private_encrypt)
+IMPLEMENT_RSA_CRPT_ASYNC(RSA_public_decrypt)
+IMPLEMENT_RSA_CRPT_ASYNC(RSA_private_decrypt)
 
 int RSA_flags(const RSA *r)
 {
