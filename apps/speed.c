@@ -2218,7 +2218,9 @@ int MAIN(int argc, char **argv)
             continue;
         do {
             ret = RSA_sign_async(NID_md5_sha1, buf, 36, buf2, &rsa_num, rsa_key[j]);
+# ifndef OPENSSL_NO_HW_QAT
             poll_engine(engine, batch);
+# endif
         } while (ret == -1 && rsa_key[j]->job != NULL);
         if (ret == 0) {
             BIO_printf(bio_err,
@@ -2246,10 +2248,14 @@ int MAIN(int argc, char **argv)
                     count = 1;
                     break;
                 }
+# ifndef OPENSSL_NO_HW_QAT
                 if (requestno == 0)
                     poll_engine(engine, batch);
+# endif
             }
+# ifndef OPENSSL_NO_HW_QAT
             poll_engine(engine, batch);
+# endif
             d = Time_F(STOP);
             BIO_printf(bio_err,
                        mr ? "+R1:%ld:%d:%.2f\n"
@@ -2261,7 +2267,9 @@ int MAIN(int argc, char **argv)
 
         do {
             ret = RSA_verify_async(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
+# ifndef OPENSSL_NO_HW_QAT
             poll_engine(engine, batch);
+# endif
         } while (ret == -1 && rsa_key[j]->job != NULL);
         if (ret <= 0) {
             BIO_printf(bio_err,
@@ -2290,10 +2298,14 @@ int MAIN(int argc, char **argv)
                         break;
                    }
                 }
+# ifndef OPENSSL_NO_HW_QAT
                 if (requestno == 0)
                     poll_engine(engine, batch);
+# endif
             }
+# ifndef OPENSSL_NO_HW_QAT
             poll_engine(engine, batch);
+# endif
             d = Time_F(STOP);
             BIO_printf(bio_err,
                        mr ? "+R2:%ld:%d:%.2f\n"
