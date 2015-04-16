@@ -1955,9 +1955,6 @@ int MAIN(int argc, char **argv)
 #endif
         for (j = 0; j < SIZE_NUM; j++) {
             if (evp_cipher) {
-                EVP_CIPHER_CTX ctx;
-                int outl;
-                int ret;
 
                 names[D_EVP] = OBJ_nid2ln(evp_cipher->nid);
                 /*
@@ -1970,6 +1967,7 @@ int MAIN(int argc, char **argv)
                     EVP_CIPHER_CTX *ctxs;
                     int k = 0;
                     int requestno = 0;
+                    int num_ctx = 8;
 # endif
                     EVP_CIPHER_CTX *ctx;
                     int outl;
@@ -2005,14 +2003,14 @@ int MAIN(int argc, char **argv)
                         EVP_CIPHER_CTX_init(ctx);
 
                         if (decrypt)
-                            res =
+                            retval =
                                 EVP_DecryptInit_ex(ctx, evp_cipher, engine,
                                                    key16, iv);
                         else
-                            res =
+                            retval =
                                 EVP_EncryptInit_ex(ctx, evp_cipher, engine,
                                                    key16, iv);
-                        if (!res) {
+                        if (!retval) {
                             BIO_printf(bio_err,
                                        "[%s] --- Failed to initialise cipher"
                                        " with EVP_DecryptInit_ex/EVP_EncryptInit_ex\n",
