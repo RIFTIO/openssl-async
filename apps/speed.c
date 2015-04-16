@@ -2200,8 +2200,8 @@ int MAIN(int argc, char **argv)
         int requestno = 0;
         const unsigned char *prsa_data;
         prsa_data = rsa_data[j];
-        RSA *rsa_inflights;
-        RSA *rsa_inflight;
+        RSA *rsa_inflights = NULL;
+        RSA *rsa_inflight = NULL;
         memset(rsa_inflights, 0, sizeof(rsa_inflights));
         rsa_inflights = (RSA *)OPENSSL_malloc((batch) * (sizeof(RSA *)));
         if (NULL == rsa_inflights) {
