@@ -632,6 +632,7 @@ int MAIN(int argc, char **argv)
     const EVP_CIPHER *evp_cipher = NULL;
     const EVP_MD *evp_md = NULL;
     int decrypt = 0;
+    int batch = 1;
 # ifndef OPENSSL_NO_HW_QAT
     int num_ctx = 1;
 # endif
@@ -758,6 +759,21 @@ int MAIN(int argc, char **argv)
             j--;
         }
 #endif
+        else if (argc > 0 && !strcmp(*argv, "-batch")) {
+            argc--;
+            argv++;
+            if (argc == 0) {
+                BIO_printf(bio_err, "no batch size given\n");
+                goto end;
+            }
+            batch = atoi(argv[0]);
+            if (batch <= 0) {
+                BIO_printf(bio_err, "bad batch count\n");
+                goto end;
+            }
+            j--;                /* Otherwise, -elapsed gets confused with an
+                                 * algorithm. */
+        }
 # ifndef OPENSSL_NO_HW_QAT
         else if ((argc > 0) && (strcmp(*argv, "-num_ctx") == 0)) {
             argc--;
@@ -1220,6 +1236,9 @@ int MAIN(int argc, char **argv)
             BIO_printf(bio_err,
                        "-engine e       "
                        "use engine e, possibly a hardware device.\n");
+            BIO_printf(bio_err,
+                       "-batch n        "
+                       "submit n requests back to back to the engine (only applicable in asynch mode).\n");
 #  ifndef OPENSSL_NO_HW_QAT
             BIO_printf(bio_err,
                        "-num_ctx n      "
@@ -2177,12 +2196,20 @@ int MAIN(int argc, char **argv)
     
 #ifndef OPENSSL_NO_RSA
     for (j = 0; j < RSA_NUM; j++) {
-        int ret, k, batch=16;
+        int ret, k;
         int requestno = 0;
         const unsigned char *prsa_data;
-        RSA *rsa_inflights[batch];
         prsa_data = rsa_data[j];
+        RSA *rsa_inflights;
         memset(rsa_inflights, 0, sizeof(rsa_inflights));
+        rsa_inflights = (RSA *)OPENSSL_malloc((batch) * (sizeof(RSA *)));
+        if (NULL == rsa_inflights) {
+            BIO_printf(bio_err,
+                       "[%s] --- Failed to allocate rsa structure\n", __func__);
+            ERR_print_errors(bio_err);
+            exit(EXIT_FAILURE);
+        }
+        memset(rsa_inflights, 0,batch * sizeof(RSA *));
         for (k = 0; k < batch; k++) {
             rsa_inflights[k] = d2i_RSAPrivateKey(NULL, &prsa_data, rsa_data_length[j]);
             prsa_data = rsa_data[j];
@@ -2281,6 +2308,8 @@ int MAIN(int argc, char **argv)
             for (j++; j < RSA_NUM; j++)
                 rsa_doit[j] = 0;
         }
+        if (rsa_inflights)
+            OPENSSL_free(rsa_inflights);
     }
 #endif
 
