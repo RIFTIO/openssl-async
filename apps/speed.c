@@ -254,6 +254,19 @@ static int rnd_fake = 0;
 #endif
 
 ENGINE* engine = NULL;
+
+static int poll_engine(ENGINE *eng, unsigned int no_resp) 
+{
+    int poll_status = 0;
+    /* Poll for the responses */
+    if (!ENGINE_ctrl_cmd(eng, "POLL", 0, &poll_status, NULL, 0)) {
+        printf("CTRL command not supported or failed\n");
+        return 0;
+    }
+    return 1;
+}
+
+
 #ifdef SIGALRM
 # if defined(__STDC__) || defined(sgi) || defined(_AIX)
 #  define SIGRETTYPE void
@@ -277,7 +290,7 @@ static SIGRETTYPE sig_done(int sig)
 # if !defined(SIGALRM)
 #  define SIGALRM
 # endif
-static unsigned int lapse, schlock;
+i
 static void alarm_win32(unsigned int secs)
 {
     lapse = secs * 1000;
@@ -1222,6 +1235,14 @@ int MAIN(int argc, char **argv)
      */
     if (engine_id != NULL)
         engine = ENGINE_by_id(engine_id);
+# ifndef OPENSSL_NO_HW_QAT
+    if (!ENGINE_ctrl_cmd(engine, "ENABLE_POLLING", 0, NULL, NULL, 0)) {
+        BIO_printf(bio_err, "Unable to enabling polling on engine\n");
+        ENGINE_free(engine);
+        goto end;
+    }
+# endif
+
     engine = setup_engine(bio_err, engine_id, 0);
 #endif
 
@@ -1936,9 +1957,6 @@ int MAIN(int argc, char **argv)
 #endif
         for (j = 0; j < SIZE_NUM; j++) {
             if (evp_cipher) {
-                EVP_CIPHER_CTX ctx;
-                int outl;
-                int ret;
 
                 names[D_EVP] = OBJ_nid2ln(evp_cipher->nid);
                 /*
@@ -1947,48 +1965,174 @@ int MAIN(int argc, char **argv)
                  */
                 print_message(names[D_EVP], save_count, lengths[j]);
 
-                EVP_CIPHER_CTX_init(&ctx);
-                if (decrypt)
-                    EVP_DecryptInit_ex(&ctx, evp_cipher, NULL, key16, iv);
-                else
-                    EVP_EncryptInit_ex(&ctx, evp_cipher, NULL, key16, iv);
-                EVP_CIPHER_CTX_set_padding(&ctx, 0);
+# ifndef OPENSSL_NO_HW_QAT
+                EVP_CIPHER_CTX *ctxs;
+                int k = 0;
+                int requestno = 0;
+                int num_ctx = 8;
+# endif
+                EVP_CIPHER_CTX *ctx;
+                int outl;
+                int retval = 0;
 
-                Time_F(START);
-                if (decrypt)
-                    for (count = 0, run = 1;
-                         COND(save_count * 4 * lengths[0] / lengths[j]);
-                         count++) {
-                        ret = EVP_DecryptUpdate_async(&ctx, buf, &outl, buf, lengths[j]);
-                        //EVP_DecryptUpdate(&ctx, buf, &outl, buf, lengths[j]);
-                        if (ret == -1 && ctx.job != NULL) {
-                            count--;
-                        } 
-                    }
-                else
-                    for (count = 0, run = 1;
-                         COND(save_count * 4 * lengths[0] / lengths[j]);
-                         count++) {
-                        ret = EVP_EncryptUpdate_async(&ctx, buf, &outl, buf, lengths[j]);
-                        //EVP_EncryptUpdate(&ctx, buf, &outl, buf, lengths[j]);
-                        if (ret == -1 && ctx.job != NULL) {
-                            count--;
-                        } 
-                    }
-                if (decrypt) {
-                    do {
-                        ret = EVP_DecryptFinal_ex_async(&ctx, buf, &outl);
-                        //EVP_DecryptFinal_ex(&ctx, buf, &outl);
-                    } while(ret == -1 && ctx.job != NULL);
-                } else {
-                    do {
-                        ret = EVP_EncryptFinal_ex_async(&ctx, buf, &outl);
-                        //EVP_EncryptFinal_ex(&ctx, buf, &outl);
-                    } while(ret == -1 && ctx.job != NULL);
+                ctx = (EVP_CIPHER_CTX *)
+                    OPENSSL_malloc(sizeof(EVP_CIPHER_CTX));
+                if (NULL == ctx) {
+                    BIO_printf(bio_err,
+                               "[%s] --- Failed to allocate ctx\n",
+                               __func__);
+                    ERR_print_errors(bio_err);
+                    exit(EXIT_FAILURE);
                 }
+# ifndef OPENSSL_NO_HW_QAT
+                if (ctx)
+                    OPENSSL_free(ctx);
+                ctxs =
+                    (EVP_CIPHER_CTX *)OPENSSL_malloc((num_ctx) *
+                                                      (sizeof
+                                                      (EVP_CIPHER_CTX)));
+                if (NULL == ctxs) {
+                    BIO_printf(bio_err,
+                               "[%s] --- Failed to allocate ctx\n",
+                               __func__);
+                    ERR_print_errors(bio_err);
+                    exit(EXIT_FAILURE);
+                }
+
+                for (k = 0; k < num_ctx; k++) {
+                     ctx = ctxs + k;
+# endif
+                    EVP_CIPHER_CTX_init(ctx);
+
+                    if (decrypt)
+                        retval =
+                            EVP_DecryptInit_ex(ctx, evp_cipher, engine,
+                                               key16, iv);
+                    else
+                        retval =
+                            EVP_EncryptInit_ex(ctx, evp_cipher, engine,
+                                               key16, iv);
+                    if (!retval) {
+                        BIO_printf(bio_err,
+                                   "[%s] --- Failed to initialise cipher"
+                                   " with EVP_DecryptInit_ex/EVP_EncryptInit_ex\n",
+                                   __func__);
+                        ERR_print_errors(bio_err);
+                        if (ctx)
+                            OPENSSL_free(ctx);
+                        exit(EXIT_FAILURE);
+                    }
+                    EVP_CIPHER_CTX_set_padding(ctx, 0);
+                    EVP_CIPHER_CTX_set_flags(ctx,
+                                             EVP_CIPH_CTX_FLAG_CAN_IGNORE_IV);
+# ifndef OPENSSL_NO_HW_QAT
+                }
+# endif
+                /*
+                 * Polling mode for speed measurements 1) Submit a
+                 * 'batch' number of requests to the engine or until
+                 * ERR_R_RETRY status is encountered 2) Poll the engine
+                 * once 3) Repeat steps 1-2 for the specified
+                 * duration/count
+                 */
+                Time_F(START);
+                if (decrypt) {
+                    for (count = 0, run = 1;
+                        COND(save_count * 4 * lengths[0] / lengths[j]);
+                        count++) {
+# ifndef OPENSSL_NO_HW_QAT
+                        requestno++;
+                        requestno=requestno%num_ctx;
+                        ctx = ctxs + requestno;
+# endif
+                        retval =
+                            EVP_DecryptUpdate_async(ctx, buf, &outl, buf,
+                                                    lengths[j]);
+                        if (retval == -1 && ctx->job != NULL) { 
+                            count--; /* Decrement count as the request
+                                      * was not completed */
+                        } 
+
+# ifndef OPENSSL_NO_HW_QAT
+                        if (requestno == 0)
+                            poll_engine(engine, num_ctx);
+# endif
+                    }
+                    /*
+                     * No padding is set so the final request will not
+                     * produce a callback
+                     */
+# ifndef OPENSSL_NO_HW_QAT
+                    for (k = 0; k < num_ctx; k++) {
+                        ctx = ctxs + k;
+                        do {
+# endif
+                            retval = EVP_DecryptFinal_ex_async(ctx, buf, &outl);
+# ifndef OPENSSL_NO_HW_QAT
+                            poll_engine(engine, num_ctx);
+                        } while (retval == -1 && ctx->job != NULL);
+                    }
+                    poll_engine(engine, num_ctx);
+# endif
+                } else {
+# ifndef OPENSSL_NO_HW_QAT
+                    requestno = 0;
+# endif
+                    for (count = 0, run = 1;
+                         COND(save_count * 4 * lengths[0] / lengths[j]);
+                         count++) {
+# ifndef OPENSSL_NO_HW_QAT
+                         requestno++;
+                         requestno=requestno%num_ctx;
+                         ctx = ctxs + requestno;
+# endif
+                         retval =
+                            EVP_EncryptUpdate_async(ctx, buf, &outl, buf,
+                                                    lengths[j]);
+                         if (retval == -1 && ctx->job != NULL) { 
+                             count--; /* Decrement count as the request
+                                       * was not completed */
+                         }
+# ifndef OPENSSL_NO_HW_QAT
+                         if (requestno == 0)
+                             poll_engine(engine, num_ctx);
+# endif
+                    }
+                    /*
+                     * No padding is set so the final request will not
+                     * produce a callback
+                     */
+# ifndef OPENSSL_NO_HW_QAT
+                    for (k = 0; k < num_ctx; k++) {
+                        ctx = ctxs + k;
+                        do {
+# endif
+                            retval = EVP_EncryptFinal_ex_async(ctx, buf, &outl);
+# ifndef OPENSSL_NO_HW_QAT
+                            poll_engine(engine, num_ctx);
+                        } while (retval == -1 && ctx->job != NULL);
+                    }
+                    poll_engine(engine, num_ctx);
+# endif
+                }
+
                 d = Time_F(STOP);
-                EVP_CIPHER_CTX_cleanup(&ctx);
+
+# ifndef OPENSSL_NO_HW_QAT
+                for (k = 0; k < num_ctx; k++) {
+                    ctx = ctxs + k;
+# endif
+                    EVP_CIPHER_CTX_cleanup(ctx);
+# ifndef OPENSSL_NO_HW_QAT
+                }
+                if (ctxs)
+                    OPENSSL_free(ctxs);
+                ctx = NULL;
+# endif
+                if (ctx)
+                    OPENSSL_free(ctx);
             }
+
             if (evp_md) {
                 names[D_EVP] = OBJ_nid2ln(evp_md->type);
                 print_message(names[D_EVP], save_count, lengths[j]);
@@ -2006,12 +2150,26 @@ int MAIN(int argc, char **argv)
 #ifndef OPENSSL_SYS_WIN32
 #endif
     RAND_bytes(buf, 36);
+    
 #ifndef OPENSSL_NO_RSA
     for (j = 0; j < RSA_NUM; j++) {
-        int ret;
+        int ret, k, batch=16;
+        int requestno = 0;
+        const unsigned char *prsa_data;
+        RSA *rsa_inflights[batch];
+        prsa_data = rsa_data[j];
+        memset(rsa_inflights, 0, sizeof(rsa_inflights));
+        for (k = 0; k < batch; k++) {
+            rsa_inflights[k] = d2i_RSAPrivateKey(NULL, &prsa_data, rsa_data_length[j]);
+            prsa_data = rsa_data[j];
+        }
+
         if (!rsa_doit[j])
             continue;
-        ret = RSA_sign(NID_md5_sha1, buf, 36, buf2, &rsa_num, rsa_key[j]);
+        do {
+            ret = RSA_sign_async(NID_md5_sha1, buf, 36, buf2, &rsa_num, rsa_key[j]);
+            poll_engine(engine, batch);
+        } while (ret == -1 && rsa_key[j]->job != NULL);
         if (ret == 0) {
             BIO_printf(bio_err,
                        "RSA sign failure.  No RSA sign will be done.\n");
@@ -2023,11 +2181,13 @@ int MAIN(int argc, char **argv)
             /* RSA_blinding_on(rsa_key[j],NULL); */
             Time_F(START);
             for (count = 0, run = 1; COND(rsa_c[j][0]); count++) {
+                requestno++;
+                requestno=requestno%batch;
                 //ret = RSA_sign(NID_md5_sha1, buf, 36, buf2,
                 //               &rsa_num, rsa_key[j]);
                 ret = RSA_sign_async(NID_md5_sha1, buf, 36, buf2,
-                               &rsa_num, rsa_key[j]);
-                if (ret == -1 && rsa_key[j]->job != NULL) {
+                               &rsa_num, rsa_inflights[requestno]);
+                if (ret == -1 && rsa_inflights[requestno]->job != NULL) {
                     count--; /*Retry detected so need to resubmit*/
                 }
                 if (ret == 0) {
@@ -2036,7 +2196,10 @@ int MAIN(int argc, char **argv)
                     count = 1;
                     break;
                 }
+                if (requestno == 0)
+                    poll_engine(engine, batch);
             }
+            poll_engine(engine, batch);
             d = Time_F(STOP);
             BIO_printf(bio_err,
                        mr ? "+R1:%ld:%d:%.2f\n"
@@ -2046,22 +2209,28 @@ int MAIN(int argc, char **argv)
             rsa_count = count;
         }
 
-        ret = RSA_verify(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
+        do {
+            ret = RSA_verify_async(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
+            poll_engine(engine, batch);
+        } while (ret == -1 && rsa_key[j]->job != NULL);
         if (ret <= 0) {
             BIO_printf(bio_err,
                        "RSA verify failure.  No RSA verify will be done.\n");
             ERR_print_errors(bio_err);
             rsa_doit[j] = 0;
         } else {
+            requestno=0;
             pkey_print_message("public", "rsa",
                                rsa_c[j][1], rsa_bits[j], RSA_SECONDS);
             Time_F(START);
             for (count = 0, run = 1; COND(rsa_c[j][1]); count++) {
+                requestno++;
+                requestno=requestno%batch;
                 //ret = RSA_verify(NID_md5_sha1, buf, 36, buf2,
                 //                 rsa_num, rsa_key[j]);
                 ret = RSA_verify_async(NID_md5_sha1, buf, 36, buf2,
-                                 rsa_num, rsa_key[j]);
-                if (ret == -1 && rsa_key[j]->job != NULL) {
+                                 rsa_num, rsa_inflights[requestno]);
+                if (ret == -1 && rsa_inflights[requestno]->job != NULL) {
                     count--;
                 } else {
                     if (ret <= 0) {
@@ -2071,7 +2240,10 @@ int MAIN(int argc, char **argv)
                         break;
                    }
                 }
+                if (requestno == 0)
+                    poll_engine(engine, batch);
             }
+            poll_engine(engine, batch);
             d = Time_F(STOP);
             BIO_printf(bio_err,
                        mr ? "+R2:%ld:%d:%.2f\n"
