@@ -85,6 +85,9 @@
 int qat_dh_generate_key_synch(DH *dh);
 int qat_dh_compute_key_synch(unsigned char *key, const BIGNUM *pub_key,
                              DH *dh);
+int qat_mod_exp_dh(const DH *dh, BIGNUM *r, const BIGNUM *a,
+                   const BIGNUM *p, const BIGNUM *m, BN_CTX *ctx,
+                   BN_MONT_CTX *m_ctx);
 
 static DH_METHOD qat_dh_method = {
     "QAT DH method",            /* name */

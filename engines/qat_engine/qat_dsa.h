@@ -61,9 +61,6 @@
 
 /* Qat engine DSA methods declaration */
 
-int qat_mod_exp_dsa(DSA *dsa, BIGNUM *r, BIGNUM *a, const BIGNUM *p,
-                    const BIGNUM *m, BN_CTX *ctx, BN_MONT_CTX *m_ctx);
-
 DSA_METHOD *get_DSA_methods(void);
 
-#endif                          // QAT_DSA_H
+#endif                          /* QAT_DSA_H */

@@ -63,4 +63,4 @@
 
 ECDH_METHOD *get_ECDH_methods(void);
 
-#endif                          // QAT_ECDH_H
+#endif                          /* QAT_ECDH_H */

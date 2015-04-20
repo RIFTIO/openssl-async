@@ -60,10 +60,7 @@
 # include <openssl/dh.h>
 
 /* Qat engine DH methods declaration */
-int qat_mod_exp_dh(const DH *dh, BIGNUM *r, const BIGNUM *a,
-                   const BIGNUM *p, const BIGNUM *m, BN_CTX *ctx,
-                   BN_MONT_CTX *m_ctx);
 
 DH_METHOD *get_DH_methods(void);
 
-#endif                          // QAT_DH_H
+#endif                          /* QAT_DH_H */

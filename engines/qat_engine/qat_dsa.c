@@ -87,6 +87,10 @@
 DSA_SIG *qat_dsa_do_sign_synch(const unsigned char *dgst, int dlen, DSA *dsa);
 int qat_dsa_do_verify_synch(const unsigned char *dgst, int dgst_len,
                             DSA_SIG *sig, DSA *dsa);
+int qat_dsa_sign_setup(DSA *dsa, BN_CTX *ctx_in, BIGNUM **kinvp, BIGNUM **rp);
+int qat_mod_exp_dsa(DSA *dsa, BIGNUM *r, BIGNUM *a, const BIGNUM *p,
+                    const BIGNUM *m, BN_CTX *ctx, BN_MONT_CTX *m_ctx);
+
 /* Qat DSA method structure declaration. */
 static DSA_METHOD qat_dsa_method = {
     "QAT DSA method",           /* name */
