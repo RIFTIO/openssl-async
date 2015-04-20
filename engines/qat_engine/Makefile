@@ -55,7 +55,7 @@ QATLIBSRC_SHARED = e_qat.c\
 	 qat_dsa.c\
 	 qat_dh.c\
 	 qat_ecdh.c\
-	 qat_ecdsa.c\ 
+	 qat_ecdsa.c\
 	 qat_asym_common.c\
 	 qat_sym_common.c\
 	 e_qat_err.c\
