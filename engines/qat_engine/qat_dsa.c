@@ -61,6 +61,8 @@
 #include "qat_asym_common.h"
 
 #include <openssl/dsa.h>
+#include <openssl/err.h>
+#include <openssl/bn.h>
 #include "cpa.h"
 #include "cpa_types.h"
 #include "cpa_cy_dh.h"
