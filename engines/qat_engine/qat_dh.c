@@ -62,6 +62,8 @@
 #ifdef USE_QAE_MEM
 # include "qat_mem_drv_inf.h"
 #endif
+#include <openssl/err.h>
+#include <openssl/bn.h>
 #include "qat_asym_common.h"
 #include "qat_utils.h"
 #include "cpa.h"
