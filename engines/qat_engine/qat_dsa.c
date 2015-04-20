@@ -82,28 +82,9 @@
 # endif
 #endif
 
-#ifdef OPENSSL_ENABLE_QAT_DSA_ASYNCH
-# ifdef OPENSSL_DISABLE_QAT_DSA_ASYNCH
-#  undef OPENSSL_DISABLE_QAT_DSA_ASYNCH
-# endif
-#endif
-
 DSA_SIG *qat_dsa_do_sign_synch(const unsigned char *dgst, int dlen, DSA *dsa);
 int qat_dsa_do_verify_synch(const unsigned char *dgst, int dgst_len,
                             DSA_SIG *sig, DSA *dsa);
-#ifdef OPENSSL_QAT_ASYNCH
-DSA_SIG *qat_dsa_do_sign_asynch(const unsigned char *dgst, int dlen,
-                                unsigned char *sig, unsigned int *siglen,
-                                DSA *dsa, int (*cb) (unsigned char *res,
-                                                     size_t reslen,
-                                                     void *cb_data,
-                                                     int status),
-                                void *cb_data);
-int qat_dsa_do_verify_asynch(const unsigned char *dgst, int dgst_len,
-                             DSA_SIG *sig, DSA *dsa, int (*cb) (void *cb_data,
-                                                                int status),
-                             void *cb_data);
-#endif
 /* Qat DSA method structure declaration. */
 static DSA_METHOD qat_dsa_method = {
     "QAT DSA method",           /* name */
@@ -118,16 +99,11 @@ static DSA_METHOD qat_dsa_method = {
     NULL,                       /* app_data */
     NULL,                       /* dsa_paramgen */
     NULL                        /* dsa_keygen */
-#ifdef OPENSSL_QAT_ASYNCH
-        , qat_dsa_do_sign_asynch, /* do_sign asynch */
-    qat_dsa_do_verify_asynch    /* do_verify asynch */
-#endif
 };
 
 DSA_METHOD *get_DSA_methods(void)
 {
 #ifdef OPENSSL_DISABLE_QAT_DSA_SYNCH
-# ifndef OPENSSL_DISABLE_QAT_DSA_ASYNCH
     const DSA_METHOD *def_dsa_meth = DSA_get_default_method();
     if (def_dsa_meth) {
         qat_dsa_method.dsa_do_sign = def_dsa_meth->dsa_do_sign;
@@ -140,42 +116,10 @@ DSA_METHOD *get_DSA_methods(void)
         qat_dsa_method.dsa_do_verify = NULL;
         qat_dsa_method.bn_mod_exp = NULL;
     }
-# endif
 #endif
 
-#ifdef OPENSSL_QAT_ASYNCH
-# ifndef OPENSSL_DISABLE_QAT_DSA_SYNCH
-#  ifdef OPENSSL_DISABLE_QAT_DSA_ASYNCH
-    qat_dsa_method.dsa_do_sign_asynch = NULL;
-    qat_dsa_method.dsa_do_verify_asynch = NULL;
-#  endif
-# endif
-#endif
-
-#ifdef OPENSSL_DISABLE_QAT_DSA_SYNCH
-# ifdef OPENSSL_DISABLE_QAT_DSA_ASYNCH
-    return NULL;
-# endif
-#endif
     return &qat_dsa_method;
 }
-
-typedef struct dsa_sign_op_data {
-    BIGNUM *r;
-    BIGNUM *s;
-    unsigned char *sig;
-    unsigned int *siglen;
-    CpaCyDsaRSSignOpData *opData;
-    int (*cb_func) (unsigned char *res, size_t reslen, void *cb_data,
-                    int status);
-    void *cb_data;
-} dsa_sign_op_data_t;
-
-typedef struct dsa_verify_op_data {
-    CpaCyDsaVerifyOpData *opData;
-    int (*cb_func) (void *cb_data, int status);
-    void *cb_data;
-} dsa_verify_op_data_t;
 
 /*
  * DSA range Supported in QAT {L,N} = {1024, 160}, {2048, 224} {2048, 256},
@@ -223,122 +167,6 @@ void qat_dsaVerifyCallbackFn(void *pCallbackTag, CpaStatus status,
     qat_crypto_callbackFn(pCallbackTag, status, CPA_CY_SYM_OP_CIPHER, pOpData,
                           NULL, bDsaVerifyStatus);
 }
-
-#ifdef OPENSSL_QAT_ASYNCH
-/* Callback to indicate QAT sync completion of DSA Sign in asynch mode */
-void qat_dsaSignAsynchCallbackFn(void *pCallbackTag, CpaStatus status,
-                                 void *pOpData, CpaBoolean bDsaSignStatus,
-                                 CpaFlatBuffer * pResultR,
-                                 CpaFlatBuffer * pResultS)
-{
-    DSA_SIG *ret = NULL;
-    dsa_sign_op_data_t *sign_async_data =
-        (dsa_sign_op_data_t *) (pCallbackTag);
-    int cb_status = status == CPA_STATUS_SUCCESS ? 1 : 0;
-
-    if (!sign_async_data || !pResultR || !pResultS ||
-        !sign_async_data->siglen || !sign_async_data->sig) {
-        WARN("[%s] --- parameters NULL!\n", __func__);
-        goto err;
-    }
-
-    ret = DSA_SIG_new();
-    if (!ret) {
-        WARN("[%s] --- DSA_SIG_new() failed!\n", __func__);
-        goto err;
-    }
-
-    /* Convert the flatbuffer results back to a BN */
-    BN_bin2bn(pResultR->pData, pResultR->dataLenInBytes, sign_async_data->r);
-    BN_bin2bn(pResultS->pData, pResultS->dataLenInBytes, sign_async_data->s);
-    ret->r = sign_async_data->r;
-    ret->s = sign_async_data->s;
-
-    *sign_async_data->siglen = i2d_DSA_SIG(ret, &sign_async_data->sig);
-
-    /* Invoke the user registered callback */
-    sign_async_data->cb_func(sign_async_data->sig, *sign_async_data->siglen,
-                             sign_async_data->cb_data, cb_status);
-
- err:
-    if (ret) {
-        DSA_SIG_free(ret);
-    }
-
-    if (pResultR) {
-        if (pResultR->pData) {
-            qaeCryptoMemFree(pResultR->pData);
-        }
-        OPENSSL_free(pResultR);
-    }
-    if (pResultS) {
-        if (pResultS->pData) {
-            qaeCryptoMemFree(pResultS->pData);
-        }
-        OPENSSL_free(pResultS);
-    }
-
-    if (sign_async_data) {
-        if (sign_async_data->opData) {
-            if (sign_async_data->opData->P.pData)
-                qaeCryptoMemFree(sign_async_data->opData->P.pData);
-            if (sign_async_data->opData->Q.pData)
-                qaeCryptoMemFree(sign_async_data->opData->Q.pData);
-            if (sign_async_data->opData->G.pData)
-                qaeCryptoMemFree(sign_async_data->opData->G.pData);
-            if (sign_async_data->opData->X.pData)
-                qaeCryptoMemFree(sign_async_data->opData->X.pData);
-            if (sign_async_data->opData->K.pData)
-                qaeCryptoMemFree(sign_async_data->opData->K.pData);
-            if (sign_async_data->opData->Z.pData)
-                qaeCryptoMemFree(sign_async_data->opData->Z.pData);
-            OPENSSL_free(sign_async_data->opData);
-        }
-        OPENSSL_free(sign_async_data);
-    }
-}
-#endif
-
-#ifdef OPENSSL_QAT_ASYNCH
-/* Callback to indicate QAT sync completion of DSA Verify in asynch mode*/
-void qat_dsaVerifyAsynchCallbackFn(void *pCallbackTag, CpaStatus status,
-                                   void *pOpData, CpaBoolean bDsaVerifyStatus)
-{
-    dsa_verify_op_data_t *verify_async_data =
-        (dsa_verify_op_data_t *) (pCallbackTag);
-    int cb_status = bDsaVerifyStatus == CPA_TRUE ? 1 : 0;
-
-    if (!verify_async_data) {
-        WARN("[%s] --- pCallbackTag NULL!\n", __func__);
-        goto err;
-    }
-
-    /* Invoke the user registered callback */
-    verify_async_data->cb_func(verify_async_data->cb_data, cb_status);
-
- err:
-    if (verify_async_data) {
-        if (verify_async_data->opData) {
-            if (verify_async_data->opData->P.pData)
-                qaeCryptoMemFree(verify_async_data->opData->P.pData);
-            if (verify_async_data->opData->Q.pData)
-                qaeCryptoMemFree(verify_async_data->opData->Q.pData);
-            if (verify_async_data->opData->G.pData)
-                qaeCryptoMemFree(verify_async_data->opData->G.pData);
-            if (verify_async_data->opData->Y.pData)
-                qaeCryptoMemFree(verify_async_data->opData->Y.pData);
-            if (verify_async_data->opData->Z.pData)
-                qaeCryptoMemFree(verify_async_data->opData->Z.pData);
-            if (verify_async_data->opData->R.pData)
-                qaeCryptoMemFree(verify_async_data->opData->R.pData);
-            if (verify_async_data->opData->S.pData)
-                qaeCryptoMemFree(verify_async_data->opData->S.pData);
-            OPENSSL_free(verify_async_data->opData);
-        }
-        OPENSSL_free(verify_async_data);
-    }
-}
-#endif
 
 /******************************************************************************
 * function:
@@ -397,9 +225,6 @@ DSA_SIG *qat_dsa_do_sign(const unsigned char *dgst, int dlen,
     int qatPerformOpRetries = 0;
     useconds_t ulPollInterval = getQatPollInterval();
     int iMsgRetry = getQatMsgRetryCount();
-#ifdef OPENSSL_QAT_ASYNCH
-    dsa_sign_op_data_t *dsa_op_done = NULL;
-#endif
     int rc = 1;
 
     DEBUG("[%s] --- called.\n", __func__);
@@ -555,58 +380,6 @@ DSA_SIG *qat_dsa_do_sign(const unsigned char *dgst, int dlen,
         ret->r = r;
         ret->s = s;
     }
-#ifdef OPENSSL_QAT_ASYNCH
-    else {                      /* Asynch mode */
-
-        dsa_op_done =
-            (dsa_sign_op_data_t *) OPENSSL_malloc(sizeof(dsa_sign_op_data_t));
-        if (dsa_op_done == NULL) {
-            QATerr(QAT_F_QAT_DSA_DO_SIGN, ERR_R_MALLOC_FAILURE);
-            DSA_SIG_free(ret);
-            ret = NULL;
-            goto err;
-        }
-
-        dsa_op_done->r = r;
-        dsa_op_done->s = s;
-        dsa_op_done->sig = sig;
-        dsa_op_done->siglen = siglen;
-        dsa_op_done->opData = opData;
-        dsa_op_done->cb_func = cb;
-        dsa_op_done->cb_data = cb_data;
-
-        if ((instanceHandle = get_next_inst()) == NULL) {
-            QATerr(QAT_F_QAT_DSA_DO_SIGN, ERR_R_INTERNAL_ERROR);
-            OPENSSL_free(dsa_op_done);
-            DSA_SIG_free(ret);
-            ret = NULL;
-            goto err;
-        }
-
-        status = cpaCyDsaSignRS(instanceHandle,
-                                qat_dsaSignAsynchCallbackFn,
-                                dsa_op_done,
-                                opData, &bDsaSignStatus, pResultR, pResultS);
-
-        if (status != CPA_STATUS_SUCCESS) {
-            WARN("[%s] --- Async cpaCyEcdsaSignRS, status=%d.\n", __func__,
-                 status);
-            if (status == CPA_STATUS_RETRY) {
-                QATerr(QAT_F_QAT_DSA_DO_SIGN, ERR_R_RETRY);
-            } else
-                QATerr(QAT_F_QAT_DSA_DO_SIGN, ERR_R_INTERNAL_ERROR);
-            OPENSSL_free(dsa_op_done);
-            DSA_SIG_free(ret);
-            ret = NULL;
-            goto err;
-        }
-        if (ctx)
-            BN_CTX_end(ctx);
-        if (ctx)
-            BN_CTX_free(ctx);
-        return ret;
-    }
-#endif
  err:
     if (!ret) {
         BN_free(r);
@@ -677,56 +450,6 @@ DSA_SIG *qat_dsa_do_sign_synch(const unsigned char *dgst, int dlen, DSA *dsa)
     return qat_dsa_do_sign(dgst, dlen, NULL, NULL, dsa, NULL, NULL);
 }
 
-#ifdef OPENSSL_QAT_ASYNCH
-/******************************************************************************
-* function:
-*         qat_dsa_do_sign_asynch(const unsigned char *dgst, int dlen,
-*                                unsigned char *sig, unsigned int *siglen,
-*                                DSA *dsa, int (*cb)(unsigned char *res,
-*                                size_t reslen, void *cb_data, int status),
-*                                void *cb_data)
-*
-* description:
-*   Generate DSA R and S Signatures in asynch mode.
-******************************************************************************/
-DSA_SIG *qat_dsa_do_sign_asynch(const unsigned char *dgst, int dlen,
-                                unsigned char *sig, unsigned int *siglen,
-                                DSA *dsa, int (*cb) (unsigned char *res,
-                                                     size_t reslen,
-                                                     void *cb_data,
-                                                     int status),
-                                void *cb_data)
-{
-    const DSA_METHOD *default_dsa_method = DSA_OpenSSL();
-    DSA_SIG *ret = NULL;
-
-    qat_dsa_method.bn_mod_exp = default_dsa_method->bn_mod_exp;
-
-    if (!dsa || !cb || !siglen)
-        return NULL;
-
-    /*
-     * If the sizes of P and Q are not in the range supported by QAT engine
-     * then fall back to software
-     */
-
-    if (!dsa_range_check(BN_num_bits(dsa->p), BN_num_bits(dsa->q))) {
-        if (!default_dsa_method)
-            return NULL;
-
-        ret = default_dsa_method->dsa_do_sign(dgst, dlen, dsa);
-        if (!ret)
-            return NULL;
-
-        *siglen = i2d_DSA_SIG(ret, &sig);
-        cb(sig, *siglen, cb_data, 1);
-        return ret;
-    }
-
-    return qat_dsa_do_sign(dgst, dlen, sig, siglen, dsa, cb, cb_data);
-}
-#endif
-
 /******************************************************************************
 * function:
 *         qat_dsa_sign_setup(DSA *dsa, BN_CTX *ctx_in, BIGNUM **kinvp,
@@ -769,9 +492,6 @@ int qat_dsa_do_verify(const unsigned char *dgst, int dgst_len,
     int qatPerformOpRetries = 0;
     useconds_t ulPollInterval = getQatPollInterval();
     int iMsgRetry = getQatMsgRetryCount();
-#ifdef OPENSSL_QAT_ASYNCH
-    dsa_verify_op_data_t *dsa_op_done = NULL;
-#endif
 
     DEBUG("[%s] --- called.\n", __func__);
     CRYPTO_QAT_LOG("AU - %s\n", __func__);
@@ -884,48 +604,6 @@ int qat_dsa_do_verify(const unsigned char *dgst, int dgst_len,
             goto err;
         }
     }
-#ifdef OPENSSL_QAT_ASYNCH
-    else {                      /* Asynch mode */
-
-        dsa_op_done = (dsa_verify_op_data_t *)
-            OPENSSL_malloc(sizeof(dsa_verify_op_data_t));
-        if (dsa_op_done == NULL) {
-            QATerr(QAT_F_QAT_DSA_DO_VERIFY, ERR_R_MALLOC_FAILURE);
-            goto err;
-        }
-
-        dsa_op_done->opData = opData;
-        dsa_op_done->cb_func = cb;
-        dsa_op_done->cb_data = cb_data;
-
-        if ((instanceHandle = get_next_inst()) == NULL) {
-            QATerr(QAT_F_QAT_DSA_DO_VERIFY, ERR_R_INTERNAL_ERROR);
-            OPENSSL_free(dsa_op_done);
-            goto err;
-        }
-
-        status = cpaCyDsaVerify(instanceHandle,
-                                qat_dsaVerifyAsynchCallbackFn,
-                                dsa_op_done, opData, &bDsaVerifyStatus);
-
-        if (status != CPA_STATUS_SUCCESS) {
-            WARN("[%s] --- Async cpaCyDsaVerify, status=%d.\n", __func__,
-                 status);
-            if (status == CPA_STATUS_RETRY) {
-                QATerr(QAT_F_QAT_DSA_DO_VERIFY, ERR_R_RETRY);
-            }
-            OPENSSL_free(dsa_op_done);
-            ret = 0;
-            goto err;
-        }
-        ret = 1;
-        if (ctx)
-            BN_CTX_end(ctx);
-        if (ctx)
-            BN_CTX_free(ctx);
-        return ret;
-    }
-#endif
 
  err:
     if (opData) {
@@ -984,40 +662,3 @@ int qat_dsa_do_verify_synch(const unsigned char *dgst, int dgst_len,
     return qat_dsa_do_verify(dgst, dgst_len, sig, dsa, NULL, NULL);
 }
 
-#ifdef OPENSSL_QAT_ASYNCH
-/******************************************************************************
-* function:
-*         qat_dsa_do_verify_asynch(const unsigned char *dgst, int dgst_len,
-*                           DSA_SIG *sig, DSA *dsa,
-*                           int (*cb)(void *cb_data, int status), void *cb_data)
-*
-* description:
-*   Verify DSA R and S Signatures in asynch mode.
-******************************************************************************/
-int qat_dsa_do_verify_asynch(const unsigned char *dgst, int dgst_len,
-                             DSA_SIG *sig, DSA *dsa,
-                             int (*cb) (void *cb_data, int status),
-                             void *cb_data)
-{
-    const DSA_METHOD *default_dsa_method = DSA_OpenSSL();
-    int ret = 0;
-
-    if (!dsa || !cb)
-        return -1;
-
-    /*
-     * If the sizes of P and Q are not in the range supported by QAT engine
-     * then fall back to software
-     */
-
-    if (!dsa_range_check(BN_num_bits(dsa->p), BN_num_bits(dsa->q))) {
-        if (!default_dsa_method)
-            return -1;
-        ret = default_dsa_method->dsa_do_verify(dgst, dgst_len, sig, dsa);
-        cb(cb_data, ret);
-        return 1;
-    }
-
-    return qat_dsa_do_verify(dgst, dgst_len, sig, dsa, cb, cb_data);
-}
-#endif

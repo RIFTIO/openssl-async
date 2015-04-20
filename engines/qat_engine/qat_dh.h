@@ -63,14 +63,6 @@
 int qat_mod_exp_dh(const DH *dh, BIGNUM *r, const BIGNUM *a,
                    const BIGNUM *p, const BIGNUM *m, BN_CTX *ctx,
                    BN_MONT_CTX *m_ctx);
-int qat_dh_generate_key(DH *dh,
-                        int (*cb) (unsigned char *res, size_t reslen,
-                                   void *cb_data, int status), void *cb_data);
-
-int qat_dh_compute_key(unsigned char *key, int *len, const BIGNUM *pub_key,
-                       DH *dh, int (*cb) (unsigned char *res, size_t reslen,
-                                          void *cb_data, int status),
-                       void *cb_data);
 
 DH_METHOD *get_DH_methods(void);
 

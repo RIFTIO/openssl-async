@@ -60,16 +60,6 @@
 # include <openssl/dsa.h>
 
 /* Qat engine DSA methods declaration */
-DSA_SIG *qat_dsa_do_sign(const unsigned char *dgst, int dlen,
-                         unsigned char *sig, unsigned int *siglen,
-                         DSA *dsa, int (*cb) (unsigned char *res,
-                                              size_t reslen, void *cb_data,
-                                              int status), void *cb_data);
-
-int qat_dsa_sign_setup(DSA *dsa, BN_CTX *ctx_in, BIGNUM **kinvp, BIGNUM **rp);
-int qat_dsa_do_verify(const unsigned char *dgst, int dgst_len,
-                      DSA_SIG *sig, DSA *dsa,
-                      int (*cb) (void *cb_data, int status), void *cb_data);
 
 int qat_mod_exp_dsa(DSA *dsa, BIGNUM *r, BIGNUM *a, const BIGNUM *p,
                     const BIGNUM *m, BN_CTX *ctx, BN_MONT_CTX *m_ctx);

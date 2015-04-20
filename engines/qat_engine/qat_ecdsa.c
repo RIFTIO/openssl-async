@@ -82,16 +82,6 @@
 # endif
 #endif
 
-#ifdef OPENSSL_ENABLE_QAT_ECDSA_ASYNCH
-# ifdef OPENSSL_DISABLE_QAT_ECDSA_ASYNCH
-#  undef OPENSSL_DISABLE_QAT_ECDSA_ASYNCH
-# endif
-#endif
-
-#ifndef OPENSSL_QAT_ASYNCH
-# define OPENSSL_DISABLE_QAT_ECDSA_ASYNCH
-#endif
-
 static ECDSA_SIG *qat_ecdsa_do_sign(const unsigned char *dgst, int dlen,
                                     const BIGNUM *, const BIGNUM *,
                                     EC_KEY *eckey, unsigned char *sig,
@@ -108,39 +98,14 @@ static ECDSA_SIG *qat_ecdsa_do_sign_sync(const unsigned char *dgst,
                                          int dgst_len, const BIGNUM *in_kinv,
                                          const BIGNUM *in_r, EC_KEY *eckey);
 
-#ifdef OPENSSL_QAT_ASYNCH
-static ECDSA_SIG *qat_ecdsa_do_sign_asynch(const unsigned char *dgst,
-                                           int dgst_len,
-                                           const BIGNUM *in_kinv,
-                                           const BIGNUM *in_r, EC_KEY *eckey,
-                                           unsigned char *sig,
-                                           unsigned int *siglen,
-                                           int (*cb) (unsigned char *res,
-                                                      size_t reslen,
-                                                      void *cb_data,
-                                                      int status),
-                                           void *cb_data);
-#endif
-
 static int qat_ecdsa_do_verify_sync(const unsigned char *dgst, int dgst_len,
                                     const ECDSA_SIG *sig, EC_KEY *eckey);
-
-#ifdef OPENSSL_QAT_ASYNCH
-static int qat_ecdsa_do_verify_asynch(const unsigned char *dgst, int dgst_len,
-                                      const ECDSA_SIG *sig, EC_KEY *eckey,
-                                      int (*cb) (void *cb_data, int status),
-                                      void *cb_data);
-#endif
 
 static ECDSA_METHOD qat_ecdsa_method = {
     "QAT ECDSA method",
     qat_ecdsa_do_sign_sync,
     NULL,
     qat_ecdsa_do_verify_sync,
-#ifdef OPENSSL_QAT_ASYNCH
-    qat_ecdsa_do_sign_asynch,
-    qat_ecdsa_do_verify_asynch,
-#endif
     0,                          /* flags */
     NULL                        /* app_data */
 };
@@ -148,48 +113,15 @@ static ECDSA_METHOD qat_ecdsa_method = {
 ECDSA_METHOD *get_ECDSA_methods(void)
 {
 #ifdef OPENSSL_DISABLE_QAT_ECDSA_SYNCH
-# ifndef OPENSSL_DISABLE_QAT_ECDSA_ASYNCH
     const ECDSA_METHOD *def_ecdsa_meth = ECDSA_get_default_method();
 
     qat_ecdsa_method.ecdsa_do_sign = def_ecdsa_meth->ecdsa_do_sign;
     qat_ecdsa_method.ecdsa_sign_setup = def_ecdsa_meth->ecdsa_sign_setup;
     qat_ecdsa_method.ecdsa_do_verify = def_ecdsa_meth->ecdsa_do_verify;
-# endif
 #endif
 
-#ifdef OPENSSL_QAT_ASYNCH
-# ifndef OPENSSL_DISABLE_QAT_ECDSA_SYNCH
-#  ifdef OPENSSL_DISABLE_QAT_ECDSA_ASYNCH
-    qat_ecdsa_method.ecdsa_do_sign_asynch = NULL;
-    qat_ecdsa_method.ecdsa_do_verify_asynch = NULL;
-#  endif
-# endif
-#endif
-
-#ifdef OPENSSL_DISABLE_QAT_ECDSA_SYNCH
-# ifdef OPENSSL_DISABLE_QAT_ECDSA_ASYNCH
-    return NULL;
-# endif
-#endif
     return &qat_ecdsa_method;
 }
-
-typedef struct ecdsa_sign_op_data {
-    BN_CTX *ctx;
-    unsigned char *sig;
-    unsigned int *siglen;
-    CpaCyEcdsaSignRSOpData *sign_op_data;
-    int (*cb_func) (unsigned char *res, size_t reslen, void *cb_data,
-                    int status);
-    void *cb_data;
-} ecdsa_sign_op_data_t;
-
-typedef struct ecdsa_verify_op_data {
-    BN_CTX *ctx;
-    CpaCyEcdsaVerifyOpData *verify_op_data;
-    int (*cb_func) (void *cb_data, int status);
-    void *cb_data;
-} ecdsa_verify_op_data_t;
 
 /* Callback to indicate QAT sync completion of ECDSA Sign */
 void qat_ecdsaSignCallbackFn(void *pCallbackTag, CpaStatus status,
@@ -201,88 +133,6 @@ void qat_ecdsaSignCallbackFn(void *pCallbackTag, CpaStatus status,
                           NULL, CPA_FALSE);
 }
 
-#ifdef OPENSSL_QAT_ASYNCH
-/* Callback to indicate QAT async completion of ECDSA Sign */
-void qat_ecdsaAsyncSignCallbackFn(void *pCallbackTag, CpaStatus status,
-                                  void *pOpData, CpaBoolean bEcdsaSignStatus,
-                                  CpaFlatBuffer * pResultR,
-                                  CpaFlatBuffer * pResultS)
-{
-    ECDSA_SIG *ret = NULL;
-    ecdsa_sign_op_data_t *sign_async_data =
-        (ecdsa_sign_op_data_t *) (pCallbackTag);
-    int cb_status = status == CPA_STATUS_SUCCESS ? 1 : 0;
-
-    if (!sign_async_data) {
-        WARN("[%s] --- pCallbackTag NULL!\n", __func__);
-        goto err;
-    }
-
-    ret = ECDSA_SIG_new();
-    if (!ret) {
-        WARN("[%s] --- ECDSA_SIG_new() failed!\n", __func__);
-        goto err;
-    }
-
-    /* Convert the flatbuffer results back to a BN */
-    BN_bin2bn(pResultR->pData, pResultR->dataLenInBytes, ret->r);
-    BN_bin2bn(pResultS->pData, pResultS->dataLenInBytes, ret->s);
-
-    *sign_async_data->siglen = i2d_ECDSA_SIG(ret, &sign_async_data->sig);
-
-    /* Invoke the user registered callback */
-    sign_async_data->cb_func(sign_async_data->sig, *sign_async_data->siglen,
-                             sign_async_data->cb_data, cb_status);
-
- err:
-    if (pResultR) {
-        if (pResultR->pData) {
-            qaeCryptoMemFree(pResultR->pData);
-        }
-        OPENSSL_free(pResultR);
-    }
-    if (pResultS) {
-        if (pResultS->pData) {
-            qaeCryptoMemFree(pResultS->pData);
-        }
-        OPENSSL_free(pResultS);
-    }
-
-    if (ret)
-        ECDSA_SIG_free(ret);
-
-    if (sign_async_data) {
-        if (sign_async_data->sign_op_data) {
-            if (sign_async_data->sign_op_data->k.pData)
-                qaeCryptoMemFree(sign_async_data->sign_op_data->k.pData);
-            if (sign_async_data->sign_op_data->n.pData)
-                qaeCryptoMemFree(sign_async_data->sign_op_data->n.pData);
-            if (sign_async_data->sign_op_data->m.pData)
-                qaeCryptoMemFree(sign_async_data->sign_op_data->m.pData);
-            if (sign_async_data->sign_op_data->d.pData)
-                qaeCryptoMemFree(sign_async_data->sign_op_data->d.pData);
-            if (sign_async_data->sign_op_data->xg.pData)
-                qaeCryptoMemFree(sign_async_data->sign_op_data->xg.pData);
-            if (sign_async_data->sign_op_data->yg.pData)
-                qaeCryptoMemFree(sign_async_data->sign_op_data->yg.pData);
-            if (sign_async_data->sign_op_data->a.pData)
-                qaeCryptoMemFree(sign_async_data->sign_op_data->a.pData);
-            if (sign_async_data->sign_op_data->b.pData)
-                qaeCryptoMemFree(sign_async_data->sign_op_data->b.pData);
-            if (sign_async_data->sign_op_data->q.pData)
-                qaeCryptoMemFree(sign_async_data->sign_op_data->q.pData);
-            OPENSSL_free(sign_async_data->sign_op_data);
-        }
-
-        if (sign_async_data->ctx)
-            BN_CTX_end(sign_async_data->ctx);
-        if (sign_async_data->ctx)
-            BN_CTX_free(sign_async_data->ctx);
-        OPENSSL_free(sign_async_data);
-    }
-}
-#endif
-
 /* Callback to indicate QAT sync completion of ECDSA Verify */
 void qat_ecdsaVerifyCallbackFn(void *pCallbackTag, CpaStatus status,
                                void *pOpData, CpaBoolean bEcdsaVerifyStatus)
@@ -290,57 +140,6 @@ void qat_ecdsaVerifyCallbackFn(void *pCallbackTag, CpaStatus status,
     qat_crypto_callbackFn(pCallbackTag, status, CPA_CY_SYM_OP_CIPHER, pOpData,
                           NULL, bEcdsaVerifyStatus);
 }
-
-#ifdef OPENSSL_QAT_ASYNCH
-/* Callback to indicate QAT async completion of ECDSA Verify */
-void qat_ecdsaAsyncVerifyCallbackFn(void *pCallbackTag, CpaStatus status,
-                                    void *pOpData,
-                                    CpaBoolean bEcdsaVerifyStatus)
-{
-    ecdsa_verify_op_data_t *verify_async_data =
-        (ecdsa_verify_op_data_t *) (pCallbackTag);
-    int cb_status = bEcdsaVerifyStatus == CPA_TRUE ? 1 : 0;
-
-    if (!verify_async_data) {
-        WARN("[%s] --- pCallbackTag NULL!\n", __func__);
-        goto err;
-    }
-
-    /* Invoke the user registered callback */
-    verify_async_data->cb_func(verify_async_data->cb_data, cb_status);
-
- err:
-    if (verify_async_data) {
-        if (verify_async_data->verify_op_data) {
-            if (verify_async_data->verify_op_data->r.pData)
-                qaeCryptoMemFree(verify_async_data->verify_op_data->r.pData);
-            if (verify_async_data->verify_op_data->s.pData)
-                qaeCryptoMemFree(verify_async_data->verify_op_data->s.pData);
-            if (verify_async_data->verify_op_data->n.pData)
-                qaeCryptoMemFree(verify_async_data->verify_op_data->n.pData);
-            if (verify_async_data->verify_op_data->m.pData)
-                qaeCryptoMemFree(verify_async_data->verify_op_data->m.pData);
-            if (verify_async_data->verify_op_data->xg.pData)
-                qaeCryptoMemFree(verify_async_data->verify_op_data->xg.pData);
-            if (verify_async_data->verify_op_data->yg.pData)
-                qaeCryptoMemFree(verify_async_data->verify_op_data->yg.pData);
-            if (verify_async_data->verify_op_data->a.pData)
-                qaeCryptoMemFree(verify_async_data->verify_op_data->a.pData);
-            if (verify_async_data->verify_op_data->b.pData)
-                qaeCryptoMemFree(verify_async_data->verify_op_data->b.pData);
-            if (verify_async_data->verify_op_data->q.pData)
-                qaeCryptoMemFree(verify_async_data->verify_op_data->q.pData);
-            OPENSSL_free(verify_async_data->verify_op_data);
-        }
-
-        if (verify_async_data->ctx)
-            BN_CTX_end(verify_async_data->ctx);
-        if (verify_async_data->ctx)
-            BN_CTX_free(verify_async_data->ctx);
-        OPENSSL_free(verify_async_data);
-    }
-}
-#endif
 
 static ECDSA_SIG *qat_ecdsa_do_sign(const unsigned char *dgst, int dgst_len,
                                     const BIGNUM *in_kinv, const BIGNUM *in_r,
@@ -373,9 +172,6 @@ static ECDSA_SIG *qat_ecdsa_do_sign(const unsigned char *dgst, int dgst_len,
     useconds_t ulPollInterval = getQatPollInterval();
     int iMsgRetry = getQatMsgRetryCount();
     const EC_POINT *ec_point = NULL;
-#ifdef OPENSSL_QAT_ASYNCH
-    ecdsa_sign_op_data_t *ecdsa_op_done = NULL;
-#endif
 
     DEBUG("[%s] --- called.\n", __func__);
     CRYPTO_QAT_LOG("AU - %s\n", __func__);
@@ -632,47 +428,6 @@ static ECDSA_SIG *qat_ecdsa_do_sign(const unsigned char *dgst, int dgst_len,
 
         ok = 1;
     }
-#ifdef OPENSSL_QAT_ASYNCH
-    else {                      /* Async Mode */
-
-        ecdsa_op_done = (ecdsa_sign_op_data_t *)
-            OPENSSL_malloc(sizeof(ecdsa_sign_op_data_t));
-        if (ecdsa_op_done == NULL) {
-            QATerr(QAT_F_QAT_ECDSA_DO_SIGN, ERR_R_MALLOC_FAILURE);
-            goto err;
-        }
-
-        ecdsa_op_done->ctx = ctx;
-        ecdsa_op_done->sig = sig;
-        ecdsa_op_done->siglen = siglen;
-        ecdsa_op_done->sign_op_data = opData;
-        ecdsa_op_done->cb_func = cb;
-        ecdsa_op_done->cb_data = cb_data;
-
-        if ((instanceHandle = get_next_inst()) == NULL) {
-            QATerr(QAT_F_QAT_ECDSA_DO_SIGN, ERR_R_INTERNAL_ERROR);
-            OPENSSL_free(ecdsa_op_done);
-            goto err;
-        }
-
-        status = cpaCyEcdsaSignRS(instanceHandle,
-                                  qat_ecdsaAsyncSignCallbackFn,
-                                  ecdsa_op_done,
-                                  opData,
-                                  &bEcdsaSignStatus, pResultR, pResultS);
-
-        if (status != CPA_STATUS_SUCCESS) {
-            WARN("[%s] --- Async cpaCyEcdsaSignRS, status=%d.\n", __func__,
-                 status);
-            if (status == CPA_STATUS_RETRY) {
-                QATerr(QAT_F_QAT_ECDSA_DO_SIGN, ERR_R_RETRY);
-            }
-            OPENSSL_free(ecdsa_op_done);
-            goto err;
-        }
-        return ret;
-    }
-#endif
 
  err:
     if (!ok) {
@@ -731,29 +486,6 @@ static ECDSA_SIG *qat_ecdsa_do_sign_sync(const unsigned char *dgst,
 
 }
 
-#ifdef OPENSSL_QAT_ASYNCH
-static ECDSA_SIG *qat_ecdsa_do_sign_asynch(const unsigned char *dgst,
-                                           int dgst_len,
-                                           const BIGNUM *in_kinv,
-                                           const BIGNUM *in_r, EC_KEY *eckey,
-                                           unsigned char *sig,
-                                           unsigned int *siglen,
-                                           int (*cb) (unsigned char *res,
-                                                      size_t reslen,
-                                                      void *cb_data,
-                                                      int status),
-                                           void *cb_data)
-{
-    if (!cb) {
-        DEBUG("[%s] --- Invalid Parameter\n", __func__);
-        return 0;
-    }
-
-    return qat_ecdsa_do_sign(dgst, dgst_len, in_kinv, in_r, eckey, sig,
-                             siglen, cb, cb_data);
-}
-#endif
-
 static int qat_ecdsa_do_verify(const unsigned char *dgst, int dgst_len,
                                const ECDSA_SIG *sig, EC_KEY *eckey,
                                int (*cb) (void *cb_data, int status),
@@ -776,9 +508,6 @@ static int qat_ecdsa_do_verify(const unsigned char *dgst, int dgst_len,
     int qatPerformOpRetries = 0;
     useconds_t ulPollInterval = getQatPollInterval();
     int iMsgRetry = getQatMsgRetryCount();
-#ifdef OPENSSL_QAT_ASYNCH
-    ecdsa_verify_op_data_t *ecdsa_op_done = NULL;
-#endif
 
     DEBUG("%s been called \n", __func__);
     CRYPTO_QAT_LOG("AU - %s\n", __func__);
@@ -1002,45 +731,6 @@ static int qat_ecdsa_do_verify(const unsigned char *dgst, int dgst_len,
             goto err;
         }
     }
-#ifdef OPENSSL_QAT_ASYNCH
-    else {                      /* Async mode */
-
-        ecdsa_op_done = (ecdsa_verify_op_data_t *)
-            OPENSSL_malloc(sizeof(ecdsa_verify_op_data_t));
-        if (ecdsa_op_done == NULL) {
-            QATerr(QAT_F_QAT_ECDSA_DO_VERIFY, ERR_R_MALLOC_FAILURE);
-            goto err;
-        }
-
-        ecdsa_op_done->ctx = ctx;
-        ecdsa_op_done->verify_op_data = opData;
-        ecdsa_op_done->cb_func = cb;
-        ecdsa_op_done->cb_data = cb_data;
-
-        if ((instanceHandle = get_next_inst()) == NULL) {
-            QATerr(QAT_F_QAT_ECDSA_DO_VERIFY, ERR_R_INTERNAL_ERROR);
-            OPENSSL_free(ecdsa_op_done);
-            goto err;
-        }
-
-        status = cpaCyEcdsaVerify(instanceHandle,
-                                  qat_ecdsaAsyncVerifyCallbackFn,
-                                  ecdsa_op_done, opData, &bEcdsaVerifyStatus);
-
-        if (status != CPA_STATUS_SUCCESS) {
-            WARN("[%s] --- Async cpaCyEcdsaVerify, status=%d.\n", __func__,
-                 status);
-            if (status == CPA_STATUS_RETRY) {
-                QATerr(QAT_F_QAT_ECDSA_DO_VERIFY, ERR_R_RETRY);
-            }
-            OPENSSL_free(ecdsa_op_done);
-            ret = 0;
-            goto err;
-        }
-        ret = 1;
-        return ret;
-    }
-#endif
 
  err:
     if (opData) {
@@ -1078,17 +768,3 @@ static int qat_ecdsa_do_verify_sync(const unsigned char *dgst, int dgst_len,
     return qat_ecdsa_do_verify(dgst, dgst_len, sig, eckey, NULL, NULL);
 }
 
-#ifdef OPENSSL_QAT_ASYNCH
-static int qat_ecdsa_do_verify_asynch(const unsigned char *dgst, int dgst_len,
-                                      const ECDSA_SIG *sig, EC_KEY *eckey,
-                                      int (*cb) (void *cb_data, int status),
-                                      void *cb_data)
-{
-    if (!cb) {
-        DEBUG("[%s] --- Invalid Parameter\n", __func__);
-        return 0;
-    }
-
-    return qat_ecdsa_do_verify(dgst, dgst_len, sig, eckey, cb, cb_data);
-}
-#endif

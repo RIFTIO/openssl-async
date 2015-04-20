@@ -83,16 +83,6 @@
 # endif
 #endif
 
-#ifdef OPENSSL_ENABLE_QAT_ECDH_ASYNCH
-# ifdef OPENSSL_DISABLE_QAT_ECDH_ASYNCH
-#  undef OPENSSL_DISABLE_QAT_ECDH_ASYNCH
-# endif
-#endif
-
-#ifndef OPENSSL_QAT_ASYNCH
-# define OPENSSL_DISABLE_QAT_ECDH_ASYNCH
-#endif
-
 /* Qat engine ECDH methods declaration */
 static int qat_ecdh_compute_key(void *outX, size_t lenX, void *outY,
                                 size_t lenY, const EC_POINT *pub_key,
@@ -111,37 +101,16 @@ static int qat_ecdh_compute_key_sync(void *out, size_t outlen,
                                                    size_t *outlen));
 
 #ifdef OPENSSL_QAT_ASYNCH
-static int qat_ecdh_compute_key_async(void *out, size_t outlen,
-                                      const EC_POINT *pub_key, EC_KEY *ecdh,
-                                      void *(*KDF) (const void *in,
-                                                    size_t inlen, void *out,
-                                                    size_t *outlen),
-                                      int (*cb) (unsigned char *res,
-                                                 size_t reslen, void *cb_data,
-                                                 int status), void *cb_data);
-#endif
-
-#ifdef OPENSSL_QAT_ASYNCH
 static int qat_ecdh_generate_key_sync(EC_KEY *ecdh);
-
-static int qat_ecdh_generate_key_async(EC_KEY *ecdh,
-                                       int (*cb) (unsigned char *res,
-                                                  size_t reslen,
-                                                  void *cb_data, int status),
-                                       void *cb_data);
 #endif
 
 static ECDH_METHOD qat_ecdh_method = {
     "QAT ECDH method",          /* name */
     qat_ecdh_compute_key_sync,  /* compute_key sync */
-#ifdef OPENSSL_QAT_ASYNCH
-    qat_ecdh_compute_key_async, /* compute_key async */
-#endif
     0,                          /* flags */
     NULL                        /* app_data */
 #ifdef OPENSSL_QAT_ASYNCH
-        , qat_ecdh_generate_key_sync, /* generate_key sync */
-    qat_ecdh_generate_key_async /* generate_key async */
+        , qat_ecdh_generate_key_sync /* generate_key sync */
 #endif
 };
 
@@ -149,47 +118,14 @@ ECDH_METHOD *get_ECDH_methods(void)
 {
 
 #ifdef OPENSSL_DISABLE_QAT_ECDH_SYNCH
-# ifndef OPENSSL_DISABLE_QAT_ECDH_ASYNCH
     const ECDH_METHOD *def_ecdh_meth = ECDH_get_default_method();
 
     qat_ecdh_method.compute_key = def_ecdh_meth->compute_key;
     qat_ecdh_method.generate_key = def_ecdh_meth->generate_key;
-# endif
 #endif
 
-#ifdef OPENSSL_QAT_ASYNCH
-# ifndef OPENSSL_DISABLE_QAT_ECDH_SYNCH
-#  ifdef OPENSSL_DISABLE_QAT_ECDH_ASYNCH
-    qat_ecdh_method.compute_key_asynch = NULL;
-    qat_ecdh_method.generate_key_asynch = NULL;
-#  endif
-# endif
-# ifndef OPENSSL_DISABLE_QAT_ECDH_ASYNCH
-    qat_ecdh_method.flags |= ECDH_FLAG_ASYNCH;
-# endif
-#endif
-
-#ifdef OPENSSL_DISABLE_QAT_ECDH_SYNCH
-# ifdef OPENSSL_DISABLE_QAT_ECDH_ASYNCH
-    return NULL;
-# endif
-#endif
     return &qat_ecdh_method;
 }
-
-typedef struct ecdh_op_data {
-    BN_CTX *ctx;
-    CpaCyEcdhPointMultiplyOpData *ecdh_mul_op_data;
-    size_t outlenX;
-    size_t outlenY;
-    unsigned char *cb_outputX;
-    unsigned char *cb_outputY;
-    EC_KEY *ecdh;
-    void *(*KDF) (const void *in, size_t inlen, void *out, size_t *outlen);
-    int (*cb_func) (unsigned char *res, size_t reslen, void *cb_data,
-                    int status);
-    void *cb_data;
-} ecdh_op_data_t;
 
 /* Callback to indicate QAT completion of ECDH point multiply */
 void qat_ecdhCallbackFn(void *pCallbackTag, CpaStatus status, void *pOpData,
@@ -199,182 +135,6 @@ void qat_ecdhCallbackFn(void *pCallbackTag, CpaStatus status, void *pOpData,
     qat_crypto_callbackFn(pCallbackTag, status, CPA_CY_SYM_OP_CIPHER, pOpData,
                           NULL, CPA_FALSE);
 }
-
-#ifdef OPENSSL_QAT_ASYNCH
-/* Async Callback function for ECDH point multiply */
-void qat_ecdhAsyncCallbackFn(void *pCallbackTag,
-                             CpaStatus status,
-                             void *pOpData,
-                             CpaBoolean multiplyStatus,
-                             CpaFlatBuffer * pXk, CpaFlatBuffer * pYk)
-{
-    BIGNUM *x_bn = NULL, *y_bn = NULL, *tx_bn = NULL, *ty_bn = NULL;
-    const EC_GROUP *group;
-    EC_POINT *pub_key = NULL;
-    ecdh_op_data_t *ecdh_async_data = (ecdh_op_data_t *) (pCallbackTag);
-    int cb_status = status == CPA_STATUS_SUCCESS ? 1 : 0;
-
-    if (!ecdh_async_data) {
-        WARN("[%s] --- pCallbackTag NULL!\n", __func__);
-        goto err;
-    }
-
-    /* Invoke the key derivative function */
-    if (ecdh_async_data->KDF != NULL) {
-        if (ecdh_async_data->KDF(pXk->pData,
-                                 pXk->dataLenInBytes,
-                                 ecdh_async_data->cb_outputX,
-                                 &ecdh_async_data->outlenX) == NULL) {
-            QATerr(QAT_F_QAT_ECDHASYNCCALLBACKFN, QAT_R_ECDH_KDF_FAILED);
-            cb_status = CPA_STATUS_FAIL;
-        }
-    } else {
-        /* no KDF, just copy as much as we can */
-        if (ecdh_async_data->outlenX > pXk->dataLenInBytes)
-            ecdh_async_data->outlenX = pXk->dataLenInBytes;
-        memcpy(ecdh_async_data->cb_outputX, pXk->pData,
-               ecdh_async_data->outlenX);
-
-        if (ecdh_async_data->cb_outputY != NULL) {
-            if (ecdh_async_data->outlenY > pYk->dataLenInBytes)
-                ecdh_async_data->outlenY = pYk->dataLenInBytes;
-            memcpy(ecdh_async_data->cb_outputY, pYk->pData,
-                   ecdh_async_data->outlenY);
-        }
-    }
-
-    if (ecdh_async_data->cb_outputY != NULL) {
-        if (((x_bn = BN_new()) == NULL) ||
-            ((y_bn = BN_new()) == NULL) ||
-            ((tx_bn = BN_new()) == NULL) || ((ty_bn = BN_new()) == NULL)) {
-            QATerr(QAT_F_QAT_ECDHASYNCCALLBACKFN, QAT_R_MEM_ALLOC_FAILED);
-            cb_status = CPA_STATUS_FAIL;
-            goto err;
-        }
-
-        /* key gen case for now..... */
-        x_bn =
-            BN_bin2bn(ecdh_async_data->cb_outputX,
-                      (int)ecdh_async_data->outlenX, NULL);
-        y_bn =
-            BN_bin2bn(ecdh_async_data->cb_outputY,
-                      (int)ecdh_async_data->outlenY, NULL);
-
-        group = EC_KEY_get0_group(ecdh_async_data->ecdh);
-        pub_key = (EC_POINT *)EC_KEY_get0_public_key(ecdh_async_data->ecdh);
-        if (EC_METHOD_get_field_type(EC_GROUP_method_of(group)) ==
-            NID_X9_62_prime_field) {
-            if (!EC_POINT_set_affine_coordinates_GFp
-                (group, pub_key, x_bn, y_bn, ecdh_async_data->ctx)) {
-                QATerr(QAT_F_QAT_ECDHASYNCCALLBACKFN,
-                       QAT_R_ECDH_SET_AFFINE_COORD_FAILED);
-                cb_status = CPA_STATUS_FAIL;
-                goto err;
-            }
-            if (!EC_POINT_get_affine_coordinates_GFp
-                (group, pub_key, tx_bn, ty_bn, ecdh_async_data->ctx)) {
-                QATerr(QAT_F_QAT_ECDHASYNCCALLBACKFN,
-                       QAT_R_ECDH_GET_AFFINE_COORD_FAILED);
-                cb_status = CPA_STATUS_FAIL;
-                goto err;
-            }
-
-            /*
-             * Check if retrieved coordinates match originals: if not values
-             * are out of range.
-             */
-            if (BN_cmp(x_bn, tx_bn) || BN_cmp(y_bn, ty_bn)) {
-                QATerr(QAT_F_QAT_ECDHASYNCCALLBACKFN, ERR_R_INTERNAL_ERROR);
-                cb_status = CPA_STATUS_FAIL;
-                goto err;
-            }
-        } else {
-            if (EC_METHOD_get_field_type(EC_GROUP_method_of(group)) ==
-                NID_X9_62_characteristic_two_field) {
-                if (!EC_POINT_set_affine_coordinates_GF2m
-                    (group, pub_key, x_bn, y_bn, ecdh_async_data->ctx)) {
-                    QATerr(QAT_F_QAT_ECDHASYNCCALLBACKFN,
-                           QAT_R_ECDH_SET_AFFINE_COORD_FAILED);
-                    cb_status = CPA_STATUS_FAIL;
-                    goto err;
-                }
-                if (!EC_POINT_get_affine_coordinates_GF2m
-                    (group, pub_key, tx_bn, ty_bn, ecdh_async_data->ctx)) {
-                    QATerr(QAT_F_QAT_ECDHASYNCCALLBACKFN,
-                           QAT_R_ECDH_GET_AFFINE_COORD_FAILED);
-                    cb_status = CPA_STATUS_FAIL;
-                    goto err;
-                }
-                if (BN_cmp(x_bn, tx_bn) || BN_cmp(y_bn, ty_bn)) {
-                    QATerr(QAT_F_QAT_ECDHASYNCCALLBACKFN,
-                           ERR_R_INTERNAL_ERROR);
-                    cb_status = CPA_STATUS_FAIL;
-                    goto err;
-                }
-            } else {
-                QATerr(QAT_F_QAT_ECDHASYNCCALLBACKFN,
-                       QAT_R_ECDH_UNKNOWN_FIELD_TYPE);
-                cb_status = CPA_STATUS_FAIL;
-                goto err;
-            }
-        }
-    }
- err:
-    /* Invoke the user registered callback */
-    if (ecdh_async_data)
-        ecdh_async_data->cb_func(ecdh_async_data->cb_outputX,
-                                 ecdh_async_data->outlenX,
-                                 ecdh_async_data->cb_data, cb_status);
-
-    if (pXk) {
-        if (pXk->pData) {
-            qaeCryptoMemFree(pXk->pData);
-        }
-        OPENSSL_free(pXk);
-    }
-    if (pYk) {
-        if (pYk->pData) {
-            qaeCryptoMemFree(pYk->pData);
-        }
-        OPENSSL_free(pYk);
-    }
-
-    if (ecdh_async_data) {
-        if (ecdh_async_data->cb_outputY != NULL) {
-            OPENSSL_free(ecdh_async_data->cb_outputX);
-            if (x_bn != NULL)
-                BN_free(x_bn);
-            if (y_bn != NULL)
-                BN_free(y_bn);
-            if (tx_bn != NULL)
-                BN_free(tx_bn);
-            if (ty_bn != NULL)
-                BN_free(ty_bn);
-        }
-
-        if (ecdh_async_data->ecdh_mul_op_data) {
-            if (ecdh_async_data->ecdh_mul_op_data->k.pData)
-                qaeCryptoMemFree(ecdh_async_data->ecdh_mul_op_data->k.pData);
-            if (ecdh_async_data->ecdh_mul_op_data->xg.pData)
-                qaeCryptoMemFree(ecdh_async_data->ecdh_mul_op_data->xg.pData);
-            if (ecdh_async_data->ecdh_mul_op_data->yg.pData)
-                qaeCryptoMemFree(ecdh_async_data->ecdh_mul_op_data->yg.pData);
-            if (ecdh_async_data->ecdh_mul_op_data->a.pData)
-                qaeCryptoMemFree(ecdh_async_data->ecdh_mul_op_data->a.pData);
-            if (ecdh_async_data->ecdh_mul_op_data->b.pData)
-                qaeCryptoMemFree(ecdh_async_data->ecdh_mul_op_data->b.pData);
-            if (ecdh_async_data->ecdh_mul_op_data->q.pData)
-                qaeCryptoMemFree(ecdh_async_data->ecdh_mul_op_data->q.pData);
-            OPENSSL_free(ecdh_async_data->ecdh_mul_op_data);
-        }
-        if (ecdh_async_data->ctx)
-            BN_CTX_end(ecdh_async_data->ctx);
-        if (ecdh_async_data->ctx)
-            BN_CTX_free(ecdh_async_data->ctx);
-        OPENSSL_free(ecdh_async_data);
-    }
-}
-#endif
 
 static int qat_ecdh_compute_key(void *outX, size_t outlenX, void *outY,
                                 size_t outlenY, const EC_POINT *pub_key,
@@ -404,9 +164,6 @@ static int qat_ecdh_compute_key(void *outX, size_t outlenX, void *outY,
     int iMsgRetry = getQatMsgRetryCount();
     CpaStatus status;
     struct op_done op_done;
-#ifdef OPENSSL_QAT_ASYNCH
-    ecdh_op_data_t *ecdh_op_done = NULL;
-#endif
 
     DEBUG("%s been called \n", __func__);
     CRYPTO_QAT_LOG("KX - %s\n", __func__);
@@ -607,52 +364,6 @@ static int qat_ecdh_compute_key(void *outX, size_t outlenX, void *outY,
             }
         }
     }
-#ifdef OPENSSL_QAT_ASYNCH
-    else {                      /* Async mode */
-
-        ecdh_op_done =
-            (ecdh_op_data_t *) OPENSSL_malloc(sizeof(ecdh_op_data_t));
-        if (ecdh_op_done == NULL) {
-            QATerr(QAT_F_QAT_ECDH_COMPUTE_KEY, ERR_R_MALLOC_FAILURE);
-            goto err;
-        }
-
-        ecdh_op_done->ctx = ctx;
-        ecdh_op_done->ecdh_mul_op_data = opData;
-        ecdh_op_done->KDF = KDF;
-        ecdh_op_done->cb_func = cb;
-        ecdh_op_done->cb_data = cb_data;
-        ecdh_op_done->ecdh = ecdh;
-        ecdh_op_done->cb_outputX = outX;
-        ecdh_op_done->cb_outputY = outY;
-        ecdh_op_done->outlenX = outlenX;
-        ecdh_op_done->outlenY = outlenX;
-
-        if ((instanceHandle = get_next_inst()) == NULL) {
-            QATerr(QAT_F_QAT_ECDH_COMPUTE_KEY, ERR_R_INTERNAL_ERROR);
-            OPENSSL_free(ecdh_op_done);
-            ret = 0;
-            goto err;
-        }
-        status = cpaCyEcdhPointMultiply(instanceHandle,
-                                        qat_ecdhAsyncCallbackFn,
-                                        ecdh_op_done,
-                                        opData,
-                                        &bEcdhStatus, pResultX, pResultY);
-
-        if (status != CPA_STATUS_SUCCESS) {
-            WARN("[%s] --- Async cpaCyEcdhPointMultiply failed, status=%d.\n",
-                 __func__, status);
-            if (status == CPA_STATUS_RETRY) {
-                QATerr(QAT_F_QAT_ECDH_COMPUTE_KEY, ERR_R_RETRY);
-            }
-            OPENSSL_free(ecdh_op_done);
-            ret = 0;
-            goto err;
-        }
-        return 1;
-    }
-#endif
  err:
     if (pResultX) {
         if (pResultX->pData) {
@@ -699,26 +410,6 @@ static int qat_ecdh_compute_key_sync(void *out,
                                 NULL, NULL);
 }
 
-#ifdef OPENSSL_QAT_ASYNCH
-static int qat_ecdh_compute_key_async(void *out,
-                                      size_t outlen,
-                                      const EC_POINT *pub_key,
-                                      EC_KEY *ecdh,
-                                      void *(*KDF) (const void *in,
-                                                    size_t inlen, void *out,
-                                                    size_t *outlen),
-                                      int (*cb) (unsigned char *res,
-                                                 size_t reslen, void *cb_data,
-                                                 int status), void *cb_data)
-{
-    if (!cb) {
-        DEBUG("[%s] --- Invalid Parameter\n", __func__);
-        return 0;
-    }
-    return qat_ecdh_compute_key(out, outlen, NULL, 0, pub_key, ecdh, KDF, cb,
-                                cb_data);
-}
-#endif
 
 #ifdef OPENSSL_QAT_ASYNCH
 static int qat_ecdh_generate_key_sync(EC_KEY *ecdh)
@@ -902,118 +593,3 @@ static int qat_ecdh_generate_key_sync(EC_KEY *ecdh)
 }
 #endif
 
-#ifdef OPENSSL_QAT_ASYNCH
-static int qat_ecdh_generate_key_async(EC_KEY *ecdh,
-                                       int (*cb) (unsigned char *res,
-                                                  size_t reslen,
-                                                  void *cb_data, int status),
-                                       void *cb_data)
-{
-    int ok = 0;
-    int alloc_priv = 0, alloc_pub = 0;
-    int field_size = 0;
-    BN_CTX *ctx = NULL;
-    BIGNUM *priv_key = NULL, *order = NULL;
-    EC_POINT *pub_key = NULL;
-    const EC_POINT *gen;
-    const EC_GROUP *group;
-    char *temp_buf;
-
-# ifdef OPENSSL_FIPS
-    if (FIPS_mode())
-        return FIPS_ec_key_generate_key(ecdh);
-# endif
-
-    if (!ecdh || !(group = EC_KEY_get0_group(ecdh))) {
-        QATerr(QAT_F_QAT_ECDH_GENERATE_KEY_ASYNC,
-               QAT_R_INVALID_INPUT_PARAMETER);
-        return 0;
-    }
-
-    if (((order = BN_new()) == NULL) || ((ctx = BN_CTX_new()) == NULL)) {
-        QATerr(QAT_F_QAT_ECDH_GENERATE_KEY_ASYNC, QAT_R_MEM_ALLOC_FAILED);
-        goto err;
-    }
-    if ((priv_key = (BIGNUM *)EC_KEY_get0_private_key(ecdh)) == NULL) {
-        priv_key = BN_new();
-        if (priv_key == NULL) {
-            QATerr(QAT_F_QAT_ECDH_GENERATE_KEY_ASYNC, QAT_R_MEM_ALLOC_FAILED);
-            goto err;
-        }
-        alloc_priv = 1;
-    }
-
-    if (!EC_GROUP_get_order(group, order, ctx)) {
-        QATerr(QAT_F_QAT_ECDH_GENERATE_KEY_ASYNC, ERR_R_INTERNAL_ERROR);
-        goto err;
-    }
-    do
-        if (!BN_rand_range(priv_key, order)) {
-            QATerr(QAT_F_QAT_ECDH_GENERATE_KEY_ASYNC, ERR_R_INTERNAL_ERROR);
-            goto err;
-        }
-    while (BN_is_zero(priv_key)) ;
-
-    if (alloc_priv) {
-        if (!EC_KEY_set_private_key(ecdh, priv_key)) {
-            QATerr(QAT_F_QAT_ECDH_GENERATE_KEY_ASYNC, ERR_R_INTERNAL_ERROR);
-            goto err;
-        }
-    }
-
-    if ((pub_key = (EC_POINT *)EC_KEY_get0_public_key(ecdh)) == NULL) {
-        pub_key = EC_POINT_new(group);
-        if (pub_key == NULL) {
-            QATerr(QAT_F_QAT_ECDH_GENERATE_KEY_ASYNC, QAT_R_MEM_ALLOC_FAILED);
-            goto err;
-        }
-        alloc_pub = 1;
-    }
-    field_size = EC_GROUP_get_degree(group);
-    if (field_size <= 0) {
-        QATerr(QAT_F_QAT_ECDH_GENERATE_KEY_ASYNC, QAT_R_FIELD_SIZE_ERROR);
-        goto err;
-    }
-    temp_buf = OPENSSL_malloc(2 * ((field_size + 7) / 8));
-    if (temp_buf == NULL) {
-        QATerr(QAT_F_QAT_ECDH_GENERATE_KEY_ASYNC, QAT_R_MEM_ALLOC_FAILED);
-        goto err;
-    }
-    gen = EC_GROUP_get0_generator(group);
-
-    if (alloc_pub) {
-        if (!EC_KEY_set_public_key(ecdh, pub_key)) {
-            QATerr(QAT_F_QAT_ECDH_GENERATE_KEY_ASYNC, ERR_R_INTERNAL_ERROR);
-            goto err;
-        }
-    }
-    if (!qat_ecdh_compute_key(temp_buf,
-                              (field_size + 7) / 8,
-                              temp_buf + ((field_size + 7) / 8),
-                              (field_size + 7) / 8,
-                              gen, ecdh, NULL, cb, cb_data)) {
-        /*
-         * No QATerr is raised here because errors are already handled in
-         * qat_ecdh_compute_key()
-         */
-        /*
-         * In particular, if ERR_R_RETRY is raised as an error in
-         * qat_ecdh_compute_key() then it mustn't be
-         */
-        /* 'overwritten' by raising a different QATerr here. */
-        goto err;
-    }
-    ok = 1;
- err:
-    if (order)
-        BN_free(order);
-    if (alloc_pub)
-        EC_POINT_free(pub_key);
-    if (alloc_priv)
-        BN_free(priv_key);
-    if (ctx != NULL)
-        BN_CTX_free(ctx);
-
-    return (ok);
-}
-#endif

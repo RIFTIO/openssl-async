@@ -78,33 +78,13 @@
 # endif
 #endif
 
-#ifdef OPENSSL_ENABLE_QAT_DH_ASYNCH
-# ifdef OPENSSL_DISABLE_QAT_DH_ASYNCH
-#  undef OPENSSL_DISABLE_QAT_DH_ASYNCH
-# endif
-#endif
-
-#ifndef OPENSSL_QAT_ASYNCH
-# define OPENSSL_DISABLE_QAT_DH_ASYNCH
-#endif
-
 /* To specify the DH op sizes supported by QAT engine */
 #define DH_QAT_RANGE_MIN 768
 #define DH_QAT_RANGE_MAX 4096
 
 int qat_dh_generate_key_synch(DH *dh);
-int qat_dh_generate_key_asynch(DH *dh,
-                               int (*cb) (unsigned char *res, size_t reslen,
-                                          void *cb_data, int status),
-                               void *cb_data);
 int qat_dh_compute_key_synch(unsigned char *key, const BIGNUM *pub_key,
                              DH *dh);
-
-int qat_dh_compute_key_asynch(unsigned char *key, int *len,
-                              const BIGNUM *pub_key, DH *dh,
-                              int (*cb) (unsigned char *res, size_t reslen,
-                                         void *cb_data, int status),
-                              void *cb_data);
 
 static DH_METHOD qat_dh_method = {
     "QAT DH method",            /* name */
@@ -115,17 +95,12 @@ static DH_METHOD qat_dh_method = {
     NULL,                       /* finish */
     0,                          /* flags */
     NULL,                       /* app_data */
-    NULL,                       /* generate_params */
-#ifdef OPENSSL_QAT_ASYNCH
-    qat_dh_generate_key_asynch, /* generate_key asynch */
-    qat_dh_compute_key_asynch   /* compute_key asynch */
-#endif
+    NULL                        /* generate_params */
 };
 
 DH_METHOD *get_DH_methods(void)
 {
 #ifdef OPENSSL_DISABLE_QAT_DH_SYNCH
-# ifndef OPENSSL_DISABLE_QAT_DH_ASYNCH
     const DH_METHOD *def_dh_meth = DH_get_default_method();
     if (def_dh_meth) {
         qat_dh_method.generate_key = def_dh_meth->generate_key;
@@ -136,49 +111,10 @@ DH_METHOD *get_DH_methods(void)
         qat_dh_method.compute_key = NULL;
         qat_dh_method.bn_mod_exp = NULL;
     }
-# endif
 #endif
 
-#ifdef OPENSSL_QAT_ASYNCH
-# ifndef OPENSSL_DISABLE_QAT_DH_SYNCH
-#  ifdef OPENSSL_DISABLE_QAT_DH_ASYNCH
-    qat_dh_method.generate_key_asynch = NULL;
-    qat_dh_method.compute_key_asynch = NULL;
-#  endif
-# endif
-# ifndef OPENSSL_DIABLE_QAT_DH_ASYNCH
-    qat_dh_method.flags |= DH_FLAG_ASYNCH;
-# endif
-#endif
-
-#ifdef OPENSSL_DISABLE_QAT_DH_SYNCH
-# ifdef OPENSSL_DISABLE_QAT_DH_ASYNCH
-    return NULL;
-# endif
-#endif
     return &qat_dh_method;
 }
-
-typedef struct dh_generate_op_data {
-    DH *dh;
-    BIGNUM *priv_key;
-    BIGNUM *pub_key;
-    CpaCyDhPhase1KeyGenOpData *opData;
-    size_t outlen;
-    int (*cb_func) (unsigned char *res, size_t reslen,
-                    void *cb_data, int status);
-    void *cb_data;
-} dh_generate_op_data_t;
-
-typedef struct dh_compute_op_data {
-    int *len;
-    unsigned char *key;
-    CpaCyDhPhase2SecretKeyGenOpData *opData;
-    size_t outlen;
-    int (*cb_func) (unsigned char *res, size_t reslen,
-                    void *cb_data, int status);
-    void *cb_data;
-} dh_compute_op_data_t;
 
 /*
  * The DH range check is performed so that if the op sizes are not in the
@@ -202,110 +138,6 @@ void qat_dhCallbackFn(void *pCallbackTag, CpaStatus status, void *pOpData,
     qat_crypto_callbackFn(pCallbackTag, status, CPA_CY_SYM_OP_CIPHER, pOpData,
                           NULL, CPA_FALSE);
 }
-
-#ifdef OPENSSL_QAT_ASYNCH
-/* Callback to indicate QAT completion of DH generate key in asynch mode*/
-void qat_dhGenerateAsynchCallbackFn(void *pCallbackTag, CpaStatus status,
-                                    void *pOpData, CpaFlatBuffer * pPV)
-{
-    dh_generate_op_data_t *dh_asynch_data =
-        (dh_generate_op_data_t *) (pCallbackTag);
-    int cb_status = status == CPA_STATUS_SUCCESS ? 1 : 0;
-
-    if (!dh_asynch_data || !pPV) {
-        WARN("[%s] --- parameter NULL!\n", __func__);
-        goto err;
-    }
-
-    dh_asynch_data->dh->priv_key = dh_asynch_data->priv_key;
-    /* Convert the flatbuffer result back to a BN */
-    BN_bin2bn(pPV->pData, pPV->dataLenInBytes, dh_asynch_data->pub_key);
-    dh_asynch_data->dh->pub_key = dh_asynch_data->pub_key;
-
-    dh_asynch_data->cb_func(NULL, 0, dh_asynch_data->cb_data, cb_status);
- err:
-
-    if (pPV) {
-        if (pPV->pData) {
-            qaeCryptoMemFree(pPV->pData);
-        }
-        OPENSSL_free(pPV);
-    }
-
-    if (dh_asynch_data) {
-        if (dh_asynch_data->opData) {
-            if (dh_asynch_data->opData->primeP.pData)
-                qaeCryptoMemFree(dh_asynch_data->opData->primeP.pData);
-            if (dh_asynch_data->opData->baseG.pData)
-                qaeCryptoMemFree(dh_asynch_data->opData->baseG.pData);
-            if (dh_asynch_data->opData->privateValueX.pData)
-                qaeCryptoMemFree(dh_asynch_data->opData->privateValueX.pData);
-            OPENSSL_free(dh_asynch_data->opData);
-        }
-
-        if ((dh_asynch_data->pub_key != NULL) &&
-            (dh_asynch_data->dh->pub_key == NULL))
-            BN_free(dh_asynch_data->pub_key);
-        if ((dh_asynch_data->priv_key != NULL) &&
-            (dh_asynch_data->dh->priv_key == NULL))
-            BN_free(dh_asynch_data->priv_key);
-        OPENSSL_free(dh_asynch_data);
-    }
-}
-#endif
-
-#ifdef OPENSSL_QAT_ASYNCH
-/* Callback to indicate QAT completion of DH compute key asynch mode */
-void qat_dhComputeAsynchCallbackFn(void *pCallbackTag, CpaStatus status,
-                                   void *pOpData, CpaFlatBuffer * pSecretKey)
-{
-    dh_compute_op_data_t *dh_asynch_data =
-        (dh_compute_op_data_t *) (pCallbackTag);
-    int cb_status = status == CPA_STATUS_SUCCESS ? 1 : 0;
-    int index = 1;
-
-    if (!dh_asynch_data || !pSecretKey || !dh_asynch_data->len) {
-        WARN("[%s] --- parameter NULL!\n", __func__);
-        goto err;
-    }
-
-    if (!pSecretKey->pData[0]) {
-        while (!pSecretKey->pData[index])
-            index++;
-        pSecretKey->dataLenInBytes = pSecretKey->dataLenInBytes - index;
-        memcpy(dh_asynch_data->key, &pSecretKey->pData[index],
-               pSecretKey->dataLenInBytes);
-    } else {
-        memcpy(dh_asynch_data->key, pSecretKey->pData,
-               pSecretKey->dataLenInBytes);
-    }
-    *dh_asynch_data->len = pSecretKey->dataLenInBytes;
-
-    dh_asynch_data->cb_func(dh_asynch_data->key, *dh_asynch_data->len,
-                            dh_asynch_data->cb_data, cb_status);
- err:
-    if (pSecretKey) {
-        if (pSecretKey->pData) {
-            qaeCryptoMemFree(pSecretKey->pData);
-        }
-        OPENSSL_free(pSecretKey);
-    }
-
-    if (dh_asynch_data) {
-        if (dh_asynch_data->opData) {
-            if (dh_asynch_data->opData->primeP.pData)
-                qaeCryptoMemFree(dh_asynch_data->opData->primeP.pData);
-            if (dh_asynch_data->opData->remoteOctetStringPV.pData)
-                qaeCryptoMemFree(dh_asynch_data->opData->
-                                 remoteOctetStringPV.pData);
-            if (dh_asynch_data->opData->privateValueX.pData)
-                qaeCryptoMemFree(dh_asynch_data->opData->privateValueX.pData);
-            OPENSSL_free(dh_asynch_data->opData);
-        }
-        OPENSSL_free(dh_asynch_data);
-    }
-}
-#endif
 
 /******************************************************************************
 * function:
@@ -334,9 +166,6 @@ int qat_dh_generate_key(DH *dh,
     CpaStatus status;
     struct op_done op_done;
     size_t buflen;
-#ifdef OPENSSL_QAT_ASYNCH
-    dh_generate_op_data_t *dh_op_done = NULL;
-#endif
 
     DEBUG("%s been called \n", __func__);
     CRYPTO_QAT_LOG("KX - %s\n", __func__);
@@ -451,45 +280,6 @@ int qat_dh_generate_key(DH *dh,
 
         ok = 1;
     }
-#ifdef OPENSSL_QAT_ASYNCH
-    else {                      /* Asynch mode */
-
-        dh_op_done = (dh_generate_op_data_t *)
-            OPENSSL_malloc(sizeof(dh_generate_op_data_t));
-        if (dh_op_done == NULL) {
-            QATerr(QAT_F_QAT_DH_GENERATE_KEY, ERR_R_MALLOC_FAILURE);
-            goto err;
-        }
-
-        dh_op_done->priv_key = priv_key;
-        dh_op_done->pub_key = pub_key;
-        dh_op_done->dh = dh;
-        dh_op_done->opData = opData;
-        dh_op_done->cb_func = cb;
-        dh_op_done->cb_data = cb_data;
-
-        if ((instanceHandle = get_next_inst()) == NULL) {
-            QATerr(QAT_F_QAT_DH_GENERATE_KEY, ERR_R_INTERNAL_ERROR);
-            OPENSSL_free(dh_op_done);
-            goto err;
-        }
-
-        status = cpaCyDhKeyGenPhase1(instanceHandle,
-                                     qat_dhGenerateAsynchCallbackFn,
-                                     dh_op_done, opData, pPV);
-
-        if (status != CPA_STATUS_SUCCESS) {
-            WARN("[%s] --- Async cpaCyDhKeyGenPhase1 failed,\
-                                        status=%d.\n", __func__, status);
-            if (status == CPA_STATUS_RETRY) {
-                QATerr(QAT_F_QAT_DH_GENERATE_KEY, ERR_R_RETRY);
-            }
-            OPENSSL_free(dh_op_done);
-            goto err;
-        }
-        return 1;
-    }
-#endif
  err:
     if (pPV) {
         if (pPV->pData) {
@@ -544,50 +334,6 @@ int qat_dh_generate_key_synch(DH *dh)
     return qat_dh_generate_key(dh, NULL, NULL);
 }
 
-#ifdef OPENSSL_QAT_ASYNCH
-/******************************************************************************
-* function:
-*         qat_dh_generate_key_asynch(DH * dh,
-*                                    int (*cb)(unsigned char *res, size_t reslen,
-*                                    void *cb_data, int status),
-*                                    void *cb_data)
-*
-* description:
-*   Implement Diffie-Hellman phase 1 operations in asynch mode.
-******************************************************************************/
-
-int qat_dh_generate_key_asynch(DH *dh,
-                               int (*cb) (unsigned char *res, size_t reslen,
-                                          void *cb_data, int status),
-                               void *cb_data)
-{
-    const DH_METHOD *default_dh_method = DH_OpenSSL();
-    const DH_METHOD *dh_tmp_meth;
-    int ret = 0;
-
-    if (!dh || !cb)
-        return 0;
-
-    /*
-     * If the op sizes are not in the range supported by QAT engine then fall
-     * back to software
-     */
-
-    if (!dh_range_check(BN_num_bits(dh->p))) {
-        if (!default_dh_method)
-            return 0;
-        dh_tmp_meth = dh->meth;
-        dh->meth = default_dh_method;
-        ret = default_dh_method->generate_key(dh);
-        dh->meth = dh_tmp_meth;
-        cb(NULL, 0, cb_data, ret);
-        return 1;
-    }
-
-    return qat_dh_generate_key(dh, cb, cb_data);
-}
-#endif
-
 /******************************************************************************
 * function:
 *         qat_dh_compute_key(unsigned char *key, int *len,
@@ -614,9 +360,6 @@ int qat_dh_compute_key(unsigned char *key, int *len, const BIGNUM *pub_key,
     CpaStatus status;
     struct op_done op_done;
     size_t buflen;
-#ifdef OPENSSL_QAT_ASYNCH
-    dh_compute_op_data_t *dh_op_done = NULL;
-#endif
     int index = 1;
 
     DEBUG("%s been called \n", __func__);
@@ -716,44 +459,6 @@ int qat_dh_compute_key(unsigned char *key, int *len, const BIGNUM *pub_key,
         }
         ret = pSecretKey->dataLenInBytes;
     }
-#ifdef OPENSSL_QAT_ASYNCH
-    else {                      /* Asynch mode */
-
-        dh_op_done = (dh_compute_op_data_t *)
-            OPENSSL_malloc(sizeof(dh_compute_op_data_t));
-        if (dh_op_done == NULL) {
-            QATerr(QAT_F_QAT_DH_COMPUTE_KEY, ERR_R_MALLOC_FAILURE);
-            goto err;
-        }
-
-        dh_op_done->key = key;
-        dh_op_done->len = len;
-        dh_op_done->opData = opData;
-        dh_op_done->cb_func = cb;
-        dh_op_done->cb_data = cb_data;
-
-        if ((instanceHandle = get_next_inst()) == NULL) {
-            QATerr(QAT_F_QAT_DH_COMPUTE_KEY, ERR_R_INTERNAL_ERROR);
-            OPENSSL_free(dh_op_done);
-            goto err;
-        }
-
-        status = cpaCyDhKeyGenPhase2Secret(instanceHandle,
-                                           qat_dhComputeAsynchCallbackFn,
-                                           dh_op_done, opData, pSecretKey);
-
-        if (status != CPA_STATUS_SUCCESS) {
-            WARN("[%s] --- Asynch cpaCyDhKeyGenPhase2Secret failed, status=%d.\n", __func__, status);
-            if (status == CPA_STATUS_RETRY) {
-                QATerr(QAT_F_QAT_DH_COMPUTE_KEY, ERR_R_RETRY);
-            }
-            OPENSSL_free(dh_op_done);
-            ret = 0;
-            goto err;
-        }
-        return 1;
-    }
-#endif
 
  err:
     if (pSecretKey) {
@@ -805,50 +510,6 @@ int qat_dh_compute_key_synch(unsigned char *key, const BIGNUM *pub_key,
 
     return qat_dh_compute_key(key, NULL, pub_key, dh, NULL, NULL);
 }
-
-#ifdef OPENSSL_QAT_ASYNCH
-/******************************************************************************
-* function:
-*         qat_dh_compute_key_asynch(unsigned char *key, int *len,
-*                            const BIGNUM * pub_key, DH * dh,
-*                            int (*cb)(unsigned char *res, size_t reslen,
-*                            void *cb_data, int status), void *cb_data)
-*
-* description:
-*   Implement Diffie-Hellman phase 2 operations in asynch mode.
-******************************************************************************/
-int qat_dh_compute_key_asynch(unsigned char *key, int *len,
-                              const BIGNUM *pub_key, DH *dh,
-                              int (*cb) (unsigned char *res, size_t reslen,
-                                         void *cb_data, int status),
-                              void *cb_data)
-{
-    const DH_METHOD *default_dh_method = DH_OpenSSL();
-    const DH_METHOD *dh_tmp_meth;
-    int ret = 0;
-
-    if (!dh || !cb)
-        return -1;
-
-    /*
-     * If the op sizes are not in the range supported by QAT engine then fall
-     * back to software
-     */
-
-    if (!dh_range_check(BN_num_bits(dh->p))) {
-        if (!default_dh_method)
-            return -1;
-        dh_tmp_meth = dh->meth;
-        dh->meth = default_dh_method;
-        ret = default_dh_method->compute_key(key, pub_key, dh);
-        dh->meth = dh_tmp_meth;
-        cb(key, ret, cb_data, ret);
-        return 1;
-    }
-
-    return qat_dh_compute_key(key, len, pub_key, dh, cb, cb_data);
-}
-#endif
 
 /******************************************************************************
 * function:
