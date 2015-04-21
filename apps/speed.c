@@ -2541,7 +2541,7 @@ int MAIN(int argc, char **argv)
                                          EC_KEY_get0_public_key(ecdh_b[j]),
                                          ecdh_a[j], kdf);
 # ifndef OPENSSL_NO_HW_QAT
-                        poll_engine(engine_batch);
+                        poll_engine(engine, batch);
 # endif
                 } while (secret_size_a == -1 && EC_KEY_get_job(ecdh_a[j]) != NULL);
                 do {
@@ -2550,7 +2550,7 @@ int MAIN(int argc, char **argv)
                                          EC_KEY_get0_public_key(ecdh_a[j]),
                                          ecdh_b[j], kdf);
 # ifndef OPENSSL_NO_HW_QAT
-                        poll_engine(engine_batch);
+                        poll_engine(engine, batch);
 # endif
                 } while (secret_size_b == -1 && EC_KEY_get_job(ecdh_b[j]) != NULL);
                 if (secret_size_a != secret_size_b)
