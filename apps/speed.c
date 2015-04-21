@@ -2535,14 +2535,24 @@ int MAIN(int argc, char **argv)
                     outlen = (field_size + 7) / 8;
                     kdf = NULL;
                 }
-                secret_size_a =
-                    ECDH_compute_key(secret_a, outlen,
-                                     EC_KEY_get0_public_key(ecdh_b[j]),
-                                     ecdh_a[j], kdf);
-                secret_size_b =
-                    ECDH_compute_key(secret_b, outlen,
-                                     EC_KEY_get0_public_key(ecdh_a[j]),
-                                     ecdh_b[j], kdf);
+                do {
+                    secret_size_a =
+                        ECDH_compute_key_async(secret_a, outlen,
+                                         EC_KEY_get0_public_key(ecdh_b[j]),
+                                         ecdh_a[j], kdf);
+# ifndef OPENSSL_NO_HW_QAT
+                        poll_engine(engine_batch);
+# endif
+                } while (secret_size_a == -1 && EC_KEY_get_job(ecdh_a[j]) != NULL);
+                do {
+                    secret_size_b =
+                        ECDH_compute_key_async(secret_b, outlen,
+                                         EC_KEY_get0_public_key(ecdh_a[j]),
+                                         ecdh_b[j], kdf);
+# ifndef OPENSSL_NO_HW_QAT
+                        poll_engine(engine_batch);
+# endif
+                } while (secret_size_b == -1 && EC_KEY_get_job(ecdh_b[j]) != NULL);
                 if (secret_size_a != secret_size_b)
                     ecdh_checks = 0;
                 else
