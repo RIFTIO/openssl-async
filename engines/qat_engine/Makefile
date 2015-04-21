@@ -53,6 +53,9 @@ QATLIBSRC_SHARED = e_qat.c\
 	 qat_chain.c\
 	 qat_rsa.c\
 	 qat_dsa.c\
+	 qat_dh.c\
+	 qat_ecdh.c\
+	 qat_ecdsa.c\
 	 qat_asym_common.c\
 	 qat_sym_common.c\
 	 e_qat_err.c\
@@ -64,6 +67,9 @@ qat_ciphers.o \
 qat_chain.o \
 qat_rsa.o \
 qat_dsa.o \
+qat_dh.o \
+qat_ecdh.o \
+qat_ecdsa.o \
 qat_asym_common.o \
 qat_sym_common.o \
 e_qat_err.o \
@@ -268,12 +274,12 @@ qat_ciphers.o: ../../include/openssl/tls1.h ../../include/openssl/x509.h
 qat_ciphers.o: ../../include/openssl/x509_vfy.h e_qat.h e_qat_err.h
 qat_ciphers.o: qae_mem_utils.h qat_chain.h qat_ciphers.c qat_ciphers.h
 qat_ciphers.o: qat_digests.h qat_sym_common.h qat_utils.h
-#qat_dh.o: ../../include/openssl/bio.h ../../include/openssl/crypto.h
-#qat_dh.o: ../../include/openssl/dh.h ../../include/openssl/e_os2.h
-#qat_dh.o: ../../include/openssl/opensslconf.h ../../include/openssl/opensslv.h
-#qat_dh.o: ../../include/openssl/ossl_typ.h ../../include/openssl/safestack.h
-#qat_dh.o: ../../include/openssl/stack.h ../../include/openssl/symhacks.h
-#qat_dh.o: qae_mem_utils.h qat_asym_common.h qat_dh.c qat_dh.h qat_utils.h
+qat_dh.o: ../../include/openssl/bio.h ../../include/openssl/crypto.h
+qat_dh.o: ../../include/openssl/dh.h ../../include/openssl/e_os2.h
+qat_dh.o: ../../include/openssl/opensslconf.h ../../include/openssl/opensslv.h
+qat_dh.o: ../../include/openssl/ossl_typ.h ../../include/openssl/safestack.h
+qat_dh.o: ../../include/openssl/stack.h ../../include/openssl/symhacks.h
+qat_dh.o: qae_mem_utils.h qat_asym_common.h qat_dh.c qat_dh.h qat_utils.h
 #qat_digests.o: ../../include/openssl/aes.h ../../include/openssl/asn1.h
 #qat_digests.o: ../../include/openssl/bio.h ../../include/openssl/buffer.h
 #qat_digests.o: ../../include/openssl/crypto.h ../../include/openssl/e_os2.h
@@ -290,45 +296,45 @@ qat_ciphers.o: qat_digests.h qat_sym_common.h qat_utils.h
 #qat_digests.o: ../../include/openssl/x509.h ../../include/openssl/x509_vfy.h
 #qat_digests.o: e_qat.h e_qat_err.h qae_mem_utils.h qat_ciphers.h qat_digests.c
 #qat_digests.o: qat_digests.h qat_sym_common.h qat_utils.h
-#qat_dsa.o: ../../include/openssl/bio.h ../../include/openssl/crypto.h
-#qat_dsa.o: ../../include/openssl/dsa.h ../../include/openssl/e_os2.h
-#qat_dsa.o: ../../include/openssl/opensslconf.h ../../include/openssl/opensslv.h
-#qat_dsa.o: ../../include/openssl/ossl_typ.h ../../include/openssl/safestack.h
-#qat_dsa.o: ../../include/openssl/stack.h ../../include/openssl/symhacks.h
-#qat_dsa.o: qat_asym_common.h qat_dsa.c qat_dsa.h qat_utils.h
-#qat_ecdh.o: ../../crypto/ecdh/ech_locl.h ../../include/openssl/aes.h
-#qat_ecdh.o: ../../include/openssl/asn1.h ../../include/openssl/bio.h
-#qat_ecdh.o: ../../include/openssl/buffer.h ../../include/openssl/crypto.h
-#qat_ecdh.o: ../../include/openssl/e_os2.h ../../include/openssl/ec.h
-#qat_ecdh.o: ../../include/openssl/ecdh.h ../../include/openssl/ecdsa.h
-#qat_ecdh.o: ../../include/openssl/engine.h ../../include/openssl/err.h
-#qat_ecdh.o: ../../include/openssl/evp.h ../../include/openssl/lhash.h
-#qat_ecdh.o: ../../include/openssl/obj_mac.h ../../include/openssl/objects.h
-#qat_ecdh.o: ../../include/openssl/opensslconf.h
-#qat_ecdh.o: ../../include/openssl/opensslv.h ../../include/openssl/ossl_typ.h
-#qat_ecdh.o: ../../include/openssl/pkcs7.h ../../include/openssl/safestack.h
-#qat_ecdh.o: ../../include/openssl/sha.h ../../include/openssl/stack.h
-#qat_ecdh.o: ../../include/openssl/symhacks.h ../../include/openssl/x509.h
-#qat_ecdh.o: ../../include/openssl/x509_vfy.h e_qat.h e_qat_err.h
-#qat_ecdh.o: qae_mem_utils.h qat_asym_common.h qat_ciphers.h qat_digests.h
-#qat_ecdh.o: qat_ecdh.c qat_ecdh.h qat_sym_common.h qat_utils.h
-#qat_ecdsa.o: ../../crypto/ecdsa/ecs_locl.h ../../include/openssl/aes.h
-#qat_ecdsa.o: ../../include/openssl/asn1.h ../../include/openssl/bio.h
-#qat_ecdsa.o: ../../include/openssl/bn.h ../../include/openssl/buffer.h
-#qat_ecdsa.o: ../../include/openssl/crypto.h ../../include/openssl/e_os2.h
-#qat_ecdsa.o: ../../include/openssl/ec.h ../../include/openssl/ecdh.h
-#qat_ecdsa.o: ../../include/openssl/ecdsa.h ../../include/openssl/engine.h
-#qat_ecdsa.o: ../../include/openssl/err.h ../../include/openssl/evp.h
-#qat_ecdsa.o: ../../include/openssl/lhash.h ../../include/openssl/obj_mac.h
-#qat_ecdsa.o: ../../include/openssl/objects.h
-#qat_ecdsa.o: ../../include/openssl/opensslconf.h
-#qat_ecdsa.o: ../../include/openssl/opensslv.h ../../include/openssl/ossl_typ.h
-#qat_ecdsa.o: ../../include/openssl/pkcs7.h ../../include/openssl/safestack.h
-#qat_ecdsa.o: ../../include/openssl/sha.h ../../include/openssl/stack.h
-#qat_ecdsa.o: ../../include/openssl/symhacks.h ../../include/openssl/x509.h
-#qat_ecdsa.o: ../../include/openssl/x509_vfy.h e_qat.h e_qat_err.h
-#qat_ecdsa.o: qae_mem_utils.h qat_asym_common.h qat_ciphers.h qat_digests.h
-#qat_ecdsa.o: qat_ecdsa.c qat_ecdsa.h qat_sym_common.h qat_utils.h
+qat_dsa.o: ../../include/openssl/bio.h ../../include/openssl/crypto.h
+qat_dsa.o: ../../include/openssl/dsa.h ../../include/openssl/e_os2.h
+qat_dsa.o: ../../include/openssl/opensslconf.h ../../include/openssl/opensslv.h
+qat_dsa.o: ../../include/openssl/ossl_typ.h ../../include/openssl/safestack.h
+qat_dsa.o: ../../include/openssl/stack.h ../../include/openssl/symhacks.h
+qat_dsa.o: qat_asym_common.h qat_dsa.c qat_dsa.h qat_utils.h
+qat_ecdh.o: ../../crypto/ecdh/ech_locl.h ../../include/openssl/aes.h
+qat_ecdh.o: ../../include/openssl/asn1.h ../../include/openssl/bio.h
+qat_ecdh.o: ../../include/openssl/buffer.h ../../include/openssl/crypto.h
+qat_ecdh.o: ../../include/openssl/e_os2.h ../../include/openssl/ec.h
+qat_ecdh.o: ../../include/openssl/ecdh.h ../../include/openssl/ecdsa.h
+qat_ecdh.o: ../../include/openssl/engine.h ../../include/openssl/err.h
+qat_ecdh.o: ../../include/openssl/evp.h ../../include/openssl/lhash.h
+qat_ecdh.o: ../../include/openssl/obj_mac.h ../../include/openssl/objects.h
+qat_ecdh.o: ../../include/openssl/opensslconf.h
+qat_ecdh.o: ../../include/openssl/opensslv.h ../../include/openssl/ossl_typ.h
+qat_ecdh.o: ../../include/openssl/pkcs7.h ../../include/openssl/safestack.h
+qat_ecdh.o: ../../include/openssl/sha.h ../../include/openssl/stack.h
+qat_ecdh.o: ../../include/openssl/symhacks.h ../../include/openssl/x509.h
+qat_ecdh.o: ../../include/openssl/x509_vfy.h e_qat.h e_qat_err.h
+qat_ecdh.o: qae_mem_utils.h qat_asym_common.h qat_ciphers.h qat_digests.h
+qat_ecdh.o: qat_ecdh.c qat_ecdh.h qat_sym_common.h qat_utils.h
+qat_ecdsa.o: ../../crypto/ecdsa/ecs_locl.h ../../include/openssl/aes.h
+qat_ecdsa.o: ../../include/openssl/asn1.h ../../include/openssl/bio.h
+qat_ecdsa.o: ../../include/openssl/bn.h ../../include/openssl/buffer.h
+qat_ecdsa.o: ../../include/openssl/crypto.h ../../include/openssl/e_os2.h
+qat_ecdsa.o: ../../include/openssl/ec.h ../../include/openssl/ecdh.h
+qat_ecdsa.o: ../../include/openssl/ecdsa.h ../../include/openssl/engine.h
+qat_ecdsa.o: ../../include/openssl/err.h ../../include/openssl/evp.h
+qat_ecdsa.o: ../../include/openssl/lhash.h ../../include/openssl/obj_mac.h
+qat_ecdsa.o: ../../include/openssl/objects.h
+qat_ecdsa.o: ../../include/openssl/opensslconf.h
+qat_ecdsa.o: ../../include/openssl/opensslv.h ../../include/openssl/ossl_typ.h
+qat_ecdsa.o: ../../include/openssl/pkcs7.h ../../include/openssl/safestack.h
+qat_ecdsa.o: ../../include/openssl/sha.h ../../include/openssl/stack.h
+qat_ecdsa.o: ../../include/openssl/symhacks.h ../../include/openssl/x509.h
+qat_ecdsa.o: ../../include/openssl/x509_vfy.h e_qat.h e_qat_err.h
+qat_ecdsa.o: qae_mem_utils.h qat_asym_common.h qat_ciphers.h qat_digests.h
+qat_ecdsa.o: qat_ecdsa.c qat_ecdsa.h qat_sym_common.h qat_utils.h
 qat_parseconf.o: qat_parseconf.c qat_parseconf.h qat_utils.h
 #qat_rand.o: ../../include/openssl/aes.h ../../include/openssl/asn1.h
 #qat_rand.o: ../../include/openssl/bio.h ../../include/openssl/buffer.h

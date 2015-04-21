@@ -61,8 +61,8 @@
 #include "qat_asym_common.h"
 
 #include <openssl/dsa.h>
-#include <openssl/async.h>
 #include <openssl/err.h>
+#include <openssl/bn.h>
 #include "cpa.h"
 #include "cpa_types.h"
 #include "cpa_cy_dh.h"
@@ -84,10 +84,12 @@
 # endif
 #endif
 
-
 DSA_SIG *qat_dsa_do_sign_synch(const unsigned char *dgst, int dlen, DSA *dsa);
 int qat_dsa_do_verify_synch(const unsigned char *dgst, int dgst_len,
                             DSA_SIG *sig, DSA *dsa);
+int qat_dsa_sign_setup(DSA *dsa, BN_CTX *ctx_in, BIGNUM **kinvp, BIGNUM **rp);
+int qat_mod_exp_dsa(DSA *dsa, BIGNUM *r, BIGNUM *a, const BIGNUM *p,
+                    const BIGNUM *m, BN_CTX *ctx, BN_MONT_CTX *m_ctx);
 
 /* Qat DSA method structure declaration. */
 static DSA_METHOD qat_dsa_method = {
@@ -108,7 +110,6 @@ static DSA_METHOD qat_dsa_method = {
 DSA_METHOD *get_DSA_methods(void)
 {
 #ifdef OPENSSL_DISABLE_QAT_DSA_SYNCH
-# ifndef OPENSSL_DISABLE_QAT_DSA_ASYNCH
     const DSA_METHOD *def_dsa_meth = DSA_get_default_method();
     if (def_dsa_meth) {
         qat_dsa_method.dsa_do_sign = def_dsa_meth->dsa_do_sign;
@@ -121,33 +122,10 @@ DSA_METHOD *get_DSA_methods(void)
         qat_dsa_method.dsa_do_verify = NULL;
         qat_dsa_method.bn_mod_exp = NULL;
     }
-# endif
 #endif
 
-#ifdef OPENSSL_DISABLE_QAT_DSA_SYNCH
-# ifdef OPENSSL_DISABLE_QAT_DSA_ASYNCH
-    return NULL;
-# endif
-#endif
     return &qat_dsa_method;
 }
-
-typedef struct dsa_sign_op_data {
-    BIGNUM *r;
-    BIGNUM *s;
-    unsigned char *sig;
-    unsigned int *siglen;
-    CpaCyDsaRSSignOpData *opData;
-    int (*cb_func) (unsigned char *res, size_t reslen, void *cb_data,
-                    int status);
-    void *cb_data;
-} dsa_sign_op_data_t;
-
-typedef struct dsa_verify_op_data {
-    CpaCyDsaVerifyOpData *opData;
-    int (*cb_func) (void *cb_data, int status);
-    void *cb_data;
-} dsa_verify_op_data_t;
 
 /*
  * DSA range Supported in QAT {L,N} = {1024, 160}, {2048, 224} {2048, 256},
@@ -477,7 +455,6 @@ DSA_SIG *qat_dsa_do_sign_synch(const unsigned char *dgst, int dlen, DSA *dsa)
 
     return qat_dsa_do_sign(dgst, dlen, NULL, NULL, dsa, NULL, NULL);
 }
-
 
 /******************************************************************************
 * function:

@@ -1144,25 +1144,25 @@ static int bind_qat(ENGINE *e, const char *id)
         goto end;
     }
 
-    //if (!ENGINE_set_DSA(e, get_DSA_methods())) {
-    //    WARN("ENGINE_set_DSA failed\n");
-    //    goto end;
-    //}
+    if (!ENGINE_set_DSA(e, get_DSA_methods())) {
+        WARN("ENGINE_set_DSA failed\n");
+        goto end;
+    }
 
-    //if (!ENGINE_set_DH(e, get_DH_methods())) {
-    //    WARN("ENGINE_set_DH failed\n");
-    //    goto end;
-    //}
+    if (!ENGINE_set_DH(e, get_DH_methods())) {
+        WARN("ENGINE_set_DH failed\n");
+        goto end;
+    }
 
-    //if (!ENGINE_set_ECDH(e, get_ECDH_methods())) {
-    //    WARN("ENGINE_set_ECDH failed\n");
-    //    goto end;
-    //}
+    if (!ENGINE_set_ECDH(e, get_ECDH_methods())) {
+        WARN("ENGINE_set_ECDH failed\n");
+        goto end;
+    }
 
-    //if (!ENGINE_set_ECDSA(e, get_ECDSA_methods())) {
-    //    WARN("ENGINE_set_ECDSA failed\n");
-    //    goto end;
-    //}
+    if (!ENGINE_set_ECDSA(e, get_ECDSA_methods())) {
+        WARN("ENGINE_set_ECDSA failed\n");
+        goto end;
+    }
 
     if (!ENGINE_set_ciphers(e, qat_ciphers_synch)) {
         WARN("ENGINE_set_ciphers failed\n");

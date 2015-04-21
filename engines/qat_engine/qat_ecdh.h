@@ -45,22 +45,22 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  * ====================================================================
- */
+  */
 
 /*****************************************************************************
- * @file qat_dsa.h
+ * @file qat_ecdh.h
  *
- * This file provides an interface for DSA opeartion
+ * This file provides an interface to Elliptical Curve Diffie Hellman
+ * operations
  *
  *****************************************************************************/
 
-#ifndef QAT_DSA_H
-# define QAT_DSA_H
+#ifndef QAT_ECDH_H
+# define QAT_ECDH_H
 
-# include <openssl/dsa.h>
+# include <openssl/ecdh.h>
+# include <openssl/ossl_typ.h>
 
-/* Qat engine DSA methods declaration */
+ECDH_METHOD *get_ECDH_methods(void);
 
-DSA_METHOD *get_DSA_methods(void);
-
-#endif                          /* QAT_DSA_H */
+#endif                          /* QAT_ECDH_H */
