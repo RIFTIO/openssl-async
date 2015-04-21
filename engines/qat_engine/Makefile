@@ -52,6 +52,7 @@ QATLIBSRC_SHARED = e_qat.c\
 	 qat_ciphers.c\
 	 qat_chain.c\
 	 qat_rsa.c\
+	 qat_dsa.c\
 	 qat_asym_common.c\
 	 qat_sym_common.c\
 	 e_qat_err.c\
@@ -62,6 +63,7 @@ qat_utils.o \
 qat_ciphers.o \
 qat_chain.o \
 qat_rsa.o \
+qat_dsa.o \
 qat_asym_common.o \
 qat_sym_common.o \
 e_qat_err.o \
