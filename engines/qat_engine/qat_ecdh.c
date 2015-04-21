@@ -59,6 +59,7 @@
 #include <unistd.h>
 #include "qat_ecdh.h"
 #include <openssl/ecdh.h>
+#include <openssl/async.h>
 #include <openssl/err.h>
 #include <openssl/ec.h>
 #include <ech_locl.h>
@@ -319,15 +320,20 @@ static int qat_ecdh_compute_key(void *outX, size_t outlenX, void *outY,
                                             &bEcdhStatus, pResultX, pResultY);
 
             if (status == CPA_STATUS_RETRY) {
-                usleep(ulPollInterval +
-                       (qatPerformOpRetries %
-                        QAT_RETRY_BACKOFF_MODULO_DIVISOR));
+                //usleep(ulPollInterval +
+                //       (qatPerformOpRetries %
+                //        QAT_RETRY_BACKOFF_MODULO_DIVISOR));
                 qatPerformOpRetries++;
+                QATerr(QAT_F_QAT_ECDH_COMPUTE_KEY, ERR_R_RETRY);
+                ASYNC_pause_job();
+                if(!getEnableExternalPolling())
+                    poll_instances();
             }
         }
-        while (status == CPA_STATUS_RETRY &&
-               ((qatPerformOpRetries < iMsgRetry) ||
-                (iMsgRetry == QAT_INFINITE_MAX_NUM_RETRIES)));
+        while (status == CPA_STATUS_RETRY );
+        //while (status == CPA_STATUS_RETRY &&
+        //       ((qatPerformOpRetries < iMsgRetry) ||
+        //        (iMsgRetry == QAT_INFINITE_MAX_NUM_RETRIES)));
 
         if (status != CPA_STATUS_SUCCESS) {
             QATerr(QAT_F_QAT_ECDH_COMPUTE_KEY, ERR_R_INTERNAL_ERROR);
@@ -335,7 +341,14 @@ static int qat_ecdh_compute_key(void *outX, size_t outlenX, void *outY,
             goto err;
         }
 
-        rc = waitForOpToComplete(&op_done);
+        //rc = waitForOpToComplete(&op_done);
+        do {
+            ASYNC_pause_job();
+            if(!getEnableExternalPolling())
+                poll_instances();
+        }
+        while (!op_done.flag);
+
         cleanupOpDone(&op_done);
         if (rc)
             goto err;

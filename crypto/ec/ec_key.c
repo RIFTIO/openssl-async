@@ -84,6 +84,7 @@ EC_KEY *EC_KEY_new(void)
     ret->conv_form = POINT_CONVERSION_UNCOMPRESSED;
     ret->references = 1;
     ret->method_data = NULL;
+    ret->job = NULL;
     return (ret);
 }
 
@@ -193,6 +194,7 @@ EC_KEY *EC_KEY_copy(EC_KEY *dest, const EC_KEY *src)
     dest->conv_form = src->conv_form;
     dest->version = src->version;
     dest->flags = src->flags;
+    dest->job = src->job;
 
     return dest;
 }
