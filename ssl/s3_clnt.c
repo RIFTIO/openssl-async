@@ -151,6 +151,7 @@
 #include <stdio.h>
 #include "ssl_locl.h"
 #include "kssl_lcl.h"
+#include "../crypto/ecdh/ech_locl.h"
 #include <openssl/buffer.h>
 #include <openssl/rand.h>
 #include <openssl/objects.h>
@@ -2761,7 +2762,7 @@ int ssl3_send_client_key_exchange(SSL *s)
                 SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE, ERR_R_DH_LIB);
                 goto err;
             }
-            if (s->s3->flags & SSL3_FLAGS_ASYNCH) {
+            if ((s->s3->flags & SSL3_FLAGS_ASYNCH) &&(dh_clnt->meth->flags & DH_FLAG_ASYNCH)) {
                 s->s3->pkeystate = -1;
                 s->s3->send_client_key_exchange.dh_srvr = dh_srvr;
                 s->s3->send_client_key_exchange.dh_clnt = dh_clnt;
@@ -2798,7 +2799,7 @@ int ssl3_send_client_key_exchange(SSL *s)
              * clear it out afterwards
              */
 
-            if (s->s3->flags & SSL3_FLAGS_ASYNCH) {
+            if ((s->s3->flags & SSL3_FLAGS_ASYNCH) && (dh_clnt->meth->flags & DH_FLAG_ASYNCH)) {
                 s->s3->pkeystate = -1;
                 s->s3->send_client_key_exchange.dh_srvr = dh_srvr;
                 s->s3->send_client_key_exchange.dh_clnt = dh_clnt;
@@ -2976,7 +2977,12 @@ int ssl3_send_client_key_exchange(SSL *s)
                 }
             } else {
                 /* Generate a new ECDH key pair */
-                if (s->s3->flags & SSL3_FLAGS_ASYNCH) {
+                ECDH_DATA *ecdh_tmp = ecdh_check(clnt_ecdh);
+                if (ecdh_tmp == NULL) {
+                    SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE, ERR_R_ECDH_LIB);
+                    goto err;
+                }
+                if ((s->s3->flags & SSL3_FLAGS_ASYNCH) && (ecdh_tmp->meth->flags & ECDH_FLAG_ASYNCH)) {
                     s->s3->pkeystate = -1;
                     s->s3->send_client_key_exchange.clnt_ecdh = clnt_ecdh;
                     s->s3->send_client_key_exchange.srvr_group = srvr_group;
@@ -3025,7 +3031,12 @@ int ssl3_send_client_key_exchange(SSL *s)
                 SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE, ERR_R_ECDH_LIB);
                 goto err;
             }
-            if (s->s3->flags & SSL3_FLAGS_ASYNCH) {
+            ECDH_DATA *ecdh = ecdh_check(clnt_ecdh);
+            if (ecdh == NULL) {
+                SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE, ERR_R_ECDH_LIB);
+                goto err;
+            }
+            if ((s->s3->flags & SSL3_FLAGS_ASYNCH) && (ecdh->meth->flags & ECDH_FLAG_ASYNCH)) {
                 s->s3->pkeystate = -1;
                 s->s3->send_client_key_exchange.clnt_ecdh = clnt_ecdh;
                 s->s3->send_client_key_exchange.srvr_group = srvr_group;

@@ -97,6 +97,12 @@ struct ecdh_method {
 
 # define ECDH_FLAG_FIPS_METHOD   0x1
 
+/*
+ * If this flag is set, the ECDH method will supoort asynch mode
+ * for ECDH key generation and computation.
+ */
+# define ECDH_FLAG_ASYNCH		 0x2
+
 typedef struct ecdh_data_st {
     /* EC_KEY_METH_DATA part */
     int (*init) (EC_KEY *);

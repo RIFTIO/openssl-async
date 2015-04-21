@@ -1834,7 +1834,10 @@ int MAIN(int argc, char **argv)
             case SSL_ERROR_SYSCALL:
                 ret = get_last_socket_error();
                 BIO_printf(bio_err, "read:errno=%d\n", ret);
-                goto shut;
+                if (EAGAIN == ret)
+                    break;
+                else
+                    goto shut;
             case SSL_ERROR_ZERO_RETURN:
                 BIO_printf(bio_c_out, "closed\n");
                 ret = 0;
