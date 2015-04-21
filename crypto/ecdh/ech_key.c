@@ -68,6 +68,7 @@
  */
 
 #include "ech_locl.h"
+#include <openssl/async.h>
 
 struct ecdh_compute_key_async_args {
     void *out;
