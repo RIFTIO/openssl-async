@@ -227,8 +227,8 @@ static int dsa_verify_async_internal(void *vargs)
     args = (struct dsa_async_args *)vargs;
     if (!args)
         return 0;
-    return DSA_sign(args->type, args->dgst, args->dlen,
-                    args->sig, args->sigbuflen, args->dsa); 
+    return DSA_verify(args->type, args->dgst, args->dlen,
+                    args->sigbuf, args->sigbuflen, args->dsa); 
 }
 
 /* data has already been hashed (probably with SHA or SHA-1). */
