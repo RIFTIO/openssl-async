@@ -553,3 +553,15 @@ void EC_KEY_clear_flags(EC_KEY *key, int flags)
 {
     key->flags &= ~flags;
 }
+
+void EC_KEY_set_job(EC_KEY *eckey, ASYNC_JOB *job)
+{
+    eckey->job = job;
+}
+
+ASYNC_JOB *EC_KEY_get_job(const EC_KEY *eckey)
+{
+    if (eckey)
+        return eckey->job;
+    return NULL;
+}

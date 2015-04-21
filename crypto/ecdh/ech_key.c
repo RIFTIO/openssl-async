@@ -106,6 +106,7 @@ int ECDH_compute_key_async(void *out, size_t outlen, const EC_POINT *pub_key,
 {
     int ret;
     struct ecdh_compute_key_async_args args;
+    ASYNC_JOB *tmp_job = EC_KEY_get_job(eckey);
 
     args.out = out;
     args.outlen = outlen;
@@ -114,15 +115,16 @@ int ECDH_compute_key_async(void *out, size_t outlen, const EC_POINT *pub_key,
     args.KDF = KDF;
 
     if(!ASYNC_in_job()) {
-        switch(ASYNC_start_job(&eckey->job, &ret, ecdh_compute_key_async_internal, &args,
+        switch(ASYNC_start_job(&tmp_job, &ret, ecdh_compute_key_async_internal, &args,
             sizeof(struct ecdh_compute_key_async_args))) {
         case ASYNC_ERR:
             //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
+            EC_KEY_set_job(eckey, tmp_job);
             return -1;
         case ASYNC_FINISH:
-            eckey->job = NULL;
+            EC_KEY_set_job(eckey, NULL);
             return ret;
         default:
             //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
