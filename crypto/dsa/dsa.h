@@ -74,6 +74,7 @@
 # include <openssl/bio.h>
 # include <openssl/crypto.h>
 # include <openssl/ossl_typ.h>
+# include <openssl/async.h>
 
 # ifdef OPENSSL_USE_DEPRECATED
 #  include <openssl/bn.h>
@@ -176,6 +177,7 @@ struct dsa_st {
     const DSA_METHOD *meth;
     /* functional reference if 'meth' is ENGINE-provided */
     ENGINE *engine;
+    ASYNC_JOB *job;
 };
 
 # define d2i_DSAparams_fp(fp,x) (DSA *)ASN1_d2i_fp((char *(*)())DSA_new, \
@@ -212,7 +214,11 @@ int DSA_security_bits(const DSA *d);
 int DSA_sign_setup(DSA *dsa, BN_CTX *ctx_in, BIGNUM **kinvp, BIGNUM **rp);
 int DSA_sign(int type, const unsigned char *dgst, int dlen,
              unsigned char *sig, unsigned int *siglen, DSA *dsa);
+int DSA_sign_async(int type, const unsigned char *dgst, int dlen,
+             unsigned char *sig, unsigned int *siglen, DSA *dsa);
 int DSA_verify(int type, const unsigned char *dgst, int dgst_len,
+               const unsigned char *sigbuf, int siglen, DSA *dsa);
+int DSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
                const unsigned char *sigbuf, int siglen, DSA *dsa);
 int DSA_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new *new_func,
                          CRYPTO_EX_dup *dup_func, CRYPTO_EX_free *free_func);

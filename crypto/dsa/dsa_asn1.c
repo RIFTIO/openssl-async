@@ -64,6 +64,18 @@
 #include <openssl/asn1t.h>
 #include <openssl/rand.h>
 
+struct dsa_async_args {
+    int type;
+    const unsigned char *dgst;
+    unsigned int dlen;
+    unsigned char *sig;
+    unsigned int *siglen;
+    DSA *dsa;
+    const unsigned char *sigbuf;
+    unsigned int sigbuflen;
+};
+
+
 /* Override the default new methods */
 static int sig_cb(int operation, ASN1_VALUE **pval, const ASN1_ITEM *it,
                   void *exarg)
@@ -151,6 +163,16 @@ DSA *DSAparams_dup(DSA *dsa)
     return ASN1_item_dup(ASN1_ITEM_rptr(DSAparams), dsa);
 }
 
+static int dsa_sign_async_internal(void *vargs)
+{
+    struct dsa_async_args *args;
+    args = (struct dsa_async_args *)vargs;
+    if (!args)
+        return 0;
+    return DSA_sign(args->type, args->dgst, args->dlen,
+                    args->sig, args->siglen, args->dsa); 
+}
+
 int DSA_sign(int type, const unsigned char *dgst, int dlen,
              unsigned char *sig, unsigned int *siglen, DSA *dsa)
 {
@@ -164,6 +186,49 @@ int DSA_sign(int type, const unsigned char *dgst, int dlen,
     *siglen = i2d_DSA_SIG(s, &sig);
     DSA_SIG_free(s);
     return (1);
+}
+
+int DSA_sign_async(int type, const unsigned char *dgst, int dlen,
+             unsigned char *sig, unsigned int *siglen, DSA *dsa)
+{
+    int ret;
+    struct dsa_async_args args;
+
+    args.type = type;
+    args.dgst = dgst;
+    args.dlen = dlen;
+    args.sig = sig;
+    args.siglen = siglen;
+    args.dsa = dsa;
+
+    if(!ASYNC_in_job()) {
+        switch(ASYNC_start_job(&dsa->job, &ret, dsa_sign_async_internal, &args,
+            sizeof(struct dsa_async_args))) {
+        case ASYNC_ERR:
+            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
+            return -1;
+        case ASYNC_PAUSE:
+            return -1;
+        case ASYNC_FINISH:
+            dsa->job = NULL;
+            return ret;
+        default:
+            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
+            /* Shouldn't happen */
+            return -1;
+        }
+    }
+    return DSA_sign(type, dgst, dlen, sig, siglen, dsa);
+}
+
+static int dsa_verify_async_internal(void *vargs)
+{
+    struct dsa_async_args *args;
+    args = (struct dsa_async_args *)vargs;
+    if (!args)
+        return 0;
+    return DSA_sign(args->type, args->dgst, args->dlen,
+                    args->sig, args->sigbuflen, args->dsa); 
 }
 
 /* data has already been hashed (probably with SHA or SHA-1). */
@@ -200,3 +265,37 @@ int DSA_verify(int type, const unsigned char *dgst, int dgst_len,
     DSA_SIG_free(s);
     return (ret);
 }
+
+int DSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
+               const unsigned char *sigbuf, int siglen, DSA *dsa)
+{
+    int ret;
+    struct dsa_async_args args;
+
+    args.type = type;
+    args.dgst = dgst;
+    args.dlen = dgst_len;
+    args.sigbuf = sigbuf;
+    args.sigbuflen = siglen;
+    args.dsa = dsa;
+
+    if(!ASYNC_in_job()) {
+        switch(ASYNC_start_job(&dsa->job, &ret, dsa_verify_async_internal, &args,
+            sizeof(struct dsa_async_args))) {
+        case ASYNC_ERR:
+            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
+            return -1;
+        case ASYNC_PAUSE:
+            return -1;
+        case ASYNC_FINISH:
+            dsa->job = NULL;
+            return ret;
+        default:
+            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
+            /* Shouldn't happen */
+            return -1;
+        }
+    }
+    return DSA_verify(type, dgst, dgst_len, sigbuf, siglen, dsa);
+}
+
