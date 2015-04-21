@@ -2502,6 +2502,21 @@ int MAIN(int argc, char **argv)
         rnd_fake = 1;
     }
     for (j = 0; j < EC_NUM; j++) {
+        int requestno = 0;
+        int k;
+        EC_KEY **ecdh_inflights = NULL;
+        ecdh_inflights = (EC_KEY **)OPENSSL_malloc((batch) * (sizeof(EC_KEY *)));
+        if (ecdh_inflights == NULL) {
+            BIO_printf(bio_err, "ECDH mem alloc failure.\n");
+            ERR_print_errors(bio_err);
+            exit(EXIT_FAILURE);
+        }
+        memset(ecdh_inflights, 0, batch * sizeof(EC_KEY *));
+        for (k = 0; k < batch; k++) {
+            ecdh_inflights[k] = EC_KEY_new_by_curve_name(test_curves[j]);
+            EC_KEY_generate_key(ecdh_inflights[k]);;
+        }
+
         if (!ecdh_doit[j])
             continue;
         ecdh_a[j] = EC_KEY_new_by_curve_name(test_curves[j]);
@@ -2575,14 +2590,17 @@ int MAIN(int argc, char **argv)
                                    test_curves_bits[j], ECDH_SECONDS);
                 Time_F(START);
                 for (count = 0, run = 1; COND(ecdh_c[j][0]); count++) {
+                    requestno++;
+                    requestno=requestno%batch;
                     secret_size_a = ECDH_compute_key_async(secret_a, outlen,
                                      EC_KEY_get0_public_key(ecdh_b[j]),
-                                     ecdh_a[j], kdf);
-                    if (secret_size_a == -1 && EC_KEY_get_job(ecdh_a[j]) != NULL) {
+                                     ecdh_inflights[requestno], kdf);
+                    if (secret_size_a == -1 && EC_KEY_get_job(ecdh_inflights[requestno]) != NULL) {
                         count--; /*Retry detected so need to resubmit*/
                     }
 # ifndef OPENSSL_NO_HW_QAT
-                    poll_engine(engine, batch);
+                    if (requestno == 0)
+                        poll_engine(engine, batch);
 # endif
                 }
 # ifndef OPENSSL_NO_HW_QAT
