@@ -84,6 +84,7 @@ EC_KEY *EC_KEY_new(void)
     ret->conv_form = POINT_CONVERSION_UNCOMPRESSED;
     ret->references = 1;
     ret->method_data = NULL;
+    ret->job = NULL;
     return (ret);
 }
 
@@ -193,6 +194,7 @@ EC_KEY *EC_KEY_copy(EC_KEY *dest, const EC_KEY *src)
     dest->conv_form = src->conv_form;
     dest->version = src->version;
     dest->flags = src->flags;
+    dest->job = src->job;
 
     return dest;
 }
@@ -550,4 +552,16 @@ void EC_KEY_set_flags(EC_KEY *key, int flags)
 void EC_KEY_clear_flags(EC_KEY *key, int flags)
 {
     key->flags &= ~flags;
+}
+
+void EC_KEY_set_job(EC_KEY *eckey, ASYNC_JOB *job)
+{
+    eckey->job = job;
+}
+
+ASYNC_JOB *EC_KEY_get_job(const EC_KEY *eckey)
+{
+    if (eckey)
+        return eckey->job;
+    return NULL;
 }

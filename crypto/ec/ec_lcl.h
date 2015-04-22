@@ -73,6 +73,7 @@
 
 #include <openssl/obj_mac.h>
 #include <openssl/ec.h>
+#include <openssl/async.h>
 #include <openssl/bn.h>
 
 #if defined(__SUNPRO_C)
@@ -266,6 +267,7 @@ struct ec_key_st {
     int references;
     int flags;
     EC_EXTRA_DATA *method_data;
+    ASYNC_JOB *job;
 } /* EC_KEY */ ;
 
 /*

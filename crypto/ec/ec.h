@@ -84,6 +84,7 @@
 
 # include <openssl/asn1.h>
 # include <openssl/symhacks.h>
+# include <openssl/async.h>
 # ifdef OPENSSL_USE_DEPRECATED
 #  include <openssl/bn.h>
 # endif
@@ -886,6 +887,18 @@ int EC_KEY_check_key(const EC_KEY *key);
  */
 int EC_KEY_set_public_key_affine_coordinates(EC_KEY *key, BIGNUM *x,
                                              BIGNUM *y);
+
+/** Sets the job of a EC_KEY object for async operation.
+ *  \param  eckey  EC_KEY object
+ *  \param  job  ASYNC_JOB object
+ */
+void EC_KEY_set_job(EC_KEY *eckey, ASYNC_JOB *job);
+
+/** Returns the async job of a EC_KEY object.
+ *  \param  eckey  the EC_KEY object
+ *  \return an ASYNC_JOB object (possibly NULL)
+ */
+ASYNC_JOB *EC_KEY_get_job(const EC_KEY *eckey);
 
 /********************************************************************/
 /*        de- and encoding functions for SEC1 ECPrivateKey          */
