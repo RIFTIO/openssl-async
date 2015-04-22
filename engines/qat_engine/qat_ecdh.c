@@ -350,8 +350,8 @@ static int qat_ecdh_compute_key(void *outX, size_t outlenX, void *outY,
         while (!op_done.flag);
 
         cleanupOpDone(&op_done);
-        if (rc)
-            goto err;
+        //if (rc)
+        //    goto err;
 
         /* Invoke the key derivative function */
         if (KDF != NULL) {
