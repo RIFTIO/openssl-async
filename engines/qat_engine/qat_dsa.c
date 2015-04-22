@@ -354,15 +354,19 @@ DSA_SIG *qat_dsa_do_sign(const unsigned char *dgst, int dlen,
                                     &bDsaSignStatus, pResultR, pResultS);
 
             if (status == CPA_STATUS_RETRY) {
-                usleep(ulPollInterval +
-                       (qatPerformOpRetries %
-                        QAT_RETRY_BACKOFF_MODULO_DIVISOR));
-                qatPerformOpRetries++;
+                //usleep(ulPollInterval +
+                //       (qatPerformOpRetries %
+                //        QAT_RETRY_BACKOFF_MODULO_DIVISOR));
+                //qatPerformOpRetries++;
+                ASYNC_pause_job();
+                if(!getEnableExternalPolling())
+                        poll_instances();
             }
         }
-        while (status == CPA_STATUS_RETRY &&
-               ((qatPerformOpRetries < iMsgRetry) ||
-                (iMsgRetry == QAT_INFINITE_MAX_NUM_RETRIES)));
+        while (status == CPA_STATUS_RETRY);
+        //while (status == CPA_STATUS_RETRY &&
+        //       ((qatPerformOpRetries < iMsgRetry) ||
+        //        (iMsgRetry == QAT_INFINITE_MAX_NUM_RETRIES)));
 
         if (status != CPA_STATUS_SUCCESS) {
             QATerr(QAT_F_QAT_DSA_DO_SIGN, ERR_R_INTERNAL_ERROR);
@@ -372,13 +376,19 @@ DSA_SIG *qat_dsa_do_sign(const unsigned char *dgst, int dlen,
             goto err;
         }
 
-        rc = waitForOpToComplete(&op_done);
-        cleanupOpDone(&op_done);
-        if (rc) {
-            DSA_SIG_free(ret);
-            ret = NULL;
-            goto err;
+        //rc = waitForOpToComplete(&op_done);
+        do {
+            ASYNC_pause_job();
+            if(!getEnableExternalPolling())
+                poll_instances();
         }
+        while (!op_done.flag);
+        cleanupOpDone(&op_done);
+        //if (rc) {
+        //    DSA_SIG_free(ret);
+        //    ret = NULL;
+        //    goto err;
+        //}
 
         /* Convert the flatbuffer results back to a BN */
         BN_bin2bn(pResultR->pData, pResultR->dataLenInBytes, r);
@@ -584,15 +594,19 @@ int qat_dsa_do_verify(const unsigned char *dgst, int dgst_len,
                                     &op_done, opData, &bDsaVerifyStatus);
 
             if (status == CPA_STATUS_RETRY) {
-                usleep(ulPollInterval +
-                       (qatPerformOpRetries %
-                        QAT_RETRY_BACKOFF_MODULO_DIVISOR));
-                qatPerformOpRetries++;
+                //usleep(ulPollInterval +
+                //       (qatPerformOpRetries %
+                //        QAT_RETRY_BACKOFF_MODULO_DIVISOR));
+                //qatPerformOpRetries++;
+                ASYNC_pause_job();
+                if(!getEnableExternalPolling())
+                        poll_instances();
             }
         }
-        while (status == CPA_STATUS_RETRY &&
-               ((qatPerformOpRetries < iMsgRetry) ||
-                (iMsgRetry == QAT_INFINITE_MAX_NUM_RETRIES)));
+        while (status == CPA_STATUS_RETRY);
+        //while (status == CPA_STATUS_RETRY &&
+        //       ((qatPerformOpRetries < iMsgRetry) ||
+        //        (iMsgRetry == QAT_INFINITE_MAX_NUM_RETRIES)));
 
         if (status != CPA_STATUS_SUCCESS) {
             QATerr(QAT_F_QAT_DSA_DO_VERIFY, ERR_R_INTERNAL_ERROR);
@@ -600,15 +614,21 @@ int qat_dsa_do_verify(const unsigned char *dgst, int dgst_len,
             goto err;
         }
 
-        rc = waitForOpToComplete(&op_done);
+        //rc = waitForOpToComplete(&op_done);
+        do {
+            ASYNC_pause_job();
+            if(!getEnableExternalPolling())
+                poll_instances();
+        }
+        while (!op_done.flag);
         if (op_done.verifyResult == CPA_TRUE)
             ret = 1;
 
         cleanupOpDone(&op_done);
-        if (rc) {
-            ret = 0;
-            goto err;
-        }
+        //if (rc) {
+        //    ret = 0;
+        //    goto err;
+        //}
     }
 
  err:

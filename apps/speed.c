@@ -2333,14 +2333,47 @@ int MAIN(int argc, char **argv)
     }
     for (j = 0; j < DSA_NUM; j++) {
         unsigned int kk;
-        int ret;
+        int ret, k;
+        int requestno = 0;
+        DSA **dsa_inflights = NULL;
+        dsa_inflights = (DSA **)OPENSSL_malloc((batch) * (sizeof(DSA *)));
+        if (NULL == dsa_inflights) {
+            BIO_printf(bio_err,
+                       "[%s] --- Failed to allocate DSA structure\n", __func__);
+            ERR_print_errors(bio_err);
+            exit(EXIT_FAILURE);
+        }
+        memset(dsa_inflights, 0, batch * sizeof(DSA *));
+        for (k = 0; k < batch; k++) {
+            switch (dsa_bits[j]) {
+                case 512:
+                    dsa_inflights[k] = get_dsa512();
+                    break;
+                case 1024:
+                    dsa_inflights[k] = get_dsa1024();
+                    break;
+                case 2048:
+                    dsa_inflights[k] = get_dsa2048();
+                    break;
+                default:
+                    BIO_printf(bio_err,
+                            "[%s] --- Failed to init DSA structure\n", __func__);
+                    exit(EXIT_FAILURE);
+            }
+        }
 
         if (!dsa_doit[j])
             continue;
 
         /* DSA_generate_key(dsa_key[j]); */
         /* DSA_sign_setup(dsa_key[j],NULL); */
-        ret = DSA_sign(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]);
+        do {
+            //ret = DSA_sign(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]); 
+            ret = DSA_sign_async(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]);
+# ifndef OPENSSL_NO_HW_QAT
+            poll_engine(engine, batch);
+# endif
+        } while (ret == -1 && dsa_key[j]->job != NULL);
         if (ret == 0) {
             BIO_printf(bio_err,
                        "DSA sign failure.  No DSA sign will be done.\n");
@@ -2351,14 +2384,28 @@ int MAIN(int argc, char **argv)
                                dsa_c[j][0], dsa_bits[j], DSA_SECONDS);
             Time_F(START);
             for (count = 0, run = 1; COND(dsa_c[j][0]); count++) {
-                ret = DSA_sign(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]);
+                requestno++;
+                requestno = requestno % batch;
+                // ret = DSA_sign(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]);
+                ret = DSA_sign_async(EVP_PKEY_DSA, buf, 20, buf2, &kk,
+                                    dsa_inflights[requestno]);
+                if (ret == -1 && dsa_inflights[requestno]->job != NULL) {
+                    count--; /*Retry detected so need to resubmit*/
+                }
                 if (ret == 0) {
                     BIO_printf(bio_err, "DSA sign failure\n");
                     ERR_print_errors(bio_err);
                     count = 1;
                     break;
                 }
+# ifndef OPENSSL_NO_HW_QAT
+                if (requestno == 0)
+                    poll_engine(engine, batch);
+# endif
             }
+# ifndef OPENSSL_NO_HW_QAT
+            poll_engine(engine, batch);
+# endif
             d = Time_F(STOP);
             BIO_printf(bio_err,
                        mr ? "+R3:%ld:%d:%.2f\n"
@@ -2368,7 +2415,13 @@ int MAIN(int argc, char **argv)
             rsa_count = count;
         }
 
-        ret = DSA_verify(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
+        do {
+            // ret = DSA_verify(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
+            ret = DSA_verify_async(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
+# ifndef OPENSSL_NO_HW_QAT
+            poll_engine(engine, batch);
+# endif
+        } while (ret == -1 && dsa_key[j]->job != NULL);
         if (ret <= 0) {
             BIO_printf(bio_err,
                        "DSA verify failure.  No DSA verify will be done.\n");
@@ -2379,14 +2432,30 @@ int MAIN(int argc, char **argv)
                                dsa_c[j][1], dsa_bits[j], DSA_SECONDS);
             Time_F(START);
             for (count = 0, run = 1; COND(dsa_c[j][1]); count++) {
-                ret = DSA_verify(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
-                if (ret <= 0) {
-                    BIO_printf(bio_err, "DSA verify failure\n");
-                    ERR_print_errors(bio_err);
-                    count = 1;
-                    break;
+                requestno++;
+                requestno=requestno%batch;
+                // ret = DSA_verify(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
+                ret = DSA_verify_async(EVP_PKEY_DSA, buf, 20, buf2, kk,
+                                    dsa_inflights[requestno]);
+                if (ret == -1 && dsa_inflights[requestno]->job != NULL) {
+                    count--; /*Retry detected so need to resubmit*/
+                } 
+                else {
+                    if (ret <= 0) {
+                        BIO_printf(bio_err, "DSA verify failure\n");
+                        ERR_print_errors(bio_err);
+                        count = 1;
+                        break;
+                    }
                 }
+# ifndef OPENSSL_NO_HW_QAT
+                if (requestno == 0)
+                    poll_engine(engine, batch);
+# endif
             }
+# ifndef OPENSSL_NO_HW_QAT
+            poll_engine(engine, batch);
+# endif
             d = Time_F(STOP);
             BIO_printf(bio_err,
                        mr ? "+R4:%ld:%d:%.2f\n"
@@ -2400,6 +2469,9 @@ int MAIN(int argc, char **argv)
             for (j++; j < DSA_NUM; j++)
                 dsa_doit[j] = 0;
         }
+        /* TODO check memory leak on the DSA structure */
+        if (dsa_inflights)
+            OPENSSL_free(dsa_inflights);
     }
     if (rnd_fake)
         RAND_cleanup();
