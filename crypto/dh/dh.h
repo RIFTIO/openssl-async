@@ -67,6 +67,7 @@
 
 # include <openssl/bio.h>
 # include <openssl/ossl_typ.h>
+# include <openssl/async.h>
 # ifdef OPENSSL_USE_DEPRECATED
 #  include <openssl/bn.h>
 # endif
@@ -156,6 +157,7 @@ struct dh_st {
     CRYPTO_EX_DATA ex_data;
     const DH_METHOD *meth;
     ENGINE *engine;
+    ASYNC_JOB *job;
 };
 
 # define DH_GENERATOR_2          2
@@ -222,7 +224,9 @@ int DH_generate_parameters_ex(DH *dh, int prime_len, int generator,
 int DH_check(const DH *dh, int *codes);
 int DH_check_pub_key(const DH *dh, const BIGNUM *pub_key, int *codes);
 int DH_generate_key(DH *dh);
+int DH_generate_key_async(DH *dh);
 int DH_compute_key(unsigned char *key, const BIGNUM *pub_key, DH *dh);
+int DH_compute_key_async(unsigned char *key, const BIGNUM *pub_key, DH *dh);
 int DH_compute_key_padded(unsigned char *key, const BIGNUM *pub_key, DH *dh);
 DH *d2i_DHparams(DH **a, const unsigned char **pp, long length);
 int i2d_DHparams(const DH *a, unsigned char **pp);

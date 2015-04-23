@@ -324,7 +324,7 @@ static int qat_ecdh_compute_key(void *outX, size_t outlenX, void *outY,
                 //       (qatPerformOpRetries %
                 //        QAT_RETRY_BACKOFF_MODULO_DIVISOR));
                 qatPerformOpRetries++;
-                QATerr(QAT_F_QAT_ECDH_COMPUTE_KEY, ERR_R_RETRY);
+                //QATerr(QAT_F_QAT_ECDH_COMPUTE_KEY, ERR_R_RETRY);
                 ASYNC_pause_job();
                 if(!getEnableExternalPolling())
                     poll_instances();

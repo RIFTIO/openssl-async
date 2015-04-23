@@ -154,6 +154,7 @@ DH *DH_new_method(ENGINE *engine)
     ret->method_mont_p = NULL;
     ret->references = 1;
     ret->flags = ret->meth->flags;
+    ret->job = NULL;
     CRYPTO_new_ex_data(CRYPTO_EX_INDEX_DH, ret, &ret->ex_data);
     if ((ret->meth->init != NULL) && !ret->meth->init(ret)) {
 #ifndef OPENSSL_NO_ENGINE
