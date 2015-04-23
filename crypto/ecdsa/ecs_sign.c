@@ -54,10 +54,6 @@
  */
 
 #include "ecs_locl.h"
-
-// This header contains the definition of  EC_KEY
-#include "../ec/ec_lcl.h"
-
 #ifndef OPENSSL_NO_ENGINE
 # include <openssl/engine.h>
 #endif
@@ -108,6 +104,7 @@ int ECDSA_sign_async(int type, const unsigned char *dgst, int dlen,
 {
     int ret;
     struct ecdsa_sign_async_args args;
+    ASYNC_JOB *tmp_job = EC_KEY_get_job(eckey);
 
     args.type = type;
     args.dgst = dgst;
@@ -117,7 +114,7 @@ int ECDSA_sign_async(int type, const unsigned char *dgst, int dlen,
     args.eckey = eckey;
 
     if(!ASYNC_in_job()) {
-        switch(ASYNC_start_job(&eckey->job, &ret, ecdsa_sign_async_internal, &args,
+        switch(ASYNC_start_job(&tmp_job, &ret, ecdsa_sign_async_internal, &args,
             sizeof(struct ecdsa_sign_async_args))) {
         case ASYNC_ERR:
             //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
@@ -125,7 +122,7 @@ int ECDSA_sign_async(int type, const unsigned char *dgst, int dlen,
         case ASYNC_PAUSE:
            return -1;
         case ASYNC_FINISH:
-            eckey->job = NULL;
+            EC_KEY_set_job(eckey, NULL);
             return ret;
         default:
             //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);

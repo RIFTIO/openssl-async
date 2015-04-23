@@ -140,6 +140,7 @@ int ECDSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
 {
     int ret;
     struct ecdsa_verify_async_args args;
+    ASYNC_JOB *tmp_job = EC_KEY_get_job(eckey);
 
     args.type = type;
     args.dgst = dgst;
@@ -149,7 +150,7 @@ int ECDSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
     args.eckey = eckey;
 
     if(!ASYNC_in_job()) {
-        switch(ASYNC_start_job(&eckey->job, &ret, ecdsa_verify_async_internal, &args,
+        switch(ASYNC_start_job(&tmp_job, &ret, ecdsa_verify_async_internal, &args,
             sizeof(struct ecdsa_verify_async_args))) {
         case ASYNC_ERR:
             //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
@@ -157,7 +158,7 @@ int ECDSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
         case ASYNC_PAUSE:
             return -1;
         case ASYNC_FINISH:
-            eckey->job = NULL;
+            EC_KEY_set_job(eckey, NULL);
             return ret;
         default:
             //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
