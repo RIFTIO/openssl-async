@@ -2825,6 +2825,8 @@ int MAIN(int argc, char **argv)
             for (j++; j < EC_NUM; j++)
                 ecdh_doit[j] = 0;
         }
+        if (ecdh_inflights)
+            OPENSSL_free(ecdh_inflights);
     }
     if (rnd_fake)
         RAND_cleanup();
@@ -2832,8 +2834,37 @@ int MAIN(int argc, char **argv)
 # ifndef OPENSSL_NO_DH
 
     for (j = 0; j < DH_NUM; j++) {
+        int requestno = 0;
+        int k;
         int dh_gen_status_a = 0;
         int dh_gen_status_b = 0;
+        DH **dh_inflights = NULL;
+        dh_inflights = (DH **)OPENSSL_malloc((batch) * (sizeof(DH *)));
+        if (NULL == dh_inflights) {
+            BIO_printf(bio_err,
+                       "[%s] --- Failed to allocate dh structure\n", __func__);
+            ERR_print_errors(bio_err);
+            exit(EXIT_FAILURE);
+        }
+        memset(dh_inflights, 0,batch * sizeof(DH *));
+        for (k = 0; k < batch; k++) {
+            switch (dh_bits[j]) {
+                case 1024:
+                    dh_inflights[k] = get_dh1024();
+                    break;
+                case 2048:
+                    dh_inflights[k] = get_dh2048();
+                    break;
+                case 4096:
+                    dh_inflights[k] = get_dh4096();
+                    break;
+                default:
+                    BIO_printf(bio_err,
+                            "[%s] --- Failed to init DH structure\n", __func__);
+                    exit(EXIT_FAILURE);
+            }
+        }
+
         if (!dh_doit[j])
             continue;
         RAND_bytes(buf, 20);
@@ -2918,12 +2949,15 @@ int MAIN(int argc, char **argv)
                                        dh_c[j][0], dh_bits[j], DH_SECONDS);
                     Time_F(START);
                     for (count = 0, run = 1; COND(dh_c[j][0]); count++) {
-                        sec_size_a = DH_compute_key_async(sec_a, dh_b[j]->pub_key, dh_a[j]);
-                        if (sec_size_a == -1 && dh_a[j]->job != NULL) {
+                        requestno++;
+                        requestno = requestno % batch;
+                        sec_size_a = DH_compute_key_async(sec_a, dh_b[j]->pub_key, dh_inflights[requestno]);
+                        if (sec_size_a == -1 && dh_inflights[requestno]->job != NULL) {
                             count--; /*Retry detected so need to resubmit*/
                         }
 # ifndef OPENSSL_NO_HW_QAT
-                        poll_engine(engine, batch);
+                        if (requestno == 0)
+                            poll_engine(engine, batch);
 # endif
                     }
 # ifndef OPENSSL_NO_HW_QAT
@@ -2944,6 +2978,8 @@ int MAIN(int argc, char **argv)
             for (j++; j < DH_NUM; j++)
                 dh_doit[j] = 0;
         }
+        if (dh_inflights)
+            OPENSSL_free(dh_inflights);
     }
     if (rnd_fake)
         RAND_cleanup();
