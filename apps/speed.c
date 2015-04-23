@@ -253,8 +253,10 @@ static int do_multi(int multi);
 #define PRIME_NUM       3
 #define RSA_NUM         7
 #define DSA_NUM         3
+#define DH_NUM          3
 
 #define EC_NUM       16
+#define MAX_DH_SIZE   512
 #define MAX_ECDH_SIZE 256
 
 static const char *names[ALGOR_NUM] = {
@@ -280,6 +282,9 @@ static double dsa_results[DSA_NUM][2];
 static double ecdsa_results[EC_NUM][2];
 static double ecdh_results[EC_NUM][1];
 #endif
+# ifndef OPENSSL_NO_DH
+static double dh_results[DH_NUM][1];
+# endif
 
 #if defined(OPENSSL_NO_DSA) && !defined(OPENSSL_NO_EC)
 static const char rnd_seed[] =
@@ -2846,7 +2851,7 @@ int MAIN(int argc, char **argv)
                 rsa_count = 1;
             }
 
-            if (!async) {       /* DH synchronous mode */
+           
                 /* generate two DH key pairs */
                 if (!DH_generate_key(dh_a[j]) || !DH_generate_key(dh_b[j])) {
                     BIO_printf(bio_err, "DH key generation failure.\n");
@@ -2910,7 +2915,6 @@ int MAIN(int argc, char **argv)
                     rsa_count = count;
                 }
             }
-        }
 
         if (rsa_count <= 1) {
             /* if longer than 10s, don't do any more */
