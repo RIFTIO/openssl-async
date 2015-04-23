@@ -76,6 +76,7 @@
 #define DSA_SECONDS             10
 #define ECDSA_SECONDS   10
 #define ECDH_SECONDS    10
+#define DH_SECONDS      10
 
 #undef PROG
 #define PROG speed_main
@@ -172,6 +173,10 @@
 # include <openssl/dsa.h>
 # include "./testdsa.h"
 #endif
+# ifndef OPENSSL_NO_DH
+#  include <openssl/dh.h>
+#  include "./testdh.h"
+# endif
 #ifndef OPENSSL_NO_EC
 # include <openssl/ecdsa.h>
 # include <openssl/ecdh.h>
@@ -199,6 +204,35 @@
 #undef BUFSIZE
 #define BUFSIZE (1024*8+1)
 #define MAX_MISALIGNMENT 63
+
+/* Timestamp Counter routines for profiling */
+# define RDTSC_INSTRUMENTED
+
+# ifdef RDTSC_INSTRUMENTED
+
+static __inline__ unsigned long long rdtsc(void)
+{
+    unsigned long a, d;
+
+    asm volatile ("rdtsc":"=a" (a), "=d"(d));
+    return (((unsigned long long)a) | (((unsigned long long)d) << 32));
+}
+
+#  define RDTSC_FUNC_START() \
+       unsigned long long rdtsc_func_start = 0; \
+       rdtsc_func_start = rdtsc();
+#  define RDTSC_FUNC_MID(str) \
+        printf("RDTSC, %s, %s, %llu\n",  __func__, str, rdtsc() - rdtsc_func_start);
+#  define RDTSC_FUNC_END() \
+        printf("RDTSC, %s, end, %llu\n", __func__,      rdtsc() - rdtsc_func_start);
+
+# else
+
+#  define RDTSC_FUNC_START()
+#  define RDTSC_FUNC_MID(str)
+#  define RDTSC_FUNC_END()
+
+# endif
 
 static volatile int run = 0;
 
@@ -335,10 +369,24 @@ static double Time_F(int s)
 
 static double Time_F(int s)
 {
-    double ret = app_tminterval(s, usertime);
-    if (s == STOP)
-        alarm(0);
-    return ret;
+#  ifdef RDTSC_INSTRUMENTED
+    static unsigned long long rdtsc_start = 0;
+    switch (s) {
+    case START:
+        rdtsc_start = rdtsc();
+        break;
+    case STOP:
+        BIO_printf(bio_err, "RDTSC, %s, enc, %llu\n", __func__,
+                   rdtsc() - rdtsc_start);
+        rdtsc_start = 0;
+        break;
+    default:
+        BIO_printf(bio_err, "%s: bad s arg\n", __func__);
+        exit(EXIT_FAILURE);
+    }
+#  endif
+
+    return app_tminterval(s, usertime);
 }
 #endif
 
@@ -625,6 +673,29 @@ int MAIN(int argc, char **argv)
     int ecdh_doit[EC_NUM];
 #endif
 
+# ifndef OPENSSL_NO_DH
+    DH *dh_a[DH_NUM], *dh_b[DH_NUM];
+    unsigned char sec_a[MAX_DH_SIZE], sec_b[MAX_DH_SIZE];
+    int sec_size_a, sec_size_b;
+    int dh_checks = 0;
+    int sec_idx = 0;
+    long dh_c[DH_NUM][2];
+
+    static int dh_bits[DH_NUM] = { 1024, 2048, 4096 };
+
+    static const char *dh_names[DH_NUM] = {
+        "prime1024",
+        "prime2048",
+        "prime4096"
+    };
+
+#  define R_P1024    0
+#  define R_P2048    1
+#  define R_P4096    2
+
+# endif
+
+
     int rsa_doit[RSA_NUM];
     int dsa_doit[DSA_NUM];
     int doit[ALGOR_NUM];
@@ -659,6 +730,12 @@ int MAIN(int argc, char **argv)
         ecdh_b[i] = NULL;
     }
 #endif
+# ifndef OPENSSL_NO_DH
+    for (i = 0; i < DH_NUM; i++) {
+        dh_a[i] = NULL;
+        dh_b[i] = NULL;
+    }
+# endif
 
     if (bio_err == NULL)
         if ((bio_err = BIO_new(BIO_s_file())) != NULL)
@@ -705,6 +782,10 @@ int MAIN(int argc, char **argv)
     for (i = 0; i < EC_NUM; i++)
         ecdh_doit[i] = 0;
 #endif
+# ifndef OPENSSL_NO_DH
+    for (i = 0; i < DH_NUM; i++)
+        dh_doit[i] = 0;
+# endif
 
     j = 0;
     argc--;
@@ -1032,6 +1113,18 @@ int MAIN(int argc, char **argv)
             dsa_doit[R_DSA_2048] = 1;
         } else
 #endif
+# ifndef OPENSSL_NO_DH
+        if (strcmp(*argv, "dhp1024") == 0)
+            dh_doit[R_P1024] = 2;
+        else if (strcmp(*argv, "dhp2048") == 0)
+            dh_doit[R_P2048] = 2;
+        else if (strcmp(*argv, "dhp4096") == 0)
+            dh_doit[R_P4096] = 2;
+        else if (strcmp(*argv, "dh") == 0) {
+            for (i = 0; i < DH_NUM; i++)
+                dh_doit[i] = 1;
+        } else
+# endif
 #ifndef OPENSSL_NO_EC
         if (strcmp(*argv, "ecdsap160") == 0)
             ecdsa_doit[R_EC_P160] = 2;
@@ -1178,6 +1271,10 @@ int MAIN(int argc, char **argv)
 #ifndef OPENSSL_NO_DSA
             BIO_printf(bio_err, "dsa512   dsa1024  dsa2048\n");
 #endif
+# ifndef OPENSSL_NO_DH
+            BIO_printf(bio_err, "dhp1024  dhp2048  dhp4096\n");
+            BIO_printf(bio_err, "dh\n");
+# endif
 #ifndef OPENSSL_NO_EC
             BIO_printf(bio_err, "ecdsap160 ecdsap192 ecdsap224 "
                        "ecdsap256 ecdsap384 ecdsap521\n");
@@ -1299,6 +1396,10 @@ int MAIN(int argc, char **argv)
             rsa_doit[i] = 1;
         for (i = 0; i < DSA_NUM; i++)
             dsa_doit[i] = 1;
+# ifndef OPENSSL_NO_DH
+        for (i = 0; i < DH_NUM; i++)
+            dh_doit[i] = 1;
+# endif
 #ifndef OPENSSL_NO_EC
         for (i = 0; i < EC_NUM; i++)
             ecdsa_doit[i] = 1;
@@ -1490,6 +1591,23 @@ int MAIN(int argc, char **argv)
         }
     }
 #  endif
+
+#   ifndef OPENSSL_NO_DH
+    dh_c[R_P1024][0] = count / 1000;
+    dh_c[R_P1024][1] = count / 1000;
+    for (i = R_P2048; i <= R_P4096; i++) {
+        dh_c[i][0] = dh_c[i - 1][0] / 2;
+        dh_c[i][1] = dh_c[i - 1][1] / 2;
+        if ((dh_doit[i] <= 1) && (dh_c[i][0] == 0))
+            dh_doit[i] = 0;
+        else {
+            if (dh_c[i] == 0) {
+                dh_c[i][0] = 1;
+                dh_c[i][1] = 1;
+            }
+        }
+    }
+#   endif
 
 #  ifndef OPENSSL_NO_EC
     ecdsa_c[R_EC_P160][0] = count / 1000;
@@ -2680,7 +2798,7 @@ int MAIN(int argc, char **argv)
 # endif
                 d = Time_F(STOP);
                 BIO_printf(bio_err,
-                           mr ? "+R7:%ld:%d:%.2f\n" :
+                           mr ? "+R8:%ld:%d:%.2f\n" :
                            "%ld %d-bit ECDH ops in %.2fs\n", count,
                            test_curves_bits[j], d);
                 ecdh_results[j][0] = d / (double)count;
@@ -2697,6 +2815,112 @@ int MAIN(int argc, char **argv)
     if (rnd_fake)
         RAND_cleanup();
 #endif
+# ifndef OPENSSL_NO_DH
+
+    for (j = 0; j < DH_NUM; j++) {
+        if (!dh_doit[j])
+            continue;
+        RAND_pseudo_bytes(buf, 20);
+        if (RAND_status() != 1) {
+            RAND_seed(rnd_seed, sizeof rnd_seed);
+            rnd_fake = 1;
+        }
+
+        if ((dh_b[j] = DH_new()) == NULL) {
+            BIO_printf(bio_err, "DH failure.\n");
+            ERR_print_errors(bio_err);
+            rsa_count = 1;
+        } else {
+            if (!DH_check(dh_a[j], &i)) {
+                BIO_printf(bio_err, "DH failure.\n");
+                ERR_print_errors(bio_err);
+                rsa_count = 1;
+            }
+
+            dh_b[j]->p = BN_dup(dh_a[j]->p);
+            dh_b[j]->g = BN_dup(dh_a[j]->g);
+
+            if ((dh_b[j]->p == NULL) || (dh_b[j]->g == NULL)) {
+                BIO_printf(bio_err, "DH failure.\n");
+                ERR_print_errors(bio_err);
+                rsa_count = 1;
+            }
+
+            if (!async) {       /* DH synchronous mode */
+                /* generate two DH key pairs */
+                if (!DH_generate_key(dh_a[j]) || !DH_generate_key(dh_b[j])) {
+                    BIO_printf(bio_err, "DH key generation failure.\n");
+                    ERR_print_errors(bio_err);
+                    rsa_count = 1;
+                } else {
+                    do {
+                        sec_size_a =
+                            DH_compute_key_async(sec_a, dh_b[j]->pub_key, dh_a[j]);
+# ifndef OPENSSL_NO_HW_QAT
+                            poll_engine(engine, batch);
+# endif
+                    } while (sec_size_a == -1 && dh_a[j]->job) != NULL);
+
+                    do {
+                        sec_size_b =
+                            DH_compute_key_async(sec_b, dh_a[j]->pub_key, dh_b[j]);
+# ifndef OPENSSL_NO_HW_QAT
+                            poll_engine(engine, batch);
+# endif
+                    } while (sec_size_b == -1 && dh_b[j]->job) != NULL);
+
+                    if (sec_size_a != sec_size_b)
+                        dh_checks = 0;
+                    else
+                        dh_checks = 1;
+
+                    for (sec_idx = 0; (sec_idx < sec_size_a)
+                         && (dh_checks == 1); sec_idx++) {
+                        if (sec_a[sec_idx] != sec_b[sec_idx])
+                            dh_checks = 0;
+                    }
+
+                    if (dh_checks == 0) {
+                        BIO_printf(bio_err, "DH computations don't match.\n");
+                        ERR_print_errors(bio_err);
+                        rsa_count = 1;
+                    }
+
+                    pkey_print_message("", "dh",
+                                       dh_c[j][0], dh_bits[j], DH_SECONDS);
+                    Time_F(START);
+                    for (count = 0, run = 1; COND(dh_c[j][0]); count++) {
+                        sec_size_a = DH_compute_key(sec_a, dh_b[j]->pub_key, dh_a[j]);
+                        if (sec_size_a == -1 && dh_a[j]->job != NULL) {
+                            count--; /*Retry detected so need to resubmit*/
+                        }
+# ifndef OPENSSL_NO_HW_QAT
+                        poll_engine(engine, batch);
+# endif
+                    }
+# ifndef OPENSSL_NO_HW_QAT
+                    poll_engine(engine, batch);
+# endif
+                    d = Time_F(STOP);
+                    BIO_printf(bio_err,
+                               mr ? "+R10:%ld:%d:%.2f\n" :
+                               "%ld %d-bit DH ops in %.2fs\n", count,
+                               dh_bits[j], d);
+                    dh_results[j][0] = d / (double)count;
+                    rsa_count = count;
+                }
+            }
+        }
+
+        if (rsa_count <= 1) {
+            /* if longer than 10s, don't do any more */
+            for (j++; j < DH_NUM; j++)
+                dh_doit[j] = 0;
+        }
+    }
+    if (rnd_fake)
+        RAND_cleanup();
+# endif
 #ifndef NO_FORK
  show_res:
 #endif
@@ -2832,6 +3056,25 @@ int MAIN(int argc, char **argv)
                     ecdh_results[k][0], 1.0 / ecdh_results[k][0]);
     }
 #endif
+# ifndef OPENSSL_NO_DH
+    j = 1;
+    for (k = 0; k < DH_NUM; k++) {
+        if (!dh_doit[k])
+            continue;
+        if (j && !mr) {
+            printf("%30sop      op/s\n", " ");
+            j = 0;
+        }
+        if (mr)
+            fprintf(stdout, "+F6:%u:%u:%f:%f\n",
+                    k, dh_bits[k], dh_results[k][0], 1.0 / dh_results[k][0]);
+
+        else
+            fprintf(stdout, "%4u bit dh (%s) %8.4fs %8.1f\n",
+                    dh_bits[k],
+                    dh_names[k], dh_results[k][0], 1.0 / dh_results[k][0]);
+    }
+# endif
 
     mret = 0;
 
@@ -2861,7 +3104,14 @@ int MAIN(int argc, char **argv)
             EC_KEY_free(ecdh_b[i]);
     }
 #endif
-
+# ifndef OPENSSL_NO_DH
+    for (i = 0; i < DH_NUM; i++) {
+        if (dh_a[i] != NULL)
+            DH_free(dh_a[i]);
+        if (dh_b[i] != NULL)
+            DH_free(dh_b[i]);
+    }
+# endif
     apps_shutdown();
     OPENSSL_EXIT(mret);
 }
@@ -3096,7 +3346,23 @@ static int do_multi(int multi)
 
             }
 # endif
+#  ifndef OPENSSL_NO_DH
+            else if (!strncmp(buf, "+F6:", 4)) {
+                int k;
+                double d;
 
+                p = buf + 4;
+                k = atoi(sstrsep(&p, sep));
+                sstrsep(&p, sep);
+
+                d = atof(sstrsep(&p, sep));
+                if (n)
+                    dh_results[k][0] = 1 / (1 / dh_results[k][0] + 1 / d);
+                else
+                    dh_results[k][0] = d;
+
+            }
+#  endif
             else if (!strncmp(buf, "+H:", 3)) {
             } else
                 fprintf(stderr, "Unknown type '%s' from child %d\n", buf, n);
