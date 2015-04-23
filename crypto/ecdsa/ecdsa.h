@@ -190,6 +190,9 @@ int ECDSA_sign_setup(EC_KEY *eckey, BN_CTX *ctx, BIGNUM **kinv, BIGNUM **rp);
 int ECDSA_sign(int type, const unsigned char *dgst, int dgstlen,
                unsigned char *sig, unsigned int *siglen, EC_KEY *eckey);
 
+int ECDSA_sign_async(int type, const unsigned char *dgst, int dgstlen,
+               unsigned char *sig, unsigned int *siglen, EC_KEY *eckey);
+
 /** Computes ECDSA signature of a given hash value using the supplied
  *  private key (note: sig must point to ECDSA_size(eckey) bytes of memory).
  *  \param  type     this parameter is ignored
@@ -219,6 +222,9 @@ int ECDSA_sign_ex(int type, const unsigned char *dgst, int dgstlen,
  *          and -1 on error
  */
 int ECDSA_verify(int type, const unsigned char *dgst, int dgstlen,
+                 const unsigned char *sig, int siglen, EC_KEY *eckey);
+
+int ECDSA_verify_async(int type, const unsigned char *dgst, int dgstlen,
                  const unsigned char *sig, int siglen, EC_KEY *eckey);
 
 /* the standard ex_data functions */

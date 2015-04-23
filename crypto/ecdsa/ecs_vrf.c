@@ -57,10 +57,34 @@
  */
 
 #include "ecs_locl.h"
+
+// This header contains the definition of  EC_KEY
+#include "../ec/ec_lcl.h"
+
 #include <string.h>
 #ifndef OPENSSL_NO_ENGINE
 # include <openssl/engine.h>
 #endif
+
+
+struct ecdsa_verify_async_args {
+    int type;
+    const unsigned char *dgst;
+    unsigned int dgst_len;
+    const unsigned char *sigbuf;
+    unsigned int sig_len;
+    EC_KEY *eckey;
+};
+
+static int ecdsa_verify_async_internal(void *vargs)
+{
+    struct ecdsa_verify_async_args *args;
+    args = (struct ecdsa_verify_async_args *)vargs;
+    if (!args)
+        return 0;
+    return ECDSA_verify(args->type, args->dgst, args->dgst_len,
+                    args->sigbuf, args->sig_len, args->eckey);
+}
 
 /*-
  * returns
@@ -109,4 +133,37 @@ int ECDSA_verify(int type, const unsigned char *dgst, int dgst_len,
     }
     ECDSA_SIG_free(s);
     return (ret);
+}
+
+int ECDSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
+                 const unsigned char *sigbuf, int sig_len, EC_KEY *eckey)
+{
+    int ret;
+    struct ecdsa_verify_async_args args;
+
+    args.type = type;
+    args.dgst = dgst;
+    args.dgst_len = dgst_len;
+    args.sigbuf = sigbuf;
+    args.sig_len = sig_len;
+    args.eckey = eckey;
+
+    if(!ASYNC_in_job()) {
+        switch(ASYNC_start_job(&eckey->job, &ret, ecdsa_verify_async_internal, &args,
+            sizeof(struct ecdsa_verify_async_args))) {
+        case ASYNC_ERR:
+            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
+            return -1;
+        case ASYNC_PAUSE:
+            return -1;
+        case ASYNC_FINISH:
+            eckey->job = NULL;
+            return ret;
+        default:
+            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
+            /* Shouldn't happen */
+            return -1;
+        }
+    }
+    return ECDSA_verify(type, dgst, dgst_len, sigbuf, sig_len, eckey);
 }

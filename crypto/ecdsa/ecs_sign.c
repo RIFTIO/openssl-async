@@ -54,10 +54,33 @@
  */
 
 #include "ecs_locl.h"
+
+// This header contains the definition of  EC_KEY
+#include "../ec/ec_lcl.h"
+
 #ifndef OPENSSL_NO_ENGINE
 # include <openssl/engine.h>
 #endif
 #include <openssl/rand.h>
+
+struct ecdsa_sign_async_args {
+    int type;
+    const unsigned char *dgst;
+    unsigned int dlen;
+    unsigned char *sig;
+    unsigned int *siglen;
+    EC_KEY *eckey;
+};
+
+static int ecdsa_sign_async_internal(void *vargs)
+{
+    struct ecdsa_sign_async_args *args;
+    args = (struct ecdsa_sign_async_args *)vargs;
+    if (!args)
+        return 0;
+    return ECDSA_sign(args->type, args->dgst, args->dlen,
+                    args->sig, args->siglen, args->eckey);
+}
 
 ECDSA_SIG *ECDSA_do_sign(const unsigned char *dgst, int dlen, EC_KEY *eckey)
 {
@@ -78,6 +101,39 @@ int ECDSA_sign(int type, const unsigned char *dgst, int dlen, unsigned char
                *sig, unsigned int *siglen, EC_KEY *eckey)
 {
     return ECDSA_sign_ex(type, dgst, dlen, sig, siglen, NULL, NULL, eckey);
+}
+
+int ECDSA_sign_async(int type, const unsigned char *dgst, int dlen,
+            unsigned char *sig, unsigned int *siglen, EC_KEY *eckey)
+{
+    int ret;
+    struct ecdsa_sign_async_args args;
+
+    args.type = type;
+    args.dgst = dgst;
+    args.dlen = dlen;
+    args.sig = sig;
+    args.siglen = siglen;
+    args.eckey = eckey;
+
+    if(!ASYNC_in_job()) {
+        switch(ASYNC_start_job(&eckey->job, &ret, ecdsa_sign_async_internal, &args,
+            sizeof(struct ecdsa_sign_async_args))) {
+        case ASYNC_ERR:
+            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
+            return -1;
+        case ASYNC_PAUSE:
+           return -1;
+        case ASYNC_FINISH:
+            eckey->job = NULL;
+            return ret;
+        default:
+            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
+            /* Shouldn't happen */
+            return -1;
+        }
+    }
+    return ECDSA_sign(type, dgst, dlen, sig, siglen, eckey);
 }
 
 int ECDSA_sign_ex(int type, const unsigned char *dgst, int dlen, unsigned char
