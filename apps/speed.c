@@ -703,6 +703,9 @@ int MAIN(int argc, char **argv)
 
     int rsa_doit[RSA_NUM];
     int dsa_doit[DSA_NUM];
+# ifndef OPENSSL_NO_DH
+    int dh_doit[DH_NUM];
+# endif
     int doit[ALGOR_NUM];
     int pr_header = 0;
     const EVP_CIPHER *evp_cipher = NULL;
@@ -2825,7 +2828,7 @@ int MAIN(int argc, char **argv)
     for (j = 0; j < DH_NUM; j++) {
         if (!dh_doit[j])
             continue;
-        RAND_pseudo_bytes(buf, 20);
+        RAND_bytes(buf, 20);
         if (RAND_status() != 1) {
             RAND_seed(rnd_seed, sizeof rnd_seed);
             rnd_fake = 1;
@@ -2864,7 +2867,7 @@ int MAIN(int argc, char **argv)
 # ifndef OPENSSL_NO_HW_QAT
                             poll_engine(engine, batch);
 # endif
-                    } while (sec_size_a == -1 && dh_a[j]->job) != NULL);
+                    } while (sec_size_a == -1 && dh_a[j]->job != NULL);
 
                     do {
                         sec_size_b =
@@ -2872,7 +2875,7 @@ int MAIN(int argc, char **argv)
 # ifndef OPENSSL_NO_HW_QAT
                             poll_engine(engine, batch);
 # endif
-                    } while (sec_size_b == -1 && dh_b[j]->job) != NULL);
+                    } while (sec_size_b == -1 && dh_b[j]->job != NULL);
 
                     if (sec_size_a != sec_size_b)
                         dh_checks = 0;
