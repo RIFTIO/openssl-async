@@ -2918,7 +2918,7 @@ int MAIN(int argc, char **argv)
                                        dh_c[j][0], dh_bits[j], DH_SECONDS);
                     Time_F(START);
                     for (count = 0, run = 1; COND(dh_c[j][0]); count++) {
-                        sec_size_a = DH_compute_key(sec_a, dh_b[j]->pub_key, dh_a[j]);
+                        sec_size_a = DH_compute_key_async(sec_a, dh_b[j]->pub_key, dh_a[j]);
                         if (sec_size_a == -1 && dh_a[j]->job != NULL) {
                             count--; /*Retry detected so need to resubmit*/
                         }
