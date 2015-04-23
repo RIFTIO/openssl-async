@@ -1444,6 +1444,12 @@ int MAIN(int argc, char **argv)
     dsa_key[2] = get_dsa2048();
 #endif
 
+# ifndef OPENSSL_NO_DH
+    dh_a[0] = get_dh1024();
+    dh_a[1] = get_dh2048();
+    dh_a[2] = get_dh4096();
+# endif
+
 #ifndef OPENSSL_NO_DES
     DES_set_key_unchecked(&key, &sch);
     DES_set_key_unchecked(&key2, &sch2);
