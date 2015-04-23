@@ -2832,6 +2832,8 @@ int MAIN(int argc, char **argv)
 # ifndef OPENSSL_NO_DH
 
     for (j = 0; j < DH_NUM; j++) {
+        int dh_gen_status_a = 0;
+        int dh_gen_status_b = 0;
         if (!dh_doit[j])
             continue;
         RAND_bytes(buf, 20);
@@ -2860,9 +2862,21 @@ int MAIN(int argc, char **argv)
                 rsa_count = 1;
             }
 
-           
                 /* generate two DH key pairs */
-                if (!DH_generate_key(dh_a[j]) || !DH_generate_key(dh_b[j])) {
+                do {
+                    dh_gen_status_a = DH_generate_key_async(dh_a[j]) ;
+# ifndef OPENSSL_NO_HW_QAT
+                    poll_engine(engine, batch);
+# endif
+                } while (dh_gen_status_a == -1 && dh_a[j]->job != NULL);
+                do {
+                    dh_gen_status_b = DH_generate_key_async(dh_b[j]) ;
+# ifndef OPENSSL_NO_HW_QAT
+                    poll_engine(engine, batch);
+# endif
+                } while (dh_gen_status_b == -1 && dh_b[j]->job != NULL);
+           
+                if (!dh_gen_status_a || !dh_gen_status_b) {
                     BIO_printf(bio_err, "DH key generation failure.\n");
                     ERR_print_errors(bio_err);
                     rsa_count = 1;
