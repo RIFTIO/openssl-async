@@ -285,6 +285,7 @@ int qat_dh_generate_key(DH *dh,
             if(!getEnableExternalPolling())
                 poll_instances();
         }
+        while (!op_done.flag);
 
         cleanupOpDone(&op_done);
         //if (rc)
@@ -470,6 +471,7 @@ int qat_dh_compute_key(unsigned char *key, int *len, const BIGNUM *pub_key,
             if(!getEnableExternalPolling())
                 poll_instances();
         }
+        while (!op_done.flag);
 
         cleanupOpDone(&op_done);
         //if (rc)
