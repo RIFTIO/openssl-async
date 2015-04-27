@@ -2812,7 +2812,7 @@ int MAIN(int argc, char **argv)
 # endif
                 d = Time_F(STOP);
                 BIO_printf(bio_err,
-                           mr ? "+R8:%ld:%d:%.2f\n" :
+                           mr ? "+R7:%ld:%d:%.2f\n" :
                            "%ld %d-bit ECDH ops in %.2fs\n", count,
                            test_curves_bits[j], d);
                 ecdh_results[j][0] = d / (double)count;
@@ -2863,6 +2863,13 @@ int MAIN(int argc, char **argv)
                             "[%s] --- Failed to init DH structure\n", __func__);
                     exit(EXIT_FAILURE);
             }
+            do {
+                dh_gen_status_a = DH_generate_key_async(dh_inflights[k]) ;
+# ifndef OPENSSL_NO_HW_QAT
+                poll_engine(engine, batch);
+# endif
+            } while (dh_gen_status_a == -1 && dh_inflights[k]->job != NULL);
+
         }
 
         if (!dh_doit[j])
@@ -2965,7 +2972,7 @@ int MAIN(int argc, char **argv)
 # endif
                     d = Time_F(STOP);
                     BIO_printf(bio_err,
-                               mr ? "+R10:%ld:%d:%.2f\n" :
+                               mr ? "+R8:%ld:%d:%.2f\n" :
                                "%ld %d-bit DH ops in %.2fs\n", count,
                                dh_bits[j], d);
                     dh_results[j][0] = d / (double)count;
