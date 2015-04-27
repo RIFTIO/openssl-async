@@ -120,7 +120,8 @@ int ECDSA_sign_async(int type, const unsigned char *dgst, int dlen,
             //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
-           return -1;
+            EC_KEY_set_job(eckey, tmp_job);
+            return -1;
         case ASYNC_FINISH:
             EC_KEY_set_job(eckey, NULL);
             return ret;

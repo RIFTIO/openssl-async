@@ -2483,7 +2483,23 @@ int MAIN(int argc, char **argv)
         rnd_fake = 1;
     }
     for (j = 0; j < EC_NUM; j++) {
-        int ret;
+        int ret, k;
+        int requestno = 0;
+        EC_KEY **ecdsa_inflights = NULL;
+        ecdsa_inflights = (EC_KEY **)OPENSSL_malloc((batch) * (sizeof(EC_KEY *)));
+        if (NULL == ecdsa_inflights) {
+            BIO_printf(bio_err,
+                       "[%s] --- Failed to allocate EC_KEY structure\n", __func__);
+            ERR_print_errors(bio_err);
+            exit(EXIT_FAILURE);
+        }
+        memset(ecdsa_inflights, 0, batch * sizeof(EC_KEY *));
+        for (k = 0; k < batch; k++) {
+            ecdsa_inflights[k] = EC_KEY_new_by_curve_name(test_curves[j]);
+            EC_KEY_precompute_mult(ecdsa_inflights[k], NULL);
+            /* Perform ECDSA signature test */
+            EC_KEY_generate_key(ecdsa_inflights[k]);
+        }
 
         if (!ecdsa_doit[j])
             continue;           /* Ignore Curve */
@@ -2497,7 +2513,12 @@ int MAIN(int argc, char **argv)
 
             /* Perform ECDSA signature test */
             EC_KEY_generate_key(ecdsa[j]);
-            ret = ECDSA_sign(0, buf, 20, ecdsasig, &ecdsasiglen, ecdsa[j]);
+
+            do {
+                // ret = ECDSA_sign(0, buf, 20, ecdsasig, &ecdsasiglen, ecdsa[j]);
+                ret = ECDSA_sign_async(0, buf, 20, ecdsasig, &ecdsasiglen, ecdsa[j]);
+                poll_engine(engine, batch);
+            } while (ret == -1 && EC_KEY_get_job(ecdsa[j]) != NULL);
             if (ret == 0) {
                 BIO_printf(bio_err,
                            "ECDSA sign failure.  No ECDSA sign will be done.\n");
@@ -2510,15 +2531,29 @@ int MAIN(int argc, char **argv)
 
                 Time_F(START);
                 for (count = 0, run = 1; COND(ecdsa_c[j][0]); count++) {
-                    ret = ECDSA_sign(0, buf, 20,
-                                     ecdsasig, &ecdsasiglen, ecdsa[j]);
+                    requestno++;
+                    requestno = requestno % batch;
+                    // ret = ECDSA_sign(0, buf, 20,
+                    //                 ecdsasig, &ecdsasiglen, ecdsa[j]);
+                    ret = ECDSA_sign_async(0, buf, 20,
+                                     ecdsasig, &ecdsasiglen, ecdsa_inflights[requestno]);
+                    if (ret == -1 && EC_KEY_get_job(ecdsa_inflights[requestno]) != NULL) {
+                        count--; /*Retry detected so need to resubmit*/
+                    }
                     if (ret == 0) {
                         BIO_printf(bio_err, "ECDSA sign failure\n");
                         ERR_print_errors(bio_err);
                         count = 1;
                         break;
                     }
+# ifndef OPENSSL_NO_HW_QAT
+                    if (requestno == 0)
+                        poll_engine(engine, batch);
+# endif
                 }
+# ifndef OPENSSL_NO_HW_QAT
+                poll_engine(engine, batch);
+# endif
                 d = Time_F(STOP);
 
                 BIO_printf(bio_err,
@@ -2530,7 +2565,13 @@ int MAIN(int argc, char **argv)
             }
 
             /* Perform ECDSA verification test */
-            ret = ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen, ecdsa[j]);
+            do {
+                // ret = ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen, ecdsa[j]);
+                ret = ECDSA_verify_async(0, buf, 20, ecdsasig, ecdsasiglen, ecdsa[j]);
+# ifndef OPENSSL_NO_HW_QAT
+                poll_engine(engine, batch);
+# endif
+            } while (ret == -1 && EC_KEY_get_job(ecdsa[j]) != NULL);
             if (ret != 1) {
                 BIO_printf(bio_err,
                            "ECDSA verify failure.  No ECDSA verify will be done.\n");
@@ -2542,16 +2583,28 @@ int MAIN(int argc, char **argv)
                                    test_curves_bits[j], ECDSA_SECONDS);
                 Time_F(START);
                 for (count = 0, run = 1; COND(ecdsa_c[j][1]); count++) {
-                    ret =
-                        ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen,
-                                     ecdsa[j]);
+                    requestno++;
+                    requestno=requestno%batch;
+                    //ret = ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen, ecdsa[j]);
+                    ret = ECDSA_verify_async(0, buf, 20, ecdsasig, ecdsasiglen,
+                                     ecdsa_inflights[j]);
+                    if (ret == -1 && EC_KEY_get_job(ecdsa_inflights[requestno]) != NULL) {
+                        count--; /*Retry detected so need to resubmit*/
+                    } 
                     if (ret != 1) {
                         BIO_printf(bio_err, "ECDSA verify failure\n");
                         ERR_print_errors(bio_err);
                         count = 1;
                         break;
                     }
+# ifndef OPENSSL_NO_HW_QAT
+                    if (requestno == 0)
+                        poll_engine(engine, batch);
+# endif
                 }
+# ifndef OPENSSL_NO_HW_QAT
+                poll_engine(engine, batch);
+# endif
                 d = Time_F(STOP);
                 BIO_printf(bio_err,
                            mr ? "+R6:%ld:%d:%.2f\n"
@@ -2566,6 +2619,9 @@ int MAIN(int argc, char **argv)
                     ecdsa_doit[j] = 0;
             }
         }
+        /* TODO check memory leak on the DSA structure */
+        if (ecdsa_inflights)
+            OPENSSL_free(ecdsa_inflights);
     }
     if (rnd_fake)
         RAND_cleanup();

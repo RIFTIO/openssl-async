@@ -76,6 +76,7 @@ struct ecdsa_verify_async_args {
     EC_KEY *eckey;
 };
 
+
 static int ecdsa_verify_async_internal(void *vargs)
 {
     struct ecdsa_verify_async_args *args;
@@ -156,6 +157,7 @@ int ECDSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
             //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
+            EC_KEY_set_job(eckey, tmp_job);
             return -1;
         case ASYNC_FINISH:
             EC_KEY_set_job(eckey, NULL);
@@ -168,3 +170,4 @@ int ECDSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
     }
     return ECDSA_verify(type, dgst, dgst_len, sigbuf, sig_len, eckey);
 }
+

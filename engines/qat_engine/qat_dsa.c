@@ -621,6 +621,7 @@ int qat_dsa_do_verify(const unsigned char *dgst, int dgst_len,
                 poll_instances();
         }
         while (!op_done.flag);
+
         if (op_done.verifyResult == CPA_TRUE)
             ret = 1;
 
