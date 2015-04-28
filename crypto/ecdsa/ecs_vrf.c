@@ -70,9 +70,9 @@
 struct ecdsa_verify_async_args {
     int type;
     const unsigned char *dgst;
-    unsigned int dgst_len;
+    int dgst_len;
     const unsigned char *sigbuf;
-    unsigned int sig_len;
+    int sig_len;
     EC_KEY *eckey;
 };
 
