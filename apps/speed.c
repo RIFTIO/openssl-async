@@ -2494,12 +2494,6 @@ int MAIN(int argc, char **argv)
             exit(EXIT_FAILURE);
         }
         memset(ecdsa_inflights, 0, batch * sizeof(EC_KEY *));
-        for (k = 0; k < batch; k++) {
-            ecdsa_inflights[k] = EC_KEY_new_by_curve_name(test_curves[j]);
-            EC_KEY_precompute_mult(ecdsa_inflights[k], NULL);
-            /* Perform ECDSA signature test */
-            EC_KEY_generate_key(ecdsa_inflights[k]);
-        }
 
         if (!ecdsa_doit[j])
             continue;           /* Ignore Curve */
@@ -2525,6 +2519,15 @@ int MAIN(int argc, char **argv)
                 ERR_print_errors(bio_err);
                 rsa_count = 1;
             } else {
+                for (k = 0; k < batch; k++) {
+                    /* Use the same key */
+                    ecdsa_inflights[k] = EC_KEY_dup(ecdsa[j]);
+                    if (NULL == ecdsa_inflights[k]) {
+                        BIO_printf(bio_err, "ECDSA inflights key alloc failure.\n");
+                        ERR_print_errors(bio_err);
+                        exit(EXIT_FAILURE);
+                    }
+                }
                 pkey_print_message("sign", "ecdsa",
                                    ecdsa_c[j][0],
                                    test_curves_bits[j], ECDSA_SECONDS);
@@ -2587,15 +2590,17 @@ int MAIN(int argc, char **argv)
                     requestno=requestno%batch;
                     //ret = ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen, ecdsa[j]);
                     ret = ECDSA_verify_async(0, buf, 20, ecdsasig, ecdsasiglen,
-                                     ecdsa_inflights[j]);
+                                     ecdsa_inflights[requestno]);
                     if (ret == -1 && EC_KEY_get_job(ecdsa_inflights[requestno]) != NULL) {
                         count--; /*Retry detected so need to resubmit*/
-                    } 
-                    if (ret != 1) {
-                        BIO_printf(bio_err, "ECDSA verify failure\n");
-                        ERR_print_errors(bio_err);
-                        count = 1;
-                        break;
+                    }
+                    else {
+                        if (ret != 1) {
+                            BIO_printf(bio_err, "ECDSA verify failure. Count = %d\n", count);
+                            ERR_print_errors(bio_err);
+                            count = 1;
+                            break;
+                        }
                     }
 # ifndef OPENSSL_NO_HW_QAT
                     if (requestno == 0)
