@@ -60,6 +60,7 @@
 #include "cryptlib.h"
 #include <openssl/rand.h>
 #include <openssl/dh.h>
+#include <openssl/async.h>
 #include "internal/bn_int.h"
 
 static int generate_key(DH *dh);
@@ -70,14 +71,99 @@ static int dh_bn_mod_exp(const DH *dh, BIGNUM *r,
 static int dh_init(DH *dh);
 static int dh_finish(DH *dh);
 
+struct dh_generate_key_async_args {
+    DH *dh;
+};
+
+struct dh_compute_key_async_args {
+    unsigned char *key;
+    const BIGNUM *pub_key; 
+    DH *dh;
+};
+
+static int dh_generate_key_async_internal(void *vargs)
+{
+    struct dh_generate_key_async_args *args;
+    args = (struct dh_generate_key_async_args *)vargs;
+    if (!args)
+        return 0;
+    return DH_generate_key(args->dh);
+}
+
 int DH_generate_key(DH *dh)
 {
     return dh->meth->generate_key(dh);
 }
 
+int DH_generate_key_async(DH *dh)
+{
+    int ret;
+    struct dh_generate_key_async_args args;
+
+    args.dh = dh;
+
+    if(!ASYNC_in_job()) {
+        switch(ASYNC_start_job(&dh->job, &ret, dh_generate_key_async_internal, &args,
+            sizeof(struct dh_generate_key_async_args))) {
+        case ASYNC_ERR:
+            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
+            return -1;
+        case ASYNC_PAUSE:
+            return -1;
+        case ASYNC_FINISH:
+            dh->job=NULL;
+            return ret;
+        default:
+            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
+            /* Shouldn't happen */
+            return -1;
+        }
+    }
+    return DH_generate_key(dh);
+
+}
+
+static int dh_compute_key_async_internal(void *vargs)
+{
+    struct dh_compute_key_async_args *args;
+    args = (struct dh_compute_key_async_args *)vargs;
+    if (!args)
+        return 0;
+    return DH_compute_key(args->key, args->pub_key, args->dh);
+}
+
 int DH_compute_key(unsigned char *key, const BIGNUM *pub_key, DH *dh)
 {
     return dh->meth->compute_key(key, pub_key, dh);
+}
+
+int DH_compute_key_async(unsigned char *key, const BIGNUM *pub_key, DH *dh)
+{
+    int ret;
+    struct dh_compute_key_async_args args;
+
+    args.key = key;
+    args.pub_key = pub_key;
+    args.dh = dh;
+
+    if(!ASYNC_in_job()) {
+        switch(ASYNC_start_job(&dh->job, &ret, dh_compute_key_async_internal, &args,
+            sizeof(struct dh_compute_key_async_args))) {
+        case ASYNC_ERR:
+            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
+            return -1;
+        case ASYNC_PAUSE:
+            return -1;
+        case ASYNC_FINISH:
+            dh->job=NULL;
+            return ret;
+        default:
+            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
+            /* Shouldn't happen */
+            return -1;
+        }
+    }
+    return DH_compute_key(key, pub_key, dh);
 }
 
 int DH_compute_key_padded(unsigned char *key, const BIGNUM *pub_key, DH *dh)

@@ -62,6 +62,7 @@
 #ifdef USE_QAE_MEM
 # include "qat_mem_drv_inf.h"
 #endif
+#include <openssl/async.h>
 #include <openssl/err.h>
 #include <openssl/bn.h>
 #include "qat_asym_common.h"
@@ -257,15 +258,20 @@ int qat_dh_generate_key(DH *dh,
                                          &op_done, opData, pPV);
 
             if (status == CPA_STATUS_RETRY) {
-                usleep(ulPollInterval +
-                       (qatPerformOpRetries %
-                        QAT_RETRY_BACKOFF_MODULO_DIVISOR));
+                //usleep(ulPollInterval +
+                //       (qatPerformOpRetries %
+                //        QAT_RETRY_BACKOFF_MODULO_DIVISOR));
                 qatPerformOpRetries++;
+                ASYNC_pause_job();
+                if(!getEnableExternalPolling())
+                    poll_instances();
+
             }
         }
-        while (status == CPA_STATUS_RETRY &&
-               ((qatPerformOpRetries < iMsgRetry) ||
-                (iMsgRetry == QAT_INFINITE_MAX_NUM_RETRIES)));
+        while (status == CPA_STATUS_RETRY); 
+        //while (status == CPA_STATUS_RETRY &&
+        //       ((qatPerformOpRetries < iMsgRetry) ||
+        //        (iMsgRetry == QAT_INFINITE_MAX_NUM_RETRIES)));
 
         if (status != CPA_STATUS_SUCCESS) {
             QATerr(QAT_F_QAT_DH_GENERATE_KEY, ERR_R_INTERNAL_ERROR);
@@ -273,10 +279,17 @@ int qat_dh_generate_key(DH *dh,
             goto err;
         }
 
-        rc = waitForOpToComplete(&op_done);
+        //rc = waitForOpToComplete(&op_done);
+        do {
+            ASYNC_pause_job();
+            if(!getEnableExternalPolling())
+                poll_instances();
+        }
+        while (!op_done.flag);
+
         cleanupOpDone(&op_done);
-        if (rc)
-            goto err;
+        //if (rc)
+        //    goto err;
 
         dh->priv_key = priv_key;
         /* Convert the flatbuffer result back to a BN */
@@ -432,15 +445,19 @@ int qat_dh_compute_key(unsigned char *key, int *len, const BIGNUM *pub_key,
                                                &op_done, opData, pSecretKey);
 
             if (status == CPA_STATUS_RETRY) {
-                usleep(ulPollInterval +
-                       (qatPerformOpRetries %
-                        QAT_RETRY_BACKOFF_MODULO_DIVISOR));
+                //usleep(ulPollInterval +
+                //       (qatPerformOpRetries %
+                //        QAT_RETRY_BACKOFF_MODULO_DIVISOR));
                 qatPerformOpRetries++;
+                ASYNC_pause_job();
+                if(!getEnableExternalPolling())
+                    poll_instances();
             }
         }
-        while (status == CPA_STATUS_RETRY &&
-               ((qatPerformOpRetries < iMsgRetry) ||
-                (iMsgRetry == QAT_INFINITE_MAX_NUM_RETRIES)));
+        while (status == CPA_STATUS_RETRY); 
+        //while (status == CPA_STATUS_RETRY &&
+        //       ((qatPerformOpRetries < iMsgRetry) ||
+        //        (iMsgRetry == QAT_INFINITE_MAX_NUM_RETRIES)));
 
         if (status != CPA_STATUS_SUCCESS) {
             QATerr(QAT_F_QAT_DH_COMPUTE_KEY, ERR_R_INTERNAL_ERROR);
@@ -448,10 +465,17 @@ int qat_dh_compute_key(unsigned char *key, int *len, const BIGNUM *pub_key,
             goto err;
         }
 
-        rc = waitForOpToComplete(&op_done);
+        //rc = waitForOpToComplete(&op_done);
+        do {
+            ASYNC_pause_job();
+            if(!getEnableExternalPolling())
+                poll_instances();
+        }
+        while (!op_done.flag);
+
         cleanupOpDone(&op_done);
-        if (rc)
-            goto err;
+        //if (rc)
+        //    goto err;
 
         if (!pSecretKey->pData[0]) {
             while (!pSecretKey->pData[index])

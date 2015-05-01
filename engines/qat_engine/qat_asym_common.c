@@ -65,6 +65,7 @@
 
 #include <pthread.h>
 
+#include <openssl/async.h>
 #include <openssl/ossl_typ.h>
 #include <openssl/bn.h>
 
@@ -177,10 +178,14 @@ int qat_mod_exp(BIGNUM *res, const BIGNUM *base, const BIGNUM *exp,
         status = cpaCyLnModExp(instanceHandle, NULL, NULL, &opData, &result);
         if (status == CPA_STATUS_RETRY) {
             qatPerformOpRetries++;
+            ASYNC_pause_job();
+            if(!getEnableExternalPolling())
+                poll_instances();
         }
     }
-    while (status == CPA_STATUS_RETRY
-           && qatPerformOpRetries < QAT_PERFORMOP_RETRIES);
+    while (status == CPA_STATUS_RETRY);
+    //while (status == CPA_STATUS_RETRY
+    //       && qatPerformOpRetries < QAT_PERFORMOP_RETRIES);
 
     if (CPA_STATUS_SUCCESS != status) {
         WARN("cpaCyLnModExp failed, status=%d\n", status);
