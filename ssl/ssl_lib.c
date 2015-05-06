@@ -2964,19 +2964,23 @@ int ssl_init_wbio_buffer(SSL *s, int push)
         bbio = s->bbio;
         if (s->bbio == s->wbio) {
             if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-                CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+                if (ssl3_lock(s, S3_SSL3_LOCK) != 0)
+                    return 0;
             s->wbio = BIO_pop(s->wbio);
             if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-                CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+                if (ssl3_unlock(s, S3_SSL3_LOCK) != 0)
+                    return 0;
         }
     }
     if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-        CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+        if (ssl3_lock(s, S3_SSL3_LOCK) != 0)
+            return 0;
     (void)BIO_reset(bbio);
 /*      if (!BIO_set_write_buffer_size(bbio,16*1024)) */
     if (!BIO_set_read_buffer_size(bbio, 1)) {
         if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-            CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+            if (ssl3_unlock(s, S3_SSL3_LOCK) != 0)
+                return 0;
         SSLerr(SSL_F_SSL_INIT_WBIO_BUFFER, ERR_R_BUF_LIB);
         return (0);
     }
@@ -2988,7 +2992,8 @@ int ssl_init_wbio_buffer(SSL *s, int push)
             s->wbio = BIO_pop(bbio);
     }
     if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-        CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+        if (ssl3_unlock(s, S3_SSL3_LOCK) != 0)
+            return 0;
     return (1);
 }
 
@@ -3000,10 +3005,10 @@ void ssl_free_wbio_buffer(SSL *s)
     if (s->bbio == s->wbio) {
         /* remove buffering */
         if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-            CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+            ssl3_lock(s, S3_SSL3_LOCK);
         s->wbio = BIO_pop(s->wbio);
         if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-            CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+            ssl3_unlock(s, S3_SSL3_LOCK);
 #ifdef REF_CHECK                /* not the usual REF_CHECK, but this avoids
                                  * adding one more preprocessor symbol */
         assert(s->wbio != NULL);

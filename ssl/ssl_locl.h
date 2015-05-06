@@ -989,6 +989,8 @@ int ssl3_pending(const SSL *s);
 
 void ssl3_record_sequence_update(unsigned char *seq);
 int ssl3_do_change_cipher_spec(SSL *ssl);
+int ssl3_lock(SSL *s, int type);
+int ssl3_unlock(SSL *s, int type);
 long ssl3_default_timeout(void);
 
 int ssl23_num_ciphers(void);

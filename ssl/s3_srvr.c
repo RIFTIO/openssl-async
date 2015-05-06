@@ -571,15 +571,21 @@ int ssl3_accept(SSL *s)
 
             s->rwstate = SSL_WRITING;
             if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-                CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+                if (ssl3_lock(s, S3_SSL3_LOCK) != 0) {
+                    ret = -1;
+                    goto end;
+                }
             if (BIO_flush(s->wbio) <= 0) {
                 if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-                    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+                    ssl3_unlock(s, S3_SSL3_LOCK);
                 ret = -1;
                 goto end;
             }
             if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-                CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+                if (ssl3_unlock(s, S3_SSL3_LOCK) != 0) {
+                    ret = -1;
+                    goto end;
+                }
             s->rwstate = SSL_NOTHING;
 
             s->state = s->s3->tmp.next_state;
@@ -874,14 +880,20 @@ int ssl3_accept(SSL *s)
         if (!s->s3->tmp.reuse_message && !skip) {
             if (s->debug) {
                 if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-                    CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+                    if (ssl3_lock(s, S3_SSL3_LOCK) != 0) {
+                        ret = -1;
+                        goto end;
+                    }
                 if ((ret = BIO_flush(s->wbio)) <= 0) {
                     if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-                        CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+                        ssl3_unlock(s, S3_SSL3_LOCK);
                     goto end;
                 }
                 if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-                    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+                    if (ssl3_unlock(s, S3_SSL3_LOCK) != 0) {
+                        ret = -1;
+                        goto end;
+                    }
             }
 
             if ((cb != NULL) && (s->state != state)) {

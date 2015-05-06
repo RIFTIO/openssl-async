@@ -6,7 +6,7 @@ struct transmission_queue_node {
     struct transmission_queue_node *prev, *next;
 };
 struct ssl3_transmission_pool_st {
-    struct transmission_queue_node pool[1024]; /* Arbitrary */
+    struct transmission_queue_node pool[64]; /* Arbitrary */
     struct transmission_queue_node *free_head, *free_tail; /* list of free
                                                             * trans */
     struct transmission_queue_node *head, *tail; /* list of trans inflight to
@@ -49,9 +49,13 @@ void ssl3_remove_last_transmission(SSL *s, int mode)
     struct transmission_queue_node *tail;
     if (!pool)
         return;
-    CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+
+    if (ssl3_lock(s, S3_POOL_LOCK) != 0)
+        return;
     tail = pool->tail;
-    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+    if (ssl3_unlock(s, S3_POOL_LOCK) != 0)
+        return;
+
     if (tail) {
         SSL3_TRANSMISSION *trans = &tail->trans;
         if (!trans)
@@ -68,20 +72,20 @@ static int ssl3_process_transmissions(SSL *s, int status)
     SSL3_TRANSMISSION_POOL *pool = s->s3->transmission_pool;
     int iterate = 0;
 
-    CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+    ssl3_lock(s, S3_POSTPROCESSING_POOL_LOCK);
     if (!pool->postprocessing) {
         iterate = 1;
         pool->postprocessing = 1;
     }
-    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
-
+    ssl3_unlock(s, S3_POSTPROCESSING_POOL_LOCK);
     while (iterate) {
         struct transmission_queue_node *head;
-        CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+        ssl3_lock(s, S3_POSTPROCESSING_POOL_LOCK);
         head = pool->head;
         if (head && head->trans.post) {
             SSL3_TRANSMISSION *trans = &head->trans;
-            CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+            ssl3_unlock(s, S3_POSTPROCESSING_POOL_LOCK);
+ 
             if (status < 0) {
                 if (trans->s->asynch_completion_callback) {
                     if (trans->flags & SSL3_TRANS_FLAGS_SEND)
@@ -127,13 +131,14 @@ static int ssl3_process_transmissions(SSL *s, int status)
              * callbacks initiates another crypto or digest
              * operation on the same transmissions.
              */
-            CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+            ssl3_lock(s, S3_POSTPROCESSING_POOL_LOCK);
             if (!trans->post) {
                 pool->postprocessing = 0;
-                CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+                ssl3_unlock(s, S3_POSTPROCESSING_POOL_LOCK);
                 break;
             }
-            CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+            ssl3_unlock(s, S3_POSTPROCESSING_POOL_LOCK);
+
 
 #ifndef DISABLE_ASYNCH_BULK_PERF
             if (status > 0)
@@ -155,7 +160,7 @@ static int ssl3_process_transmissions(SSL *s, int status)
             }
         } else {
             pool->postprocessing = 0;
-            CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+            ssl3_unlock(s, S3_POSTPROCESSING_POOL_LOCK);
             break;
         }
     }
@@ -244,7 +249,9 @@ SSL3_TRANSMISSION *ssl3_get_transmission_before(SSL *s, SSL3_TRANSMISSION * t)
     struct transmission_queue_node *ttqn =
         (struct transmission_queue_node *)t;
 
-    CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+    if (ssl3_lock(s, S3_POOL_LOCK) != 0)
+        return NULL;
+
     if (!p) {
         p = (SSL3_TRANSMISSION_POOL *)
             OPENSSL_malloc(sizeof(SSL3_TRANSMISSION_POOL));
@@ -252,7 +259,7 @@ SSL3_TRANSMISSION *ssl3_get_transmission_before(SSL *s, SSL3_TRANSMISSION * t)
 #ifdef ASYNCH_DEBUG
             fprintf(stderr, "OPENSSL_malloc failed to get memory\n");
 #endif
-            CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+            ssl3_unlock(s, S3_POOL_LOCK);
             return NULL;
         }
         p->head = p->tail = p->free_head = p->free_tail = p->skt_head =
@@ -270,7 +277,8 @@ SSL3_TRANSMISSION *ssl3_get_transmission_before(SSL *s, SSL3_TRANSMISSION * t)
     } else if (p->pool_break < sizeof(p->pool) / sizeof(p->pool[0])) {
         tqn = &(p->pool[p->pool_break++]);
     }
-    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+    if (ssl3_unlock(s, S3_POOL_LOCK) != 0)
+        return NULL;
 
     if (!tqn)
         return NULL;
@@ -279,7 +287,8 @@ SSL3_TRANSMISSION *ssl3_get_transmission_before(SSL *s, SSL3_TRANSMISSION * t)
     memset(&tqn->trans, 0, sizeof(tqn->trans));
     tqn->trans.s = s;
 
-    CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+    if (ssl3_lock(s, S3_POOL_LOCK) != 0)
+        return NULL;
     if (ttqn) {
         tqn->next = ttqn;
         tqn->prev = ttqn->prev;
@@ -297,7 +306,8 @@ SSL3_TRANSMISSION *ssl3_get_transmission_before(SSL *s, SSL3_TRANSMISSION * t)
         if (p->head == NULL)
             p->head = tqn;
     }
-    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+    if (ssl3_unlock(s, S3_POOL_LOCK) != 0)
+        return NULL;
 
     return &tqn->trans;
 }
@@ -319,7 +329,8 @@ void ssl3_release_transmission(SSL3_TRANSMISSION * trans)
     OPENSSL_assert(tqn >= &(p->pool[0])
                    && tqn < &(p->pool[p->pool_break]));
 
-    CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+    if (ssl3_lock(trans->s, S3_POOL_LOCK) != 0)
+        return;
     if (tqn->next == NULL)
         p->tail = tqn->prev;
     else
@@ -336,7 +347,7 @@ void ssl3_release_transmission(SSL3_TRANSMISSION * trans)
     p->free_tail = tqn;
     if (p->free_head == NULL)
         p->free_head = tqn;
-    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+    ssl3_unlock(trans->s, S3_POOL_LOCK);
 }
 
 /*
@@ -404,7 +415,8 @@ int ssl3_get_record_asynch_cb(SSL3_TRANSMISSION * trans, int status)
 
     OPENSSL_assert(trans != NULL);
 
-    CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+    if (ssl3_lock(trans->s, S3_POOL_LOCK) != 0)
+        return 0;
     if (!p) {
         p = (SSL3_READ_RECORD_POOL *)
             OPENSSL_malloc(sizeof(SSL3_READ_RECORD_POOL));
@@ -412,7 +424,7 @@ int ssl3_get_record_asynch_cb(SSL3_TRANSMISSION * trans, int status)
 #ifdef ASYNCH_DEBUG
             fprintf(stderr, "OPENSSL_malloc failed to get memory\n");
 #endif
-            CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+            ssl3_unlock(trans->s, S3_POOL_LOCK);
             return 0;
         }
         memset(p, 0, sizeof(SSL3_READ_RECORD_POOL));
@@ -429,7 +441,8 @@ int ssl3_get_record_asynch_cb(SSL3_TRANSMISSION * trans, int status)
             rrqn = &(p->pool[p->pool_break++]);
         }
     }
-    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+    if (ssl3_unlock(trans->s, S3_POOL_LOCK) != 0)
+        return 0;
 
     if (!rrqn)
         return 0;
@@ -449,8 +462,9 @@ int ssl3_get_record_asynch_cb(SSL3_TRANSMISSION * trans, int status)
     rrqn->rec.status = status;
     rrqn->rec.s = trans->s;
 
-    CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
-    trans->s->s3->outstanding_read_crypto--;
+    if (ssl3_lock(trans->s, S3_POOL_LOCK) != 0)
+        return 0;
+    __sync_fetch_and_sub(&trans->s->s3->outstanding_read_crypto, 1);
 
     rrqn->next = NULL;
     rrqn->prev = p->tail;
@@ -461,7 +475,8 @@ int ssl3_get_record_asynch_cb(SSL3_TRANSMISSION * trans, int status)
         p->head = rrqn;
 
     OPENSSL_assert(rrqn != NULL);
-    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+    if (ssl3_unlock(trans->s, S3_POOL_LOCK) != 0)
+        return 0;
 
     return 1;
 }
@@ -474,7 +489,8 @@ SSL3_READ_RECORD *ssl3_extract_read_record(const SSL *s)
     if (p == NULL)
         return NULL;
 
-    CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+    if (ssl3_lock((SSL *)s, S3_POOL_LOCK) != 0)
+        return NULL;
     rrqn = p->head;
     if (rrqn) {
         if (rrqn->next == NULL)
@@ -489,7 +505,8 @@ SSL3_READ_RECORD *ssl3_extract_read_record(const SSL *s)
         rrqn->prev = NULL;
         rrqn->next = NULL;
     }
-    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+    if (ssl3_unlock((SSL *)s, S3_POOL_LOCK) != 0)
+        return NULL;
 
     if (rrqn == NULL)
         return NULL;
@@ -510,15 +527,15 @@ void ssl3_release_read_record(SSL3_READ_RECORD * rec)
 
     OPENSSL_assert(rrqn->extracted && rrqn >= &(p->pool[0])
                    && rrqn < &(p->pool[p->pool_break]));
-
-    CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+    if (ssl3_lock(rec->s, S3_POOL_LOCK) != 0)
+        return;
     rrqn->prev = p->free_tail;
     if (p->free_tail != NULL)
         p->free_tail->next = rrqn;
     p->free_tail = rrqn;
     if (p->free_head == NULL)
         p->free_head = rrqn;
-    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+    ssl3_unlock(rec->s, S3_POOL_LOCK);
 }
 
 void ssl3_cleanup_read_record_pool(SSL *s)
@@ -593,7 +610,8 @@ int ssl3_asynch_send_skt_queued_data(SSL *s)
                                         SSL3_TRANS_FLAGS_SEND));
                 ssl3_release_transmission_skt(trans);
                 (void)BIO_flush(s->wbio);
-                s->s3->outstanding_write_records--;
+                /* s->s3->outstanding_write_records--; */
+                __sync_fetch_and_sub(&s->s3->outstanding_write_records, 1);
                 BIO_clear_retry_flags(s->wbio);
                 break;          /* break for() */
             } else if (i <= 0) {
@@ -607,7 +625,8 @@ int ssl3_asynch_send_skt_queued_data(SSL *s)
                         memset(&trans->dsw_ef_buf, 0, sizeof(SSL3_BUFFER));
                     }
                     tqn = tqn->next;
-                    s->s3->outstanding_write_records--;
+                    /* s->s3->outstanding_write_records--; */
+                    __sync_fetch_and_sub(&s->s3->outstanding_write_records, 1);
 
                     ssl3_release_buffer(trans->s, &trans->buf,
                                         ! !(trans->flags &

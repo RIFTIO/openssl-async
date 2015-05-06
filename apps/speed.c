@@ -3577,7 +3577,6 @@ int MAIN(int argc, char **argv)
                     outlen = KDF1_SHA1_len;
                     kdf = KDF1_SHA1;
                 } else {
-                    fprintf(stderr, "PFT:@3653:speed.c\n");
                     outlen = (field_size + 7) / 8;
                     kdf = NULL;
                 }

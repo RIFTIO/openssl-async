@@ -225,7 +225,7 @@ int ssl3_read_n(SSL *s, int n, int max, int extend)
     /*
      * Avoid reading ahead when usign asynch operations as well, for
      * simplicity.
-     * We always act like read_ahead is set for DTLS 
+     * We always act like read_ahead is set for DTLS
      */
     if ((!s->read_ahead && !SSL_IS_DTLS(s)) || s->s3->flags & SSL3_FLAGS_ASYNCH)
         /* ignore max parameter */
@@ -252,10 +252,16 @@ int ssl3_read_n(SSL *s, int n, int max, int extend)
              * ssl3_write_pending2
              */
             if ((s->s3->flags & SSL3_FLAGS_ASYNCH) && (s->rbio == s->wbio))
-                CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+                if (ssl3_lock(s, S3_SSL3_LOCK) != 0) {
+                    SSLerr(SSL_F_SSL3_READ_N, ERR_R_INTERNAL_ERROR);
+                    return -1;
+                }
             i = BIO_read(s->rbio, pkt + len + left, max - left);
             if ((s->s3->flags & SSL3_FLAGS_ASYNCH) && (s->rbio == s->wbio))
-                CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+                if (ssl3_unlock(s, S3_SSL3_LOCK) != 0) {
+                    SSLerr(SSL_F_SSL3_READ_N, ERR_R_INTERNAL_ERROR);
+                    return -1;
+                }
         } else {
             SSLerr(SSL_F_SSL3_READ_N, SSL_R_READ_BIO_NOT_SET);
             i = -1;
@@ -403,9 +409,7 @@ static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION * trans)
         struct ssl3_read_record_st *arr = ssl3_extract_read_record(s);
 
         if (arr) {
-            CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
-            s->s3->outstanding_read_records--;
-            CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+            __sync_fetch_and_sub(&s->s3->outstanding_read_records, 1);
             if (arr->rec.type == SSL3_RT_APPLICATION_DATA)
                 /* This is an approximate length */
                 s->s3->outstanding_read_length -= arr->origlen;
@@ -553,9 +557,8 @@ static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION * trans)
                                  * couldn't transmit for the moment */
         }
         trans->flags &= ~SSL3_TRANS_FLAGS_SEND;
-        CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
-        s->s3->outstanding_read_records++;
-        CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+
+        __sync_fetch_and_add(&s->s3->outstanding_read_records, 1);
         if (s->s3->rrec.type == SSL3_RT_APPLICATION_DATA)
             /* This is an approximate length */
             s->s3->outstanding_read_length += rr->length;
@@ -570,9 +573,7 @@ static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION * trans)
         memset(&(s->s3->rbuf), 0, sizeof(SSL3_BUFFER));
         memcpy(&(trans->rec), rr, sizeof(SSL3_RECORD));
         memset(rr, 0, sizeof(SSL3_RECORD));
-        CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
-        s->s3->outstanding_read_crypto++;
-        CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+        __sync_fetch_and_add(&s->s3->outstanding_read_crypto, 1);
     }
 
     enc_err = s->method->ssl3_enc->enc(s, 0, trans);
@@ -583,7 +584,10 @@ static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION * trans)
                 memcpy(&s->s3->rbuf, &trans->buf, sizeof(SSL3_BUFFER));
                 memcpy(&s->s3->rrec, &trans->rec, sizeof(SSL3_RECORD));
                 ssl3_remove_last_transmission(s, SSL_READING);
-                CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+                if (ssl3_lock(s, S3_SSL3_LOCK) != 0) {
+                    SSLerr(SSL_F_SSL3_GET_RECORD_INNER, ERR_R_INTERNAL_ERROR);
+                    goto f_err;
+                }
                 if (EVP_CIPHER_flags(s->enc_read_ctx->cipher) &
                     EVP_CIPH_FLAG_AEAD_CIPHER) {
                     for (seqpos = 7; seqpos >= 0; seqpos--) {
@@ -595,9 +599,14 @@ static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION * trans)
                         }
                     }
                 }
-                s->s3->outstanding_read_crypto--;
-                s->s3->outstanding_read_records--;
-                CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+                /* s->s3->outstanding_read_crypto--; */
+                /* s->s3->outstanding_read_records--; */
+                __sync_fetch_and_sub(&s->s3->outstanding_read_crypto, 1);
+                __sync_fetch_and_sub(&s->s3->outstanding_read_records, 1);
+                if (ssl3_unlock(s, S3_SSL3_LOCK) != 0) {
+                    SSLerr(SSL_F_SSL3_GET_RECORD_INNER, ERR_R_INTERNAL_ERROR);
+                    goto f_err;
+                }
                 if (s->s3->rrec.type == SSL3_RT_APPLICATION_DATA) {
                     s->rstate = SSL_ST_READ_BODY;
                     s->s3->outstanding_read_length -= rr->length;
@@ -906,9 +915,7 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
                                SSL3_TRANSMISSION * trans, int post);
 static int do_ssl3_write_post_enc(SSL3_TRANSMISSION * trans, int status)
 {
-    CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
-    trans->s->s3->outstanding_write_crypto--;
-    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+    __sync_fetch_and_sub(&trans->s->s3->outstanding_write_crypto, 1);
     trans->status = status;
     return do_ssl3_write_inner(trans->s, trans->dsw_type,
                                trans->dsw_buf, trans->dsw_len,
@@ -948,10 +955,16 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
             (s->enc_write_ctx
              && (EVP_CIPHER_CTX_flags(s->enc_write_ctx) &
                  EVP_CIPH_FLAG_ASYNCH))) {
-            CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+            if (ssl3_lock(s, S3_SSL3_LOCK) != 0) {
+                SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
+                goto err;
+            }
             CRYPTO_w_lock(CRYPTO_LOCK_SSL);
             i = ssl3_asynch_send_skt_queued_data(s);
-            CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+            if (ssl3_unlock(s, S3_SSL3_LOCK) != 0) {
+                SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
+                goto err;
+            }
             CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
             /* If all data not successfully sent return now */
             if (i < 0) {
@@ -1211,10 +1224,17 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
      * where we need to populate the transmission.
      */
     if (trans) {
-        CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
-        trans->s->s3->outstanding_write_records++;
-        trans->s->s3->outstanding_write_crypto++;
-        CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+        /* CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH); */
+        if (ssl3_lock(trans->s, S3_SSL3_LOCK) != 0) {
+            SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
+            goto err;
+        }
+        __sync_fetch_and_add(&trans->s->s3->outstanding_write_records, 1);
+        __sync_fetch_and_add(&trans->s->s3->outstanding_write_crypto, 1);
+        if (ssl3_unlock(trans->s, S3_SSL3_LOCK) != 0) {
+            SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
+            goto err;
+        }
 
         /* cache the data needed by post mac and post enc */
         trans->dsw_p = p;
@@ -1255,7 +1275,7 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
             goto err;
     }
 
- post_mac:
+post_mac:
     wr->length += mac_size;
 
     wr->input = p;
@@ -1292,11 +1312,14 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
     if (0 == encstate) {
         /* Cleanup transmission pool entry here as we had an error */
         ssl3_remove_last_transmission(s, SSL_WRITING);
-        CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+        if (ssl3_lock(trans->s, S3_SSL3_LOCK) != 0) {
+            SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
+            goto err;
+        }
         s->rwstate = SSL_WRITING;
         BIO_clear_retry_flags(SSL_get_wbio(s));
-        trans->s->s3->outstanding_write_crypto--;
-        s->s3->outstanding_write_records--;
+        __sync_fetch_and_sub(&trans->s->s3->outstanding_write_crypto, 1);
+        __sync_fetch_and_sub(&s->s3->outstanding_write_records, 1);
         /*
          * On an error where the message never got sent we should roll the
          * sequence number back as otherwise it will upset the client
@@ -1318,14 +1341,17 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
             }
         }
         s->s3->crypto_retry = 1;
-        CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+        if (ssl3_unlock(trans->s, S3_SSL3_LOCK) != 0) {
+            SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
+            goto err;
+        }
         return -1;
     }
     if (trans) {
         /* Asynch case */
         return len;
     }
- post_enc:
+post_enc:
     /* record length after mac and block padding */
     s2n(wr->length, plen);
 
@@ -1338,10 +1364,13 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
 
     if (create_empty_fragment) {
         if (trans && trans->post) {
-            CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+            if (ssl3_lock(s, S3_SSL3_LOCK) != 0) {
+                SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
+                goto err;
+            }
             CRYPTO_w_lock(CRYPTO_LOCK_SSL);
             if (s->references) {
-                s->s3->outstanding_write_records--;
+                __sync_fetch_and_sub(&s->s3->outstanding_write_records, 1);
 
                 /* Move over the buffer and record. */
                 memcpy(&trans->dsw_sibling->dsw_ef_buf, &trans->buf,
@@ -1356,7 +1385,10 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
                     = trans->dsw_sibling->dsw_ef_rec.length;
             }
             CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
-            CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+            if (ssl3_unlock(s, S3_SSL3_LOCK) != 0) {
+                SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
+                goto err;
+            }
             return 1;
         }
         /*
@@ -1370,7 +1402,10 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
     wb->left = prefix_len + wr->length;
 
     if (trans && trans->post) {
-        CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+        if (ssl3_lock(s, S3_SSL3_LOCK) != 0) {
+            SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
+            goto err;
+        }
         CRYPTO_w_lock(CRYPTO_LOCK_SSL);
         if (s->references) {
             /*
@@ -1386,7 +1421,10 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
                 i = ssl3_write_pending2(s, &trans->dsw_ef_buf);
                 if (i < 0 && ssl3_get_conn_status(s) > 0) {
                     CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
-                    CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+                    if (ssl3_unlock(s, S3_SSL3_LOCK) != 0) {
+                        SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
+                        goto err;
+                    }
                     return i;
                 } else {
                     ssl3_release_buffer(trans->s, &trans->dsw_ef_buf,
@@ -1398,7 +1436,8 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
             i = ssl3_write_pending2(s, wb);
             if (i > 0) {        /* successfully sent all data to socket */
                 (void)BIO_flush(s->wbio);
-                s->s3->outstanding_write_records--;
+                /* s->s3->outstanding_write_records--; */
+                __sync_fetch_and_sub(&s->s3->outstanding_write_records, 1);
                 BIO_clear_retry_flags(s->wbio);
                 BIO_set_flags(s->wbio, f);
             }
@@ -1408,14 +1447,18 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
                  * whole packet is written inorder to enable the cleanup
                  */
                 i = wb->left;
-                s->s3->outstanding_write_records--;
+                /* s->s3->outstanding_write_records--; */
+                __sync_fetch_and_sub(&s->s3->outstanding_write_records, 1);
                 BIO_set_flags(s->wbio, f);
                 if (s->s3->outstanding_write_crypto < 1)
                     SSLerr(SSL_F_DO_SSL3_WRITE_INNER, SSL_R_CONNECTION_LOST);
             }
         }
         CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
-        CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+        if (ssl3_unlock(s, S3_SSL3_LOCK) != 0) {
+            SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
+            goto err;
+        }
         return i;
     }
 
@@ -1430,7 +1473,7 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
 
     /* we now just need to write the buffer */
     return ssl3_write_pending(s, type, buf, len);
- err:
+err:
     return -1;
 }
 
@@ -2133,10 +2176,10 @@ int ssl3_dispatch_alert(SSL *s)
          */
         if (s->s3->send_alert[0] == SSL3_AL_FATAL) {
             if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-                CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+                ssl3_lock(s, S3_SSL3_LOCK);
             (void)BIO_flush(s->wbio);
             if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-                CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+                ssl3_unlock(s, S3_SSL3_LOCK);
         }
 
         if (s->msg_callback)

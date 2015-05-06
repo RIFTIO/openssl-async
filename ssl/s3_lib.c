@@ -2901,6 +2901,33 @@ SSL3_ENC_METHOD SSLv3_enc_data = {
              int use_context))ssl_undefined_function,
 };
 
+
+int ssl3_lock(SSL *s, int type)
+{
+    int rc = -1;
+    if ((s != NULL) && (s->s3 != NULL))
+        rc = LOCK_lock(&(s->s3->s3_lockarray[type]));
+#ifdef LOCK_DEBUG
+    else
+        fprintf(stderr, "NULL pointer passed ssl3_lock()\n");
+#endif
+    return rc;
+}
+
+
+int ssl3_unlock(SSL *s, int type)
+{
+    int rc = -1;
+    if ((s != NULL) && (s->s3 != NULL))
+        rc = LOCK_unlock(&(s->s3->s3_lockarray[type]));
+#ifdef LOCK_DEBUG
+    else
+        fprintf(stderr, "NULL pointer passed ssl3_unlock()\n");
+#endif
+    return rc;
+}
+
+
 long ssl3_default_timeout(void)
 {
     /*
@@ -2941,6 +2968,7 @@ int ssl3_pending(const SSL *s)
 int ssl3_new(SSL *s)
 {
     SSL3_STATE *s3;
+    int sts = 1;
 
     if ((s3 = OPENSSL_malloc(sizeof *s3)) == NULL)
         goto err;
@@ -2954,13 +2982,36 @@ int ssl3_new(SSL *s)
     SSL_SRP_CTX_init(s);
 #endif
     s->method->ssl_clear(s);
-    return (1);
+    sts = LOCK_init(&s->s3->s3_lockarray[S3_SSL3_LOCK]);
+    if (sts != 0) {
+#ifdef LOCK_DEBUG
+        fprintf(stderr, "LOCK_init() failed for S3_SSL3_LOCK - sts = %d.\n", sts);
+#endif
+        goto err;
+    }
+    sts = LOCK_init(&s->s3->s3_lockarray[S3_POOL_LOCK]);
+    if (sts != 0) {
+#ifdef LOCK_DEBUG
+        fprintf(stderr, "LOCK_init() failed for S3_POOL_LOCK - sts = %d.\n", sts);
+#endif
+        goto err;
+    }
+    sts = LOCK_init(&s->s3->s3_lockarray[S3_POSTPROCESSING_POOL_LOCK]);
+    if (sts != 0) {
+#ifdef LOCK_DEBUG
+        fprintf(stderr, "LOCK_init() failed for S3_POSTPROCESSING_POOL_LOCK - sts = %d.\n", sts);
+#endif
+        goto err;
+    }
+    return 1;
  err:
-    return (0);
+    return 0;
 }
 
 void ssl3_free(SSL *s)
 {
+    int i;
+
     if (s == NULL)
         return;
 
@@ -2999,6 +3050,10 @@ void ssl3_free(SSL *s)
 #endif
     ssl3_cleanup_transmission_pool(s);
     ssl3_cleanup_read_record_pool(s);
+
+    for (i = 0; i < S3_NUM_LOCKS; i++)
+        LOCK_free(&(s->s3->s3_lockarray[i]));
+
     OPENSSL_cleanse(s->s3, sizeof *s->s3);
     OPENSSL_free(s->s3);
     s->s3 = NULL;
@@ -4155,10 +4210,10 @@ int ssl3_shutdown(SSL *s)
             /*
              * Data still on skt queue need to be pushed to socket
              */
-            CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+            ssl3_lock(s, S3_SSL3_LOCK);
             CRYPTO_w_lock(CRYPTO_LOCK_SSL);
             ret = ssl3_asynch_send_skt_queued_data(s);
-            CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+            ssl3_unlock(s, S3_SSL3_LOCK);
             CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
             /* If all data not successfully sent return now */
             if (ret < 0) {
@@ -4230,10 +4285,10 @@ int ssl3_shutdown(SSL *s)
                 /*
                  * Data still on skt queue need to be pushed to socket
                  */
-                CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+                ssl3_lock(s, S3_SSL3_LOCK);
                 CRYPTO_w_lock(CRYPTO_LOCK_SSL);
                 ret = ssl3_asynch_send_skt_queued_data(s);
-                CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+                ssl3_unlock(s, S3_SSL3_LOCK);
                 CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
                 /* If all data not successfully sent return now */
                 if (ret < 0) {
@@ -4289,10 +4344,12 @@ int ssl3_write(SSL *s, const void *buf, int len)
 
         s->rwstate = SSL_WRITING;
         if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-            CRYPTO_w_lock(CRYPTO_LOCK_SSL_ASYNCH);
+            if (ssl3_lock(s, S3_SSL3_LOCK) != 0)
+                return -1;
         n = BIO_flush(s->wbio);
         if (s->s3->flags & SSL3_FLAGS_ASYNCH)
-            CRYPTO_w_unlock(CRYPTO_LOCK_SSL_ASYNCH);
+            if (ssl3_unlock(s, S3_SSL3_LOCK) != 0)
+                return -1;
         if (n <= 0)
             return (n);
         s->rwstate = SSL_NOTHING;

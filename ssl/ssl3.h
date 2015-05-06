@@ -123,6 +123,7 @@
 # include <openssl/buffer.h>
 # include <openssl/evp.h>
 # include <openssl/ssl.h>
+# include <openssl/lock.h>
 
 #ifdef  __cplusplus
 extern "C" {
@@ -365,6 +366,11 @@ extern "C" {
 
 # define TLS1_HB_REQUEST         1
 # define TLS1_HB_RESPONSE        2
+
+# define S3_SSL3_LOCK                   0
+# define S3_POOL_LOCK                   1
+# define S3_POSTPROCESSING_POOL_LOCK    2
+# define S3_NUM_LOCKS                   3
 
 # ifndef OPENSSL_NO_SSL_INTERN
 
@@ -632,6 +638,8 @@ typedef struct ssl3_state_st {
     int pkeystate;              /* 0 when not used -1 while crypto is being
                                  * done 1 in post 2 not submitted due to
                                  * RETRY 3 in pkey post 10 in md post */
+    LOCK s3_lockarray[S3_NUM_LOCKS];
+
     struct {
         int status;
         int num;
