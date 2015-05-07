@@ -71,6 +71,11 @@ int ASYNC_start_job(ASYNC_JOB **job, int *ret, int (*func)(void *),
 int ASYNC_pause_job(void);
 int ASYNC_in_job(void);
 
+ASYNC_JOB *ASYNC_current_job(void);
+
+void ASYNC_set_ready(ASYNC_JOB *job, int ready);
+int ASYNC_is_ready(ASYNC_JOB *job);
+
 # ifdef  __cplusplus
 }
 # endif

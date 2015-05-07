@@ -595,6 +595,8 @@ qat_rsa_encrypt(CpaCyRsaEncryptOpData * enc_op_data,
             //usleep(ulPollInterval +
             //       (qatPerformOpRetries % QAT_RETRY_BACKOFF_MODULO_DIVISOR));
             //qatPerformOpRetries++;
+
+            // QATerr(QAT_F_QAT_RSA_ENCRYPT, ERR_R_RETRY);
             ASYNC_pause_job();
             if(!getEnableExternalPolling())
                 poll_instances();

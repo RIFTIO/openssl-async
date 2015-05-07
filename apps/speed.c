@@ -2332,6 +2332,7 @@ int MAIN(int argc, char **argv)
         int requestno = 0;
         const unsigned char *prsa_data;
         prsa_data = rsa_data[j];
+        ASYNC_JOB *job = NULL;
         RSA **rsa_inflights = NULL;
         rsa_inflights = (RSA **)OPENSSL_malloc((batch) * (sizeof(RSA *)));
         if (NULL == rsa_inflights) {
@@ -2369,10 +2370,26 @@ int MAIN(int argc, char **argv)
                 requestno=requestno%batch;
                 //ret = RSA_sign(NID_md5_sha1, buf, 36, buf2,
                 //               &rsa_num, rsa_key[j]);
+
+                job = rsa_inflights[requestno]->job;
+                if (job != NULL && !ASYNC_is_ready(job)) {
+                    /* The job is not ready to be resumed */
+                    count--;
+
+                    /* Sometimes I still need to poll */
+                    if (requestno == 0)
+                        poll_engine(engine, batch);
+
+                    continue;
+                }
+
                 ret = RSA_sign_async(NID_md5_sha1, buf, 36, buf2,
                                &rsa_num, rsa_inflights[requestno]);
                 if (ret == -1 && rsa_inflights[requestno]->job != NULL) {
-                    count--; /*Retry detected so need to resubmit*/
+                    /* Retry detected so need to resubmit
+                     * This can be HW retry or an in-flight: do I need to distinguish?
+                     */
+                    count--;
                 }
                 if (ret == 0) {
                     BIO_printf(bio_err, "RSA sign failure\n");

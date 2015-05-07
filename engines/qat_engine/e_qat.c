@@ -340,6 +340,9 @@ void initOpDone(struct op_done *opDone)
     }
     opDone->flag = 0;
     opDone->verifyResult = CPA_FALSE;
+
+    opDone->job = ASYNC_current_job();
+
 }
 
 /******************************************************************************
@@ -498,6 +501,10 @@ void qat_crypto_callbackFn(void *callbackTag, CpaStatus status,
     }
     opDone->flag = 1;
     opDone->verifyResult = verifyResult;
+
+    // TODO I don't think this needs to be done inside the lock
+    ASYNC_set_ready(opDone->job, 1);
+
     //sts = pthread_cond_signal(&(opDone->cond));
     if (sts != 0) {
         fprintf(stderr,

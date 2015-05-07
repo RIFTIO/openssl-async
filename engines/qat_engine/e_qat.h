@@ -184,6 +184,7 @@ struct op_done {
     pthread_cond_t cond;
     int flag;
     CpaBoolean verifyResult;
+    ASYNC_JOB *job;
 };
 
 struct op_done_asynch {

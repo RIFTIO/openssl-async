@@ -65,7 +65,7 @@
 static ASYNC_CTX *ASYNC_CTX_new(void)
 {
     ASYNC_CTX *nctx = NULL;
-    
+
     if(!(nctx = OPENSSL_malloc(sizeof (ASYNC_CTX)))) {
         /* Error here */
         goto err;
@@ -81,7 +81,7 @@ err:
     if(nctx) {
         OPENSSL_free(nctx);
     }
-    
+
     return NULL;
 }
 
@@ -107,6 +107,7 @@ static ASYNC_JOB *ASYNC_JOB_new(void)
 
     job->status = ASYNC_JOB_RUNNING;
     job->funcargs = NULL;
+    job->ready_flag = 0;
 
     return job;
 }
@@ -247,3 +248,22 @@ int ASYNC_in_job(void)
 
     return 0;
 }
+
+ASYNC_JOB *ASYNC_current_job(void)
+{
+    if(ASYNC_get_ctx())
+        return ASYNC_get_ctx()->currjob;
+
+    return NULL;
+}
+
+void ASYNC_set_ready(ASYNC_JOB *job, int ready)
+{
+    job->ready_flag = ready;
+}
+
+int ASYNC_is_ready(ASYNC_JOB *job)
+{
+    return job->ready_flag;
+}
+
