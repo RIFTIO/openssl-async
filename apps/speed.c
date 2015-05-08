@@ -186,6 +186,7 @@
 #include <openssl/bn.h>
 
 #include <openssl/async.h>
+#include <e_qat.h>
 
 #ifndef HAVE_FORK
 # if defined(OPENSSL_SYS_VMS) || defined(OPENSSL_SYS_WINDOWS) || defined(OPENSSL_SYS_OS2) || defined(OPENSSL_SYS_NETWARE)
@@ -2328,6 +2329,9 @@ int MAIN(int argc, char **argv)
     
 #ifndef OPENSSL_NO_RSA
     for (j = 0; j < RSA_NUM; j++) {
+        unsigned long int async_calls = 0;
+        unsigned long int poll_calls = 0;
+        unsigned long int hw_retries = 0;
         int ret, k;
         int requestno = 0;
         const unsigned char *prsa_data;
@@ -2368,8 +2372,6 @@ int MAIN(int argc, char **argv)
             for (count = 0, run = 1; COND(rsa_c[j][0]); count++) {
                 requestno++;
                 requestno=requestno%batch;
-                //ret = RSA_sign(NID_md5_sha1, buf, 36, buf2,
-                //               &rsa_num, rsa_key[j]);
 
                 job = rsa_inflights[requestno]->job;
                 if (job != NULL && !ASYNC_is_ready(job)) {
@@ -2377,18 +2379,34 @@ int MAIN(int argc, char **argv)
                     count--;
 
                     /* Sometimes I still need to poll */
-                    if (requestno == 0)
+                    if (requestno == 0) {
+                        poll_calls++;
                         poll_engine(engine, batch);
+                    }
 
                     continue;
                 }
 
+                //ret = RSA_sign(NID_md5_sha1, buf, 36, buf2,
+                //               &rsa_num, rsa_key[j]);
+                async_calls++;
                 ret = RSA_sign_async(NID_md5_sha1, buf, 36, buf2,
                                &rsa_num, rsa_inflights[requestno]);
                 if (ret == -1 && rsa_inflights[requestno]->job != NULL) {
-                    /* Retry detected so need to resubmit
-                     * This can be HW retry or an in-flight: do I need to distinguish?
+                    /* Retry detected so need to resubmit: it can be HW retry or an in-fligth
                      */
+                    if (ERR_R_RETRY == ERR_GET_REASON(ERR_peek_error())) {
+                        // In case of HW retry I must not wait for an event
+                        ASYNC_set_ready(rsa_inflights[requestno]->job, 1);
+                        hw_retries++;
+
+                        // Remove the error from the stack
+                        ERR_get_error();
+                    }
+                    else {
+                        ASYNC_set_ready(rsa_inflights[requestno]->job, 0);
+                    }
+
                     count--;
                 }
                 if (ret == 0) {
@@ -2398,8 +2416,10 @@ int MAIN(int argc, char **argv)
                     break;
                 }
 # ifndef OPENSSL_NO_HW_QAT
-                if (requestno == 0)
+                if (requestno == 0) {
+                    poll_calls++;
                     poll_engine(engine, batch);
+                }
 # endif
             }
 # ifndef OPENSSL_NO_HW_QAT
@@ -2413,6 +2433,15 @@ int MAIN(int argc, char **argv)
             rsa_results[j][0] = d / (double)count;
             rsa_count = count;
         }
+
+        BIO_printf(bio_err,"Ops: %ld - Async Calls: %ld - Calls/Op: %.2f\n",
+                count, async_calls, async_calls * 1.0 / count);
+
+        BIO_printf(bio_err,"Polling calls: %ld - Calls/Op: %.2f\n",
+                poll_calls, poll_calls * 1.0 / count);
+
+        BIO_printf(bio_err,"HW Retries: %ld - Retries/Op: %.2f\n",
+                hw_retries, hw_retries * 1.0 / count);
 
         do {
             ret = RSA_verify_async(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
@@ -2429,15 +2458,50 @@ int MAIN(int argc, char **argv)
             requestno=0;
             pkey_print_message("public", "rsa",
                                rsa_c[j][1], rsa_bits[j], RSA_SECONDS);
+
+            async_calls = 0;
+            poll_calls = 0;
+            hw_retries = 0;
+
             Time_F(START);
             for (count = 0, run = 1; COND(rsa_c[j][1]); count++) {
                 requestno++;
                 requestno=requestno%batch;
+
+                job = rsa_inflights[requestno]->job;
+                if (job != NULL && !ASYNC_is_ready(job)) {
+                    /* The job is not ready to be resumed */
+                    count--;
+
+                    /* Sometimes I still need to poll */
+                    if (requestno == 0) {
+                        poll_calls++;
+                        poll_engine(engine, batch);
+                    }
+
+                    continue;
+                }
+
                 //ret = RSA_verify(NID_md5_sha1, buf, 36, buf2,
                 //                 rsa_num, rsa_key[j]);
+                async_calls++;
                 ret = RSA_verify_async(NID_md5_sha1, buf, 36, buf2,
                                  rsa_num, rsa_inflights[requestno]);
                 if (ret == -1 && rsa_inflights[requestno]->job != NULL) {
+                    /* Retry detected so need to resubmit: it can be HW retry or an in-fligth
+                     */
+                    if (ERR_R_RETRY == ERR_GET_REASON(ERR_peek_error())) {
+                        // In case of HW retry I must not wait for an event
+                        ASYNC_set_ready(rsa_inflights[requestno]->job, 1);
+                        hw_retries++;
+
+                        // Remove the error from the stack
+                        ERR_get_error();
+                    }
+                    else {
+                        ASYNC_set_ready(rsa_inflights[requestno]->job, 0);
+                    }
+
                     count--;
                 } else {
                     if (ret <= 0) {
@@ -2448,8 +2512,10 @@ int MAIN(int argc, char **argv)
                    }
                 }
 # ifndef OPENSSL_NO_HW_QAT
-                if (requestno == 0)
+                if (requestno == 0) {
+                    poll_calls++;
                     poll_engine(engine, batch);
+                }
 # endif
             }
 # ifndef OPENSSL_NO_HW_QAT
@@ -2462,6 +2528,15 @@ int MAIN(int argc, char **argv)
                        count, rsa_bits[j], d);
             rsa_results[j][1] = d / (double)count;
         }
+
+        BIO_printf(bio_err,"Ops: %ld - Async Calls: %ld - Calls/Op: %.2f\n",
+                count, async_calls, async_calls * 1.0 / count);
+
+        BIO_printf(bio_err,"Polling calls: %ld - Calls/Op: %.2f\n",
+                poll_calls, poll_calls * 1.0 / count);
+
+        BIO_printf(bio_err,"HW Retries: %ld - Retries/Op: %.2f\n",
+                hw_retries, hw_retries * 1.0 / count);
 
         if (rsa_count <= 1) {
             /* if longer than 10s, don't do any more */
@@ -2745,7 +2820,7 @@ int MAIN(int argc, char **argv)
                     }
                     else {
                         if (ret != 1) {
-                            BIO_printf(bio_err, "ECDSA verify failure. Count = %d\n", count);
+                            BIO_printf(bio_err, "ECDSA verify failure. Count = %ld\n", count);
                             ERR_print_errors(bio_err);
                             count = 1;
                             break;

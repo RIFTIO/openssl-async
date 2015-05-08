@@ -70,6 +70,10 @@ struct async_job_st {
     void *funcargs;
     int ret;
     int status;
+
+    // This goes to 1 when the HW has completed
+    int ready_flag;
 };
+
 
 void ASYNC_start_func(void);

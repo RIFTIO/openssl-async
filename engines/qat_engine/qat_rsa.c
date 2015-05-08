@@ -401,6 +401,10 @@ qat_rsa_decrypt(CpaCyRsaDecryptOpData * dec_op_data,
             //usleep(ulPollInterval +
             //       (qatPerformOpRetries % QAT_RETRY_BACKOFF_MODULO_DIVISOR));
             //qatPerformOpRetries++;
+
+            QATerr(QAT_F_QAT_RSA_DECRYPT, ERR_R_RETRY);
+            // fprintf(stderr, "Retry decrypt\n");
+
             ASYNC_pause_job();
             if(!getEnableExternalPolling())
                 poll_instances();
@@ -596,7 +600,8 @@ qat_rsa_encrypt(CpaCyRsaEncryptOpData * enc_op_data,
             //       (qatPerformOpRetries % QAT_RETRY_BACKOFF_MODULO_DIVISOR));
             //qatPerformOpRetries++;
 
-            // QATerr(QAT_F_QAT_RSA_ENCRYPT, ERR_R_RETRY);
+            QATerr(QAT_F_QAT_RSA_ENCRYPT, ERR_R_RETRY);
+            // fprintf(stderr, "Retry encrypt\n");
             ASYNC_pause_job();
             if(!getEnableExternalPolling())
                 poll_instances();
