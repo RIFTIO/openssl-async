@@ -2262,10 +2262,34 @@ int MAIN(int argc, char **argv)
                          requestno=requestno%num_ctx;
                          ctx = ctxs + requestno;
 # endif
+                         if (ctx->job != NULL && !ASYNC_is_ready(ctx->job)) {
+                             /* The job is not ready to be resumed */
+                             count--;
+
+                             /* Sometimes I still need to poll */
+                             if (requestno == 0) {
+                                 poll_engine(engine, batch);
+                             }
+
+                             continue;
+                         }
+
                          retval =
                             EVP_EncryptUpdate_async(ctx, buf, &outl, buf,
                                                     lengths[j]);
                          if (retval == -1 && ctx->job != NULL) { 
+                             /* Retry detected so need to resubmit:
+                              * it can be HW retry or an in-fligth
+                              */
+                             if (ERR_R_RETRY == ERR_GET_REASON(ERR_peek_error())) {
+                                 // In case of HW retry I must not wait for an event
+                                 ASYNC_set_ready(ctx->job, 1);
+                                 // Remove the error from the stack
+                                 ERR_get_error();
+                             }
+                             else {
+                                 ASYNC_set_ready(ctx->job, 0);
+                             }
                              count--; /* Decrement count as the request
                                        * was not completed */
                          }
@@ -2393,7 +2417,8 @@ int MAIN(int argc, char **argv)
                 ret = RSA_sign_async(NID_md5_sha1, buf, 36, buf2,
                                &rsa_num, rsa_inflights[requestno]);
                 if (ret == -1 && rsa_inflights[requestno]->job != NULL) {
-                    /* Retry detected so need to resubmit: it can be HW retry or an in-fligth
+                    /* Retry detected so need to resubmit:
+                     * it can be HW retry or an in-fligth
                      */
                     if (ERR_R_RETRY == ERR_GET_REASON(ERR_peek_error())) {
                         // In case of HW retry I must not wait for an event

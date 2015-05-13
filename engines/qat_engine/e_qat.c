@@ -565,6 +565,7 @@ CpaStatus myPerformOp(const CpaInstanceHandle instanceHandle,
             //uiRetry++;
             //usleep(ulPollInterval +
             //       (uiRetry % QAT_RETRY_BACKOFF_MODULO_DIVISOR));
+            QATerr(QAT_F_QAT_CIPHER_OP, ERR_R_RETRY);
             ASYNC_pause_job();
             if (!getEnableExternalPolling())
                 poll_instances();
