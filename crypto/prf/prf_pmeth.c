@@ -73,8 +73,6 @@
 #endif
 #include "evp_locl.h"
 
-/* PRF pkey context structure */
-
 static int pkey_prf_derive_init(EVP_PKEY_CTX *ctx)
 {
     PRF *prf_ctx;
@@ -173,29 +171,6 @@ static int pkey_prf_derive_synch(EVP_PKEY_CTX *ctx, unsigned char *key,
     return ret;
 }
 
-static int pkey_prf_derive_asynch(EVP_PKEY_CTX *ctx, unsigned char *key,
-                                  size_t *olen, int (*cb) (unsigned char *key,
-                                                           size_t keylen,
-                                                           void *cb_data,
-                                                           int status),
-                                  void *cb_data)
-{
-    PRF *prf_ctx = ctx->data;
-    int ret = -1;
-    if (!prf_ctx) {
-        EVPerr(EVP_F_PKEY_PRF_DERIVE_ASYNCH, EVP_R_INPUT_NOT_INITIALIZED);
-        return -1;
-    }
-    ret = PRF_derive(prf_ctx, key, olen);
-
-    if (ret > 0)
-        cb(key, *olen, (void *)cb_data, 1);
-    else
-        cb(key, *olen, (void *)cb_data, 0);
-
-    return ret;
-}
-
 const EVP_PKEY_METHOD prf_pkey_meth = {
     EVP_PKEY_PRF,
     0,
@@ -226,7 +201,7 @@ const EVP_PKEY_METHOD prf_pkey_meth = {
     {0, 0},
 
     pkey_prf_derive_init,
-    {pkey_prf_derive_synch, pkey_prf_derive_asynch},
+    {pkey_prf_derive_synch, 0},
 
     pkey_prf_ctrl,
     0

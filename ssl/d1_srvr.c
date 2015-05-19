@@ -742,7 +742,7 @@ int dtls1_accept(SSL *s)
         case SSL3_ST_SW_CHANGE_B:
 
             s->session->cipher = s->s3->tmp.new_cipher;
-            if (!s->method->ssl3_enc->setup_key_block(s)) {
+            if (s->method->ssl3_enc->setup_key_block(s) <= 0) {
                 ret = -1;
                 goto end;
             }

@@ -831,6 +831,13 @@ int SSL_pending(const SSL *s)
     return (s->method->ssl_pending(s));
 }
 
+int SSL_get_async_retry(const SSL *s)
+{
+    if (s && s->s3)
+        return s->s3->async_retry_flag;
+    return 0;
+}
+
 int SSL_crypto_pending(const SSL *s)
 {
     if (s && s->s3) {
@@ -2241,7 +2248,7 @@ void ssl_set_cert_masks(CERT *c, const SSL_CIPHER *cipher)
             signature_nid = OBJ_obj2nid(x->sig_alg->algorithm);
             OBJ_find_sigid_algs(signature_nid, &md_nid, &pk_nid);
         }
-#ifndef OPENSSL_NO_ECDH
+# ifndef OPENSSL_NO_ECDH
         if (ecdh_ok) {
 
             if (pk_nid == NID_rsaEncryption || pk_nid == NID_rsa) {
@@ -2262,13 +2269,13 @@ void ssl_set_cert_masks(CERT *c, const SSL_CIPHER *cipher)
                 }
             }
         }
-#endif
-#ifndef OPENSSL_NO_ECDSA
+# endif
+# ifndef OPENSSL_NO_ECDSA
         if (ecdsa_ok) {
             mask_a |= SSL_aECDSA;
             emask_a |= SSL_aECDSA;
         }
-#endif
+# endif
     }
 #endif
 #ifndef OPENSSL_NO_ECDH
@@ -2531,13 +2538,24 @@ int SSL_get_error(const SSL *s, int i)
      * where we do encode the error
      */
     if ((l = ERR_peek_error()) != 0) {
-        if ((!(s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH)) ||
-            (!(ERR_R_RETRY == ERR_GET_REASON(l)))) {
+        if (((s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH)) &&
+            ((ERR_R_RETRY == ERR_GET_REASON(l)))) {
+            /* In asyc mode, retry error should be ignored*/
+            l = ERR_get_error();
+        }
+        else {
             if (ERR_GET_LIB(l) == ERR_LIB_SYS)
                 return (SSL_ERROR_SYSCALL);
             else
                 return (SSL_ERROR_SSL);
         }
+    }
+
+    /* Reset the retry flag */
+    if (s->s3) {
+        s->s3->async_retry_flag = 0;
+        if (ERR_R_RETRY == ERR_GET_REASON(l))
+            s->s3->async_retry_flag = 1;
     }
 
     if ((i < 0) && SSL_want_read(s)) {
@@ -2659,6 +2677,7 @@ int SSL_get_error(const SSL *s, int i)
             return (SSL_ERROR_ZERO_RETURN);
         } else {
             if ((s->shutdown & SSL_RECEIVED_SHUTDOWN) &&
+                (s->s3) && 
                 (s->s3->warn_alert == SSL_AD_CLOSE_NOTIFY))
                 return (SSL_ERROR_ZERO_RETURN);
         }

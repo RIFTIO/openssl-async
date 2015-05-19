@@ -227,7 +227,8 @@ int ssl3_read_n(SSL *s, int n, int max, int extend)
      * simplicity.
      * We always act like read_ahead is set for DTLS
      */
-    if ((!s->read_ahead && !SSL_IS_DTLS(s)) || s->s3->flags & SSL3_FLAGS_ASYNCH)
+    if ((!s->read_ahead && !SSL_IS_DTLS(s))
+        || s->s3->flags & SSL3_FLAGS_ASYNCH)
         /* ignore max parameter */
         max = n;
     else {
@@ -409,7 +410,7 @@ static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION * trans)
         struct ssl3_read_record_st *arr = ssl3_extract_read_record(s);
 
         if (arr) {
-            __sync_fetch_and_sub(&s->s3->outstanding_read_records, 1);
+            ssl_atomic_dec(s->s3->outstanding_read_records);
             if (arr->rec.type == SSL3_RT_APPLICATION_DATA)
                 /* This is an approximate length */
                 s->s3->outstanding_read_length -= arr->origlen;
@@ -558,7 +559,7 @@ static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION * trans)
         }
         trans->flags &= ~SSL3_TRANS_FLAGS_SEND;
 
-        __sync_fetch_and_add(&s->s3->outstanding_read_records, 1);
+        ssl_atomic_inc(s->s3->outstanding_read_records);
         if (s->s3->rrec.type == SSL3_RT_APPLICATION_DATA)
             /* This is an approximate length */
             s->s3->outstanding_read_length += rr->length;
@@ -573,7 +574,7 @@ static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION * trans)
         memset(&(s->s3->rbuf), 0, sizeof(SSL3_BUFFER));
         memcpy(&(trans->rec), rr, sizeof(SSL3_RECORD));
         memset(rr, 0, sizeof(SSL3_RECORD));
-        __sync_fetch_and_add(&s->s3->outstanding_read_crypto, 1);
+        ssl_atomic_inc(s->s3->outstanding_read_crypto);
     }
 
     enc_err = s->method->ssl3_enc->enc(s, 0, trans);
@@ -599,10 +600,8 @@ static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION * trans)
                         }
                     }
                 }
-                /* s->s3->outstanding_read_crypto--; */
-                /* s->s3->outstanding_read_records--; */
-                __sync_fetch_and_sub(&s->s3->outstanding_read_crypto, 1);
-                __sync_fetch_and_sub(&s->s3->outstanding_read_records, 1);
+                ssl_atomic_dec(s->s3->outstanding_read_crypto);
+                ssl_atomic_dec(s->s3->outstanding_read_records);
                 if (ssl3_unlock(s, S3_SSL3_LOCK) != 0) {
                     SSLerr(SSL_F_SSL3_GET_RECORD_INNER, ERR_R_INTERNAL_ERROR);
                     goto f_err;
@@ -915,7 +914,7 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
                                SSL3_TRANSMISSION * trans, int post);
 static int do_ssl3_write_post_enc(SSL3_TRANSMISSION * trans, int status)
 {
-    __sync_fetch_and_sub(&trans->s->s3->outstanding_write_crypto, 1);
+    ssl_atomic_dec(trans->s->s3->outstanding_write_crypto);
     trans->status = status;
     return do_ssl3_write_inner(trans->s, trans->dsw_type,
                                trans->dsw_buf, trans->dsw_len,
@@ -1229,8 +1228,8 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
             SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
             goto err;
         }
-        __sync_fetch_and_add(&trans->s->s3->outstanding_write_records, 1);
-        __sync_fetch_and_add(&trans->s->s3->outstanding_write_crypto, 1);
+        ssl_atomic_inc(trans->s->s3->outstanding_write_records);
+        ssl_atomic_inc(trans->s->s3->outstanding_write_crypto);
         if (ssl3_unlock(trans->s, S3_SSL3_LOCK) != 0) {
             SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
             goto err;
@@ -1318,8 +1317,8 @@ post_mac:
         }
         s->rwstate = SSL_WRITING;
         BIO_clear_retry_flags(SSL_get_wbio(s));
-        __sync_fetch_and_sub(&trans->s->s3->outstanding_write_crypto, 1);
-        __sync_fetch_and_sub(&s->s3->outstanding_write_records, 1);
+        ssl_atomic_dec(trans->s->s3->outstanding_write_crypto);
+        ssl_atomic_dec(s->s3->outstanding_write_records);
         /*
          * On an error where the message never got sent we should roll the
          * sequence number back as otherwise it will upset the client
@@ -1370,7 +1369,7 @@ post_enc:
             }
             CRYPTO_w_lock(CRYPTO_LOCK_SSL);
             if (s->references) {
-                __sync_fetch_and_sub(&s->s3->outstanding_write_records, 1);
+                ssl_atomic_dec(s->s3->outstanding_write_records);
 
                 /* Move over the buffer and record. */
                 memcpy(&trans->dsw_sibling->dsw_ef_buf, &trans->buf,
@@ -1436,8 +1435,7 @@ post_enc:
             i = ssl3_write_pending2(s, wb);
             if (i > 0) {        /* successfully sent all data to socket */
                 (void)BIO_flush(s->wbio);
-                /* s->s3->outstanding_write_records--; */
-                __sync_fetch_and_sub(&s->s3->outstanding_write_records, 1);
+                ssl_atomic_dec(s->s3->outstanding_write_records);
                 BIO_clear_retry_flags(s->wbio);
                 BIO_set_flags(s->wbio, f);
             }
@@ -1447,8 +1445,7 @@ post_enc:
                  * whole packet is written inorder to enable the cleanup
                  */
                 i = wb->left;
-                /* s->s3->outstanding_write_records--; */
-                __sync_fetch_and_sub(&s->s3->outstanding_write_records, 1);
+                ssl_atomic_dec(s->s3->outstanding_write_records);
                 BIO_set_flags(s->wbio, f);
                 if (s->s3->outstanding_write_crypto < 1)
                     SSLerr(SSL_F_DO_SSL3_WRITE_INNER, SSL_R_CONNECTION_LOST);
@@ -1657,6 +1654,21 @@ int ssl3_read_bytes(SSL *s, int type, unsigned char *buf, int len, int peek)
             return (-1);
         }
     }
+
+    if (s->s3->flags & SSL3_FLAGS_ASYNCH) {
+        switch (s->s3->pkeystate) {
+        case -1:
+            return -1;
+        case PRF_RETRY_GENERATE_KEY_BLOCK_STATE:
+        case PRF_GENERATE_KEY_BLOCK_STATE:
+        case PRF_RETRY_FINAL_FINISH_STATE:
+        case PRF_FINAL_FINISH_STATE:
+            goto prf_gen_key_readbytes;
+        default:
+            break;
+        }
+    }
+
  start:
     s->rwstate = SSL_NOTHING;
 
@@ -1971,6 +1983,7 @@ int ssl3_read_bytes(SSL *s, int type, unsigned char *buf, int len, int peek)
             s->msg_callback(0, s->version, SSL3_RT_CHANGE_CIPHER_SPEC,
                             rr->data, 1, s, s->msg_callback_arg);
 
+ prf_gen_key_readbytes:
         s->s3->change_cipher_spec = 1;
         if (!ssl3_do_change_cipher_spec(s))
             goto err;
@@ -2094,6 +2107,24 @@ int ssl3_do_change_cipher_spec(SSL *s)
     else
         i = SSL3_CHANGE_CIPHER_CLIENT_READ;
 
+    if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+        switch (s->s3->pkeystate) {
+        case -1:
+            return (0);
+        case PRF_RETRY_GENERATE_KEY_BLOCK_STATE:
+        case PRF_GENERATE_KEY_BLOCK_STATE:
+            goto prf_gen_key;
+        case PRF_RETRY_FINAL_FINISH_STATE:
+            s->s3->pkeystate = 0;
+            goto pre_prf_final_finish;
+        case PRF_FINAL_FINISH_STATE:
+            s->s3->pkeystate = 0;
+            i = s->s3->get_client_key_exchange.n;
+            goto post_prf_final_finish;
+        default:
+            break;
+        }
+
     if (s->s3->tmp.key_block == NULL) {
         if (s->session == NULL || s->session->master_key_length == 0) {
             /* might happen if dtls1_read_bytes() calls this */
@@ -2102,14 +2133,16 @@ int ssl3_do_change_cipher_spec(SSL *s)
             return (0);
         }
 
+ prf_gen_key:
         s->session->cipher = s->s3->tmp.new_cipher;
-        if (!s->method->ssl3_enc->setup_key_block(s))
+        if (s->method->ssl3_enc->setup_key_block(s) <= 0)
             return (0);
     }
 
     if (!s->method->ssl3_enc->change_cipher_state(s, i))
         return (0);
 
+ pre_prf_final_finish:
     /*
      * we have to record the message digest at this point so we can get it
      * before we read the finished message
@@ -2125,12 +2158,14 @@ int ssl3_do_change_cipher_spec(SSL *s)
     i = s->method->ssl3_enc->final_finish_mac(s,
                                               sender, slen,
                                               s->s3->tmp.peer_finish_md);
+    if (s->s3->flags & SSL3_FLAGS_ASYNCH && s->s3->pkeystate != 0)
+        return 0;
     if (i == 0) {
         SSLerr(SSL_F_SSL3_DO_CHANGE_CIPHER_SPEC, ERR_R_INTERNAL_ERROR);
         return 0;
     }
+ post_prf_final_finish:
     s->s3->tmp.peer_finish_md_len = i;
-
     return (1);
 }
 

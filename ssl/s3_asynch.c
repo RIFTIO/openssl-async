@@ -464,7 +464,7 @@ int ssl3_get_record_asynch_cb(SSL3_TRANSMISSION * trans, int status)
 
     if (ssl3_lock(trans->s, S3_POOL_LOCK) != 0)
         return 0;
-    __sync_fetch_and_sub(&trans->s->s3->outstanding_read_crypto, 1);
+    ssl_atomic_dec(trans->s->s3->outstanding_read_crypto);
 
     rrqn->next = NULL;
     rrqn->prev = p->tail;
@@ -610,8 +610,7 @@ int ssl3_asynch_send_skt_queued_data(SSL *s)
                                         SSL3_TRANS_FLAGS_SEND));
                 ssl3_release_transmission_skt(trans);
                 (void)BIO_flush(s->wbio);
-                /* s->s3->outstanding_write_records--; */
-                __sync_fetch_and_sub(&s->s3->outstanding_write_records, 1);
+                ssl_atomic_dec(s->s3->outstanding_write_records);
                 BIO_clear_retry_flags(s->wbio);
                 break;          /* break for() */
             } else if (i <= 0) {
@@ -625,8 +624,7 @@ int ssl3_asynch_send_skt_queued_data(SSL *s)
                         memset(&trans->dsw_ef_buf, 0, sizeof(SSL3_BUFFER));
                     }
                     tqn = tqn->next;
-                    /* s->s3->outstanding_write_records--; */
-                    __sync_fetch_and_sub(&s->s3->outstanding_write_records, 1);
+                    ssl_atomic_dec(s->s3->outstanding_write_records);
 
                     ssl3_release_buffer(trans->s, &trans->buf,
                                         ! !(trans->flags &

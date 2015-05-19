@@ -275,9 +275,14 @@ int EVP_PKEY_derive_PRF(int type, ENGINE *e, const EVP_MD **md, int md_count,
                                          EVP_PKEY_CTRL_SET_PRF_VERSION,
                                          version, NULL) <= 0)
         goto perr;
-    if (cb)
-        return EVP_PKEY_derive_asynch(prf_ctx, out1, olen, cb, cb_data);
-    else
+    if (cb) {
+        if (prf_ctx->pmeth->flags & EVP_PKEY_FLAG_ASYNCH)
+            ret = EVP_PKEY_derive_asynch(prf_ctx, out1, olen, cb, cb_data);
+        else {
+
+            ret = EVP_PKEY_derive(prf_ctx, out1, olen);
+        }
+    } else
         ret = EVP_PKEY_derive(prf_ctx, out1, olen);
  perr:
     if (prf_ctx)

@@ -630,6 +630,8 @@ typedef struct ssl3_state_st {
                                     * again with. */
     unsigned char backup_iv[EVP_MAX_IV_LENGTH];
     SSL3_READ_RECORD_POOL *read_record_pool;
+    int async_retry_flag;       /* Set on Retry from engine. 0: No retry *
+                                 * 1: Engine retry */
 
     /*
      * For synch key exchange, we expect only one, so we simply cache
@@ -659,6 +661,7 @@ typedef struct ssl3_state_st {
         EVP_PKEY *pkey;
         RSA *rsa;
         unsigned char *tmp_buf;
+        int tmp_buf_len;
         EC_KEY *clnt_ecdh;
         const EC_GROUP *srvr_group;
         const EC_POINT *srvr_ecpoint;
@@ -685,7 +688,10 @@ typedef struct ssl3_state_st {
     struct {
         int status;
         unsigned char *p;
+        unsigned char *tmp;
+        int tmp_len;
         int n;
+        int ret;
         EVP_PKEY *pkey;
     } get_client_key_exchange;
     struct {

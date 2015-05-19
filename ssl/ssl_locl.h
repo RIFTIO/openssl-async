@@ -599,6 +599,11 @@ typedef struct sess_cert_st {
 # define ssl_get_cipher_by_char(ssl,ptr) \
                 ((ssl)->method->get_cipher_by_char(ptr))
 
+# define ssl_atomic_inc(ssl_int) \
+    (__sync_fetch_and_add(&(ssl_int), 1))
+# define ssl_atomic_dec(ssl_int) \
+    (__sync_fetch_and_sub(&(ssl_int), 1))
+
 /*
  * This is for the SSLv3/TLSv1.0 differences in crypto/hash stuff It is a bit
  * of a mess of functions, but hell, think of it as an opaque structure :-)

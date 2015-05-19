@@ -165,9 +165,9 @@ int get_prf_md_list(long digest_mask, const EVP_MD **prf_md)
             count++;
         }
     }
-    if(!count) {
+    if (!count) {
         /* Should never happen */
-        SSLerr(SSL_F_TLS1_PRF, ERR_R_INTERNAL_ERROR);
+        SSLerr(SSL_F_GET_PRF_MD_LIST, ERR_R_INTERNAL_ERROR);
         goto err;
     }
     return count;
@@ -175,15 +175,35 @@ int get_prf_md_list(long digest_mask, const EVP_MD **prf_md)
     return -1;
 }
 
+int tls1_generate_key_block_post(unsigned char *res, size_t reslen,
+                                 void *ssl, int status)
+{
+    SSL *s = (SSL *)ssl;
+    if (NULL == s || NULL == s->s3)
+        return 0;
+    s->s3->get_client_key_exchange.status = status;
+    s->s3->pkeystate = PRF_GENERATE_KEY_BLOCK_STATE;
+    return status;
+}
+
 static int tls1_generate_key_block(SSL *s, unsigned char *km, int num)
 {
     int ret;
     const EVP_MD *prf_md[SSL_MAX_DIGEST];
     size_t len = num;
+    void *cb_data = NULL;
+    int (*cb_func) (unsigned char *res, size_t reslen, void *s, int status) =
+        NULL;
 
     ret = get_prf_md_list(ssl_get_algorithm2(s), prf_md);
     if (ret < 0)
         return ret;
+
+    if (s->s3->flags & SSL3_FLAGS_ASYNCH) {
+        cb_data = s;
+        cb_func = tls1_generate_key_block_post;
+        s->s3->pkeystate = -1;
+    }
 
     ret = EVP_PKEY_derive_PRF(EVP_PKEY_PRF, NULL, prf_md, ret,
                               TLS_MD_KEY_EXPANSION_CONST,
@@ -192,7 +212,9 @@ static int tls1_generate_key_block(SSL *s, unsigned char *km, int num)
                               s->s3->client_random, SSL3_RANDOM_SIZE, NULL, 0,
                               NULL, 0, s->session->master_key,
                               s->session->master_key_length, km, &len,
-                              s->version, NULL, NULL);
+                              s->version, cb_func, cb_data);
+    if (ret > -3)
+        s->s3->pkeystate = 0;
 
 #ifdef KSSL_DEBUG
     fprintf(stderr, "tls1_generate_key_block() ==> %d byte master_key =\n\t",
@@ -467,7 +489,8 @@ int tls1_change_cipher_state(SSL *s, int which)
 #endif                          /* KSSL_DEBUG */
 
     if (EVP_CIPHER_mode(c) == EVP_CIPH_GCM_MODE) {
-        if (!EVP_CipherInit_ex(dd, c, NULL, key, NULL, (which & SSL3_CC_WRITE))
+        if (!EVP_CipherInit_ex
+            (dd, c, NULL, key, NULL, (which & SSL3_CC_WRITE))
             || !EVP_CIPHER_CTX_ctrl(dd, EVP_CTRL_GCM_SET_IV_FIXED, k, iv)) {
             SSLerr(SSL_F_TLS1_CHANGE_CIPHER_STATE, ERR_R_INTERNAL_ERROR);
             goto err2;
@@ -481,7 +504,8 @@ int tls1_change_cipher_state(SSL *s, int which)
                 goto err2;
             }
         } else {
-            if (!EVP_CipherInit_ex(dd, c, NULL, key, iv, (which & SSL3_CC_WRITE))) {
+            if (!EVP_CipherInit_ex
+                (dd, c, NULL, key, iv, (which & SSL3_CC_WRITE))) {
                 SSLerr(SSL_F_TLS1_CHANGE_CIPHER_STATE, ERR_R_INTERNAL_ERROR);
                 goto err2;
             }
@@ -495,7 +519,6 @@ int tls1_change_cipher_state(SSL *s, int which)
         SSLerr(SSL_F_TLS1_CHANGE_CIPHER_STATE, ERR_R_INTERNAL_ERROR);
         goto err2;
     }
-
 #ifdef TLS_DEBUG
     printf("which = %04X\nkey=", which);
     {
@@ -531,6 +554,21 @@ int tls1_setup_key_block(SSL *s)
     int mac_type = NID_undef, mac_secret_size = 0;
     int ret = 0;
 
+    if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+        switch (s->s3->pkeystate) {
+        case -1:
+            return ret;
+        case PRF_RETRY_GENERATE_KEY_BLOCK_STATE:
+            s->s3->pkeystate = 0;
+            num = s->s3->tmp.key_block_length;
+            p1 = s->s3->tmp.key_block;
+            goto pre_prf_gen_key;
+        case PRF_GENERATE_KEY_BLOCK_STATE:
+            s->s3->pkeystate = 0;
+            goto post_prf_gen_key;
+        default:
+            break;
+        }
 #ifdef KSSL_DEBUG
     fprintf(stderr, "tls1_setup_key_block()\n");
 #endif                          /* KSSL_DEBUG */
@@ -585,8 +623,23 @@ int tls1_setup_key_block(SSL *s)
                    ((z + 1) % 16) ? ' ' : '\n');
     }
 #endif
-    if (!tls1_generate_key_block(s, p1, num))
+ pre_prf_gen_key:
+    ret = tls1_generate_key_block(s, p1, num);
+    if (ret < -2) {
+        if (s->s3->flags & SSL3_FLAGS_ASYNCH &&
+            (ERR_R_RETRY == ERR_GET_REASON(ERR_peek_error()))) {
+            s->s3->pkeystate = PRF_RETRY_GENERATE_KEY_BLOCK_STATE;
+        }
         goto err;
+    } else if (ret < 1) {
+        SSLerr(SSL_F_TLS1_SETUP_KEY_BLOCK, SSL_R_TLS_PRF_FAILED);
+        s->s3->pkeystate = 0;
+        ret = 0;
+        goto err;
+    }
+
+    s->s3->pkeystate = 0;
+
 #ifdef TLS_DEBUG
     printf("\nkey block\n");
     {
@@ -596,6 +649,7 @@ int tls1_setup_key_block(SSL *s)
     }
 #endif
 
+ post_prf_gen_key:
     if (!(s->options & SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS)
         && s->method->version <= TLS1_VERSION) {
         /*
@@ -898,6 +952,18 @@ int tls1_cert_verify_mac(SSL *s, int md_nid, unsigned char *out)
     return ((int)ret);
 }
 
+int tls1_final_finish_mac_post(unsigned char *res, size_t reslen,
+                               void *ssl, int status)
+{
+    SSL *s = (SSL *)ssl;
+    if (NULL == s || NULL == s->s3)
+        return 0;
+    s->s3->get_client_key_exchange.status = status;
+    s->s3->get_client_key_exchange.n = reslen;
+    s->s3->pkeystate = PRF_FINAL_FINISH_STATE;
+    return status;
+}
+
 int tls1_final_finish_mac(SSL *s,
                           const char *str, int slen, unsigned char *out)
 {
@@ -907,11 +973,14 @@ int tls1_final_finish_mac(SSL *s,
     unsigned char *q;
     int idx;
     long mask;
-    int err = 0;
+    int err = 0, ret = 0;
     const EVP_MD *md;
     const EVP_MD *prf_md[SSL_MAX_DIGEST];
     int md_count;
     size_t len = 12;
+    void *cb_data = NULL;
+    int (*cb_func) (unsigned char *res, size_t reslen, void *s, int status) =
+        NULL;
 
     q = buf;
 
@@ -945,15 +1014,34 @@ int tls1_final_finish_mac(SSL *s,
     if (md_count < 0)
         return md_count;
 
-    if (!EVP_PKEY_derive_PRF(EVP_PKEY_PRF, NULL, prf_md, md_count,
-                             str, slen, buf, (int)(q - buf), NULL, 0, NULL, 0,
-                             NULL, 0, s->session->master_key,
-                             s->session->master_key_length, out, &len,
-                             s->version, NULL, NULL))
-        err = 1;
+    if ((s->s3->flags & SSL3_FLAGS_ASYNCH) && (!err)) {
+        cb_data = s;
+        cb_func = tls1_final_finish_mac_post;
+        s->s3->pkeystate = -1;
+    }
+
+    ret = EVP_PKEY_derive_PRF(EVP_PKEY_PRF, NULL, prf_md, md_count,
+                              str, slen, buf, (int)(q - buf), NULL, 0, NULL,
+                              0, NULL, 0, s->session->master_key,
+                              s->session->master_key_length, out, &len,
+                              s->version, cb_func, cb_data);
     EVP_MD_CTX_cleanup(&ctx);
 
     OPENSSL_cleanse(buf, (int)(q - buf));
+    if (ret < -2) {
+        if (s->s3->flags & SSL3_FLAGS_ASYNCH
+            && (ERR_R_RETRY == ERR_GET_REASON(ERR_peek_error()))) {
+            s->s3->pkeystate = PRF_RETRY_FINAL_FINISH_STATE;
+        }
+        return 0;
+    } else if (ret < 1) {
+        SSLerr(SSL_F_TLS1_FINAL_FINISH_MAC, SSL_R_TLS_PRF_FAILED);
+        s->s3->pkeystate = 0;
+        return 0;
+    }
+
+    s->s3->pkeystate = 0;
+
     if (err)
         return 0;
     else
@@ -1095,6 +1183,18 @@ int tls1_mac(SSL *ssl, unsigned char *md, int send, SSL3_TRANSMISSION * trans)
     return (md_size);
 }
 
+int tls1_generate_master_secret_post(unsigned char *res, size_t reslen,
+                                     void *ssl, int status)
+{
+    SSL *s = (SSL *)ssl;
+    if (NULL == s || NULL == s->s3)
+        return 0;
+    s->s3->get_client_key_exchange.status = status;
+    s->s3->pkeystate = PRF_GENERATE_MASTER_SECRET_STATE;
+    s->session->master_key_length = reslen;
+    return status;
+}
+
 int tls1_generate_master_secret(SSL *s, unsigned char *out, unsigned char *p,
                                 int len)
 {
@@ -1103,6 +1203,9 @@ int tls1_generate_master_secret(SSL *s, unsigned char *out, unsigned char *p,
     int ret = 0;
     const EVP_MD *prf_md[SSL_MAX_DIGEST];
     size_t buff_len = SSL_MAX_MASTER_KEY_LENGTH;
+    void *cb_data = NULL;
+    int (*cb_func) (unsigned char *res, size_t reslen, void *s, int status) =
+        NULL;
 
 #ifdef KSSL_DEBUG
     fprintf(stderr, "tls1_generate_master_secret(%p,%p, %p, %d)\n", s, out, p,
@@ -1129,14 +1232,32 @@ int tls1_generate_master_secret(SSL *s, unsigned char *out, unsigned char *p,
     ret = get_prf_md_list(ssl_get_algorithm2(s), prf_md);
     if (ret < 0)
         return ret;
-
+    if (s->s3->flags & SSL3_FLAGS_ASYNCH) {
+        cb_data = s;
+        cb_func = tls1_generate_master_secret_post;
+        s->s3->pkeystate = -1;
+    }
     ret = EVP_PKEY_derive_PRF(EVP_PKEY_PRF, NULL, prf_md, ret,
                               TLS_MD_MASTER_SECRET_CONST,
                               TLS_MD_MASTER_SECRET_CONST_SIZE,
                               s->s3->client_random, SSL3_RANDOM_SIZE, co, col,
                               s->s3->server_random, SSL3_RANDOM_SIZE, so, sol,
                               p, len, s->session->master_key, &buff_len,
-                              s->version, NULL, NULL);
+                              s->version, cb_func, cb_data);
+    if (ret < -2) {
+        if (s->s3->flags & SSL3_FLAGS_ASYNCH
+            && (ERR_R_RETRY == ERR_GET_REASON(ERR_peek_error()))) {
+            s->s3->pkeystate = PRF_RETRY_GENERATE_MASTER_SECRET_STATE;
+        }
+        return 0;
+    } else if (ret < 1) {
+        SSLerr(SSL_F_TLS1_GENERATE_MASTER_SECRET, SSL_R_TLS_PRF_FAILED);
+        s->s3->pkeystate = 0;
+        return ret;
+    }
+
+    s->s3->pkeystate = 0;
+
 #ifdef SSL_DEBUG
     fprintf(stderr, "Premaster Secret:\n");
     BIO_dump_fp(stderr, (char *)p, len);

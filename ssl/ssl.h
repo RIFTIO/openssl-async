@@ -1886,6 +1886,7 @@ char *SSL_get_shared_ciphers(const SSL *s, char *buf, int len);
 int SSL_get_read_ahead(const SSL *s);
 int SSL_pending(const SSL *s);
 int SSL_crypto_pending(const SSL *s);
+int SSL_get_async_retry(const SSL *s);
 # ifndef OPENSSL_NO_SOCK
 int SSL_set_fd(SSL *s, int fd);
 int SSL_set_rfd(SSL *s, int fd);
@@ -2500,6 +2501,8 @@ void ERR_load_SSL_strings(void);
 # define SSL_F_TLS1_ENC                                   210
 # define SSL_F_TLS1_ENC_INNER                             373
 # define SSL_F_TLS1_EXPORT_KEYING_MATERIAL                314
+# define SSL_F_TLS1_FINAL_FINISH_MAC                      322
+# define SSL_F_TLS1_GENERATE_MASTER_SECRET                321
 # define SSL_F_TLS1_HEARTBEAT                             315
 # define SSL_F_TLS1_PREPARE_CLIENTHELLO_TLSEXT            275
 # define SSL_F_TLS1_PREPARE_SERVERHELLO_TLSEXT            276
@@ -2766,6 +2769,7 @@ void ERR_load_SSL_strings(void);
 # define SSL_R_TLS_ILLEGAL_EXPORTER_LABEL                 367
 # define SSL_R_TLS_INVALID_ECPOINTFORMAT_LIST             157
 # define SSL_R_TLS_PEER_DID_NOT_RESPOND_WITH_CERTIFICATE_LIST 233
+# define SSL_R_TLS_PRF_FAILED                             375
 # define SSL_R_TLS_RSA_ENCRYPTED_VALUE_LENGTH_IS_WRONG    234
 # define SSL_R_TRIED_TO_USE_UNSUPPORTED_CIPHER            235
 # define SSL_R_UNABLE_TO_DECODE_DH_CERTS                  236

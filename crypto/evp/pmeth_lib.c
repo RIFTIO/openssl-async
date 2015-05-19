@@ -254,6 +254,7 @@ void EVP_PKEY_meth_copy(EVP_PKEY_METHOD *dst, const EVP_PKEY_METHOD *src)
 {
 
     dst->init = src->init;
+    dst->flags = ((dst->flags & EVP_PKEY_FLAG_DYNAMIC) | (src->flags & ~EVP_PKEY_FLAG_DYNAMIC));
     dst->copy = src->copy;
     dst->cleanup = src->cleanup;
 
@@ -743,6 +744,11 @@ void EVP_PKEY_meth_set_ctrl(EVP_PKEY_METHOD *pmeth,
 {
     pmeth->ctrl = ctrl;
     pmeth->ctrl_str = ctrl_str;
+}
+
+void EVP_PKEY_meth_set_flags(EVP_PKEY_METHOD *pmeth, int flags)
+{
+    pmeth->flags |= flags;
 }
 
 int EVP_PKEY_CTX_set_asynch_cb(EVP_PKEY_CTX *ctx, void *cb)

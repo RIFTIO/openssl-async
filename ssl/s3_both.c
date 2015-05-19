@@ -162,15 +162,33 @@ int ssl3_send_finished(SSL *s, int a, int b, const char *sender, int slen)
     int i;
     unsigned long l;
 
-    if (s->state == a) {
-        d = (unsigned char *)s->init_buf->data;
-        p = &(d[4]);
+    if (s->s3->flags & SSL3_FLAGS_ASYNCH) {
+        switch (s->s3->pkeystate) {
+        case -1:
+            return -1;
+        case PRF_FINAL_FINISH_STATE:
+            s->s3->pkeystate = 0;
+            i = s->s3->get_client_key_exchange.n;
+            goto prf_final_finish;
+        default:
+            break;
+        }
+    }
 
+    if (s->state == a) {
         i = s->method->ssl3_enc->final_finish_mac(s,
                                                   sender, slen,
                                                   s->s3->tmp.finish_md);
-        if (i == 0)
+        if (i <= 0) {
+            if (s->s3->flags & SSL3_FLAGS_ASYNCH && s->s3->pkeystate != 0)
+                return -1;
             return 0;
+        }
+
+ prf_final_finish:
+        d = (unsigned char *)s->init_buf->data;
+        p = &(d[4]);
+        s->s3->pkeystate = 0;
         s->s3->tmp.finish_md_len = i;
         memcpy(p, s->s3->tmp.finish_md, i);
         p += i;
@@ -241,7 +259,7 @@ static void ssl3_take_mac(SSL *s)
 
 int ssl3_get_finished(SSL *s, int a, int b)
 {
-    int al, i, ok;
+    int al, i, ok = 0;
     long n;
     unsigned char *p;
 
@@ -418,6 +436,23 @@ long ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
     long n;
     int i, al;
 
+    if (*s->init_buf->data == SSL3_MT_FINISHED
+        && s->s3->flags & SSL3_FLAGS_ASYNCH) {
+        switch (s->s3->pkeystate) {
+        case -1:
+            return -1;
+        case PRF_RETRY_FINAL_FINISH_STATE:
+            s->s3->pkeystate = 0;
+            goto pre_prf_mac;
+        case PRF_FINAL_FINISH_STATE:
+            s->s3->pkeystate = 0;
+            s->s3->tmp.peer_finish_md_len = s->s3->get_client_key_exchange.n;
+            goto post_prf_mac;
+        default:
+            break;
+        }
+    }
+
     if (s->s3->tmp.reuse_message) {
         s->s3->tmp.reuse_message = 0;
         if ((mt >= 0) && (s->s3->tmp.message_type != mt)) {
@@ -528,14 +563,21 @@ long ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
         n -= i;
     }
 
+ pre_prf_mac:
 #ifndef OPENSSL_NO_NEXTPROTONEG
     /*
      * If receiving Finished, record MAC of prior handshake messages for
      * Finished verification.
      */
-    if (*s->init_buf->data == SSL3_MT_FINISHED)
+    if (*s->init_buf->data == SSL3_MT_FINISHED) {
         ssl3_take_mac(s);
+        if (!s->s3->tmp.peer_finish_md_len
+            || (s->s3->pkeystate != 0 && s->s3->flags & SSL3_FLAGS_ASYNCH))
+            goto err;
+    }
 #endif
+
+ post_prf_mac:
 
     /* Feed this message into MAC computation. */
     ssl3_finish_mac(s, (unsigned char *)s->init_buf->data, s->init_num + 4);

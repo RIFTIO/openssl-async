@@ -69,7 +69,7 @@
 # include <openssl/evp.h>
 
 # ifdef OPENSSL_NO_PRF
-#  error RSA is disabled.
+#  error PRF is disabled.
 # endif
 
 #ifdef  __cplusplus

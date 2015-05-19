@@ -339,6 +339,25 @@ int SRP_generate_server_master_secret(SSL *s, unsigned char *master_key)
     BIGNUM *K = NULL, *u = NULL;
     int ret = -1, tmp_len;
     unsigned char *tmp = NULL;
+    if (s->s3->flags & SSL3_FLAGS_ASYNCH) {
+        switch (s->s3->pkeystate) {
+        case -1:
+            return ret;
+        case PRF_RETRY_GENERATE_MASTER_SECRET_STATE:
+            tmp = s->s3->get_client_key_exchange.tmp;
+            tmp_len = s->s3->get_client_key_exchange.tmp_len;
+            s->s3->pkeystate = 0; /* No longer needed, reset it */
+            goto pre_prf_srp;
+        case PRF_GENERATE_MASTER_SECRET_STATE:
+            tmp = s->s3->get_client_key_exchange.tmp;
+            tmp_len = s->s3->get_client_key_exchange.tmp_len;
+            ret = s->session->master_key_length;
+            s->s3->pkeystate = 0; /* No longer needed, reset it */
+            goto post_prf_srp;
+        default:
+            break;
+        }
+    }
 
     if (!SRP_Verify_A_mod_N(s->srp_ctx.A, s->srp_ctx.N))
         goto err;
@@ -354,16 +373,26 @@ int SRP_generate_server_master_secret(SSL *s, unsigned char *master_key)
     if ((tmp = OPENSSL_malloc(tmp_len)) == NULL)
         goto err;
     BN_bn2bin(K, tmp);
+    BN_clear_free(K);
+    BN_clear_free(u);
+
+    s->s3->get_client_key_exchange.tmp = tmp;
+    s->s3->get_client_key_exchange.tmp_len = tmp_len;
+ pre_prf_srp:
     ret =
         s->method->ssl3_enc->generate_master_secret(s, master_key, tmp,
                                                     tmp_len);
+    if (ret <= 0) {
+        if (s->s3->flags & SSL3_FLAGS_ASYNCH && s->s3->pkeystate != 0)
+            return 0;
+        goto err;
+    }
+ post_prf_srp:
  err:
     if (tmp) {
         OPENSSL_cleanse(tmp, tmp_len);
         OPENSSL_free(tmp);
     }
-    BN_clear_free(K);
-    BN_clear_free(u);
     return ret;
 }
 
@@ -374,6 +403,23 @@ int SRP_generate_client_master_secret(SSL *s, unsigned char *master_key)
     int ret = -1, tmp_len;
     char *passwd = NULL;
     unsigned char *tmp = NULL;
+    if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+        switch (s->s3->pkeystate) {
+        case -1:               /* Ongoing */
+            return -1;          /* Simulate non-blocking I/O retry */
+        case PRF_RETRY_GENERATE_MASTER_SECRET_STATE:
+            s->s3->pkeystate = 0; /* No longer needed, reset it */
+            tmp = s->s3->send_client_key_exchange.tmp_buf;
+            tmp_len = s->s3->send_client_key_exchange.tmp_buf_len;
+            goto pre_prf_srp;
+        case PRF_GENERATE_MASTER_SECRET_STATE:
+            s->s3->pkeystate = 0; /* No longer needed, reset it */
+            tmp = s->s3->send_client_key_exchange.tmp_buf;
+            tmp_len = s->s3->send_client_key_exchange.tmp_buf_len;
+            goto post_prf_srp;
+        default:
+            break;
+        }
 
     /*
      * Checks if b % n == 0
@@ -401,9 +447,18 @@ int SRP_generate_client_master_secret(SSL *s, unsigned char *master_key)
     if ((tmp = OPENSSL_malloc(tmp_len)) == NULL)
         goto err;
     BN_bn2bin(K, tmp);
+
+    s->s3->send_client_key_exchange.tmp_buf = tmp;
+    s->s3->send_client_key_exchange.tmp_buf_len = tmp_len;
+ pre_prf_srp:
     ret =
         s->method->ssl3_enc->generate_master_secret(s, master_key, tmp,
                                                     tmp_len);
+    if ((s->s3->flags & SSL3_FLAGS_ASYNCH)
+        && (s->s3->pkeystate != 0))
+        return 0;
+
+ post_prf_srp:
  err:
     if (tmp) {
         OPENSSL_cleanse(tmp, tmp_len);

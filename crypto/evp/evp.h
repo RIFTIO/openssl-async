@@ -1019,6 +1019,20 @@ int EVP_PKEY_set_type_str(EVP_PKEY *pkey, const char *str, int len);
 int EVP_PKEY_assign(EVP_PKEY *pkey, int type, void *key);
 void *EVP_PKEY_get0(EVP_PKEY *pkey);
 
+# define PRF_GENERATE_MASTER_SECRET_STATE  101
+# define PRF_GENERATE_KEY_BLOCK_STATE  102
+# define PRF_FINAL_FINISH_STATE  103
+# define PRF_EXP_KEYING_MATERIAL_STATE 104
+# define PRF_MD_KEY_CONST_STATE  105
+# define PRF_MD_IV_BLOCK_CONST_STATE  106
+
+# define PRF_RETRY_GENERATE_MASTER_SECRET_STATE  107
+# define PRF_RETRY_GENERATE_KEY_BLOCK_STATE  108
+# define PRF_RETRY_FINAL_FINISH_STATE  109
+# define PRF_RETRY_EXP_KEYING_MATERIAL_STATE 110
+# define PRF_RETRY_MD_KEY_CONST_STATE  111
+# define PRF_RETRY_MD_IV_BLOCK_CONST_STATE  112
+
 # ifndef OPENSSL_NO_RSA
 struct rsa_st;
 int EVP_PKEY_set1_RSA(EVP_PKEY *pkey, struct rsa_st *key);
@@ -1239,6 +1253,7 @@ void EVP_PKEY_asn1_set_ctrl(EVP_PKEY_ASN1_METHOD *ameth,
 # define EVP_PKEY_ALG_CTRL               0x1000
 
 # define EVP_PKEY_FLAG_AUTOARGLEN        2
+# define EVP_PKEY_FLAG_ASYNCH            4
 /*
  * Method handles all operations: don't assume any digest related defaults.
  */
@@ -1542,6 +1557,8 @@ void EVP_PKEY_meth_set_ctrl(EVP_PKEY_METHOD *pmeth,
                             int (*ctrl_str) (EVP_PKEY_CTX *ctx,
                                              const char *type,
                                              const char *value));
+
+void EVP_PKEY_meth_set_flags(EVP_PKEY_METHOD *pmeth, int flags);
 
 void EVP_add_alg_module(void);
 

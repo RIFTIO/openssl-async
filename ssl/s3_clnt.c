@@ -446,12 +446,24 @@ int ssl3_connect(SSL *s)
 
         case SSL3_ST_CW_CHANGE_A:
         case SSL3_ST_CW_CHANGE_B:
+            if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+                switch (s->s3->pkeystate) {
+                case -1:       /* Ongoing */
+                    goto end;
+                case PRF_RETRY_GENERATE_KEY_BLOCK_STATE:
+                case PRF_GENERATE_KEY_BLOCK_STATE:
+                    goto prf_setup_key;
+                default:
+                    break;
+                }
+
             ret = ssl3_send_change_cipher_spec(s,
                                                SSL3_ST_CW_CHANGE_A,
                                                SSL3_ST_CW_CHANGE_B);
             if (ret <= 0)
                 goto end;
 
+ prf_setup_key:
 #if defined(OPENSSL_NO_TLSEXT) || defined(OPENSSL_NO_NEXTPROTONEG)
             s->state = SSL3_ST_CW_FINISHED_A;
 #else
@@ -471,7 +483,9 @@ int ssl3_connect(SSL *s)
             else
                 s->session->compress_meth = s->s3->tmp.new_compression->id;
 #endif
-            if (!s->method->ssl3_enc->setup_key_block(s)) {
+            if (s->method->ssl3_enc->setup_key_block(s) <= 0) {
+                if (s->s3->pkeystate != 0)
+                    s->state = state;
                 ret = -1;
                 goto end;
             }
@@ -2444,6 +2458,7 @@ int ssl3_send_client_key_exchange(SSL *s)
 {
     unsigned char *p, *d;
     int n = 0;
+    int tmp_master_key_length = 0;
     unsigned long alg_k;
 #ifndef OPENSSL_NO_RSA
     unsigned char *q = NULL;
@@ -2490,6 +2505,16 @@ int ssl3_send_client_key_exchange(SSL *s)
                     q = s->s3->send_client_key_exchange.q;
                     n = s->s3->send_client_key_exchange.n;
                     goto post_rsa;
+                case PRF_RETRY_GENERATE_MASTER_SECRET_STATE:
+                    s->s3->pkeystate = 0; /* No longer needed, reset it */
+                    tmp_buf = s->s3->send_client_key_exchange.tmp_buf;
+                    n = s->s3->send_client_key_exchange.n;
+                    goto pre_prf_rsa;
+                case PRF_GENERATE_MASTER_SECRET_STATE:
+                    s->s3->pkeystate = 0; /* No longer needed, reset it */
+                    tmp_buf = s->s3->send_client_key_exchange.tmp_buf;
+                    n = s->s3->send_client_key_exchange.n;
+                    goto post_prf_rsa;
                 default:
                     tmp_buf = OPENSSL_malloc(tmp_buf_size);
                     break;
@@ -2501,7 +2526,7 @@ int ssl3_send_client_key_exchange(SSL *s)
                  */
                 SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
                        ERR_R_INTERNAL_ERROR);
-                goto err;
+                goto post_prf_rsa;
             }
 
             if (s->session->sess_cert->peer_rsa_tmp != NULL)
@@ -2515,7 +2540,7 @@ int ssl3_send_client_key_exchange(SSL *s)
                     || (pkey->pkey.rsa == NULL)) {
                     SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
                            ERR_R_INTERNAL_ERROR);
-                    goto err;
+                    goto post_prf_rsa;
                 }
                 rsa = pkey->pkey.rsa;
                 EVP_PKEY_free(pkey);
@@ -2524,7 +2549,7 @@ int ssl3_send_client_key_exchange(SSL *s)
             tmp_buf[0] = s->client_version >> 8;
             tmp_buf[1] = s->client_version & 0xff;
             if (RAND_bytes(&(tmp_buf[2]), tmp_buf_size - 2) <= 0)
-                goto err;
+                goto post_prf_rsa;
 
             s->session->master_key_length = tmp_buf_size;
 
@@ -2553,11 +2578,11 @@ int ssl3_send_client_key_exchange(SSL *s)
                     error = ERR_get_error();
                     if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                         s->s3->pkeystate = 2;
-                        goto err;
+                        goto post_prf_rsa;
                     } else {
                         SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
                                ERR_LIB_RSA);
-                        goto err;
+                        goto post_prf_rsa;
                     }
                 }
                 return -1;
@@ -2574,7 +2599,7 @@ int ssl3_send_client_key_exchange(SSL *s)
             if (n <= 0) {
                 SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
                        SSL_R_BAD_RSA_ENCRYPT);
-                goto err;
+                goto post_prf_rsa;
             }
 
             /* Fix buf for TLS and beyond */
@@ -2583,12 +2608,19 @@ int ssl3_send_client_key_exchange(SSL *s)
                 n += 2;
             }
 
-            s->session->master_key_length =
+            s->s3->send_client_key_exchange.n = n;
+ pre_prf_rsa:
+            tmp_master_key_length =
                 s->method->ssl3_enc->generate_master_secret(s,
                                                             s->
                                                             session->master_key,
                                                             tmp_buf,
                                                             tmp_buf_size);
+            if ((s->s3->flags & SSL3_FLAGS_ASYNCH)
+                && (s->s3->pkeystate != 0))
+                return -1;
+            s->session->master_key_length = tmp_master_key_length;
+ post_prf_rsa:
             OPENSSL_cleanse(tmp_buf, tmp_buf_size);
             if (tmp_buf != _tmp_buf)
                 OPENSSL_free(tmp_buf);
@@ -2604,9 +2636,30 @@ int ssl3_send_client_key_exchange(SSL *s)
             EVP_CIPHER_CTX ciph_ctx;
             const EVP_CIPHER *enc = NULL;
             unsigned char iv[EVP_MAX_IV_LENGTH];
-            unsigned char tmp_buf[SSL_MAX_MASTER_KEY_LENGTH];
+            unsigned char _tmp_buf[SSL_MAX_MASTER_KEY_LENGTH];
+            unsigned char tmp_buf = _tmp_buf;
+            int tmp_buf_len = 0;
             unsigned char epms[SSL_MAX_MASTER_KEY_LENGTH + EVP_MAX_IV_LENGTH];
             int padl, outl = sizeof(epms);
+
+            if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+                switch (s->s3->pkeystate) {
+                case PRF_RETRY_GENERATE_MASTER_SECRET_STATE:
+                    s->s3->pkeystate = 0; /* No longer needed, reset it */
+                    tmp_buf = s->s3->send_client_key_exchange.tmp_buf;
+                    tmp_buf_len = s->s3->send_client_key_exchange.tmp_buf_len;
+                    n = s->s3->send_client_key_exchange.n;
+                    goto pre_prf_krb;
+                case PRF_GENERATE_MASTER_SECRET_STATE:
+                    s->s3->pkeystate = 0; /* No longer needed, reset it */
+                    tmp_buf = s->s3->send_client_key_exchange.tmp_buf;
+                    tmp_buf_len = s->s3->send_client_key_exchange.tmp_buf_len;
+                    n = s->s3->send_client_key_exchange.n;
+                    goto post_prf_krb;
+                default:
+                    tmp_buf = OPENSSL_malloc(tmp_buf_size);
+                    break;
+                }
 
             EVP_CIPHER_CTX_init(&ciph_ctx);
 
@@ -2713,15 +2766,26 @@ int ssl3_send_client_key_exchange(SSL *s)
             p += outl;
             n += outl + 2;
 
-            s->session->master_key_length =
+            tmp_buf_len = sizeof tmp_buf;
+            s->s3->send_client_key_exchange.tmp_buf = tmp_buf;
+            s->s3->send_client_key_exchange.tmp_buf_len = tmp_buf_len;
+            s->s3->send_client_key_exchange.n = n;
+ pre_prf_krb:
+            tmp_master_key_length =
                 s->method->ssl3_enc->generate_master_secret(s,
                                                             s->
                                                             session->master_key,
                                                             tmp_buf,
-                                                            sizeof tmp_buf);
-
-            OPENSSL_cleanse(tmp_buf, sizeof tmp_buf);
+                                                            tmp_buf_len);
+            if ((s->s3->flags & SSL3_FLAGS_ASYNCH)
+                && (s->s3->pkeystate != 0))
+                return -1;
+            s->session->master_key_length = tmp_master_key_length;
+ post_prf_krb:
+            OPENSSL_cleanse(tmp_buf, tmp_buf_len);
             OPENSSL_cleanse(epms, outl);
+            if (tmp_buf != _tmp_buf)
+                OPENSSL_free(tmp_buf);
         }
 #endif
 #ifndef OPENSSL_NO_DH
@@ -2741,6 +2805,7 @@ int ssl3_send_client_key_exchange(SSL *s)
                     n = s->s3->send_client_key_exchange.n;
                     goto post_dh_generate;
                 case 3:
+                case PRF_RETRY_GENERATE_MASTER_SECRET_STATE:
                     s->s3->pkeystate = 0; /* No longer needed, reset it */
                     dh_srvr = s->s3->send_client_key_exchange.dh_srvr;
                     dh_clnt = s->s3->send_client_key_exchange.dh_clnt;
@@ -2748,6 +2813,14 @@ int ssl3_send_client_key_exchange(SSL *s)
                     q = s->s3->send_client_key_exchange.q;
                     n = s->s3->send_client_key_exchange.n;
                     goto post_dh_compute;
+                case PRF_GENERATE_MASTER_SECRET_STATE:
+                    s->s3->pkeystate = 0; /* No longer needed, reset it */
+                    dh_srvr = s->s3->send_client_key_exchange.dh_srvr;
+                    dh_clnt = s->s3->send_client_key_exchange.dh_clnt;
+                    p = s->s3->send_client_key_exchange.p;
+                    q = s->s3->send_client_key_exchange.q;
+                    n = s->s3->send_client_key_exchange.n;
+                    goto post_prf_edh;
                 default:
                     break;
                 }
@@ -2774,7 +2847,8 @@ int ssl3_send_client_key_exchange(SSL *s)
                 SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE, ERR_R_DH_LIB);
                 goto err;
             }
-            if ((s->s3->flags & SSL3_FLAGS_ASYNCH) &&(dh_clnt->meth->flags & DH_FLAG_ASYNCH)) {
+            if ((s->s3->flags & SSL3_FLAGS_ASYNCH)
+                && (dh_clnt->meth->flags & DH_FLAG_ASYNCH)) {
                 s->s3->pkeystate = -1;
                 s->s3->send_client_key_exchange.dh_srvr = dh_srvr;
                 s->s3->send_client_key_exchange.dh_clnt = dh_clnt;
@@ -2811,7 +2885,8 @@ int ssl3_send_client_key_exchange(SSL *s)
              * clear it out afterwards
              */
 
-            if ((s->s3->flags & SSL3_FLAGS_ASYNCH) && (dh_clnt->meth->flags & DH_FLAG_ASYNCH)) {
+            if ((s->s3->flags & SSL3_FLAGS_ASYNCH)
+                && (dh_clnt->meth->flags & DH_FLAG_ASYNCH)) {
                 s->s3->pkeystate = -1;
                 s->s3->send_client_key_exchange.dh_srvr = dh_srvr;
                 s->s3->send_client_key_exchange.dh_clnt = dh_clnt;
@@ -2846,13 +2921,20 @@ int ssl3_send_client_key_exchange(SSL *s)
                 goto err;
             }
 
+            s->s3->send_client_key_exchange.n = n;
  post_dh_compute:
             /* generate master key from the result */
-            s->session->master_key_length =
+            tmp_master_key_length =
                 s->method->ssl3_enc->generate_master_secret(s,
                                                             s->
                                                             session->master_key,
                                                             p, n);
+            if ((s->s3->flags & SSL3_FLAGS_ASYNCH)
+                && (s->s3->pkeystate != 0))
+                return -1;
+            s->session->master_key_length = tmp_master_key_length;
+
+ post_prf_edh:
             /* clean up */
             memset(p, 0, n);
 
@@ -2894,6 +2976,7 @@ int ssl3_send_client_key_exchange(SSL *s)
                         s->s3->send_client_key_exchange.srvr_ecpoint;
                     goto post_ecdh_generate;
                 case 3:
+                case PRF_RETRY_GENERATE_MASTER_SECRET_STATE:
                     s->s3->pkeystate = 0; /* No longer needed, reset it */
                     clnt_ecdh = s->s3->send_client_key_exchange.clnt_ecdh;
                     srvr_group = s->s3->send_client_key_exchange.srvr_group;
@@ -2901,6 +2984,15 @@ int ssl3_send_client_key_exchange(SSL *s)
                     q = s->s3->send_client_key_exchange.q;
                     n = s->s3->send_client_key_exchange.n;
                     goto post_ecdh_compute;
+                case PRF_GENERATE_MASTER_SECRET_STATE:
+                    s->s3->pkeystate = 0; /* No longer needed, reset it */
+                    clnt_ecdh = s->s3->send_client_key_exchange.clnt_ecdh;
+                    srvr_group = s->s3->send_client_key_exchange.srvr_group;
+                    p = s->s3->send_client_key_exchange.p;
+                    q = s->s3->send_client_key_exchange.q;
+                    n = s->s3->send_client_key_exchange.n;
+                    goto post_prf_ecdh;
+
                 default:
                     break;
                 }
@@ -2991,10 +3083,12 @@ int ssl3_send_client_key_exchange(SSL *s)
                 /* Generate a new ECDH key pair */
                 ECDH_DATA *ecdh_tmp = ecdh_check(clnt_ecdh);
                 if (ecdh_tmp == NULL) {
-                    SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE, ERR_R_ECDH_LIB);
+                    SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
+                           ERR_R_ECDH_LIB);
                     goto err;
                 }
-                if ((s->s3->flags & SSL3_FLAGS_ASYNCH) && (ecdh_tmp->meth->flags & ECDH_FLAG_ASYNCH)) {
+                if ((s->s3->flags & SSL3_FLAGS_ASYNCH)
+                    && (ecdh_tmp->meth->flags & ECDH_FLAG_ASYNCH)) {
                     s->s3->pkeystate = -1;
                     s->s3->send_client_key_exchange.clnt_ecdh = clnt_ecdh;
                     s->s3->send_client_key_exchange.srvr_group = srvr_group;
@@ -3048,7 +3142,8 @@ int ssl3_send_client_key_exchange(SSL *s)
                 SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE, ERR_R_ECDH_LIB);
                 goto err;
             }
-            if ((s->s3->flags & SSL3_FLAGS_ASYNCH) && (ecdh->meth->flags & ECDH_FLAG_ASYNCH)) {
+            if ((s->s3->flags & SSL3_FLAGS_ASYNCH)
+                && (ecdh->meth->flags & ECDH_FLAG_ASYNCH)) {
                 s->s3->pkeystate = -1;
                 s->s3->send_client_key_exchange.clnt_ecdh = clnt_ecdh;
                 s->s3->send_client_key_exchange.srvr_group = srvr_group;
@@ -3089,14 +3184,20 @@ int ssl3_send_client_key_exchange(SSL *s)
                 goto err;
             }
 
+            s->s3->send_client_key_exchange.n = n;
  post_ecdh_compute:
             /* generate master key from the result */
-            s->session->master_key_length =
+            tmp_master_key_length =
                 s->method->ssl3_enc->generate_master_secret(s,
                                                             s->
                                                             session->master_key,
                                                             p, n);
+            if ((s->s3->flags & SSL3_FLAGS_ASYNCH)
+                && (s->s3->pkeystate != 0))
+                return -1;
+            s->session->master_key_length = tmp_master_key_length;
 
+ post_prf_ecdh:
             memset(p, 0, n);    /* clean up */
 
             if (ecdh_clnt_cert) {
@@ -3159,9 +3260,31 @@ int ssl3_send_client_key_exchange(SSL *s)
             size_t msglen;
             unsigned int md_len;
             int keytype;
-            unsigned char premaster_secret[32], shared_ukm[32], tmp[256];
+            unsigned char _premaster_secret[32], shared_ukm[32], tmp[256];
+            unsigned char *premaster_secret = _premaster_secret;
             EVP_MD_CTX *ukm_hash;
             EVP_PKEY *pub_key;
+
+            if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+                switch (s->s3->pkeystate) {
+                case -1:       /* Ongoing */
+                    return -1;  /* Simulate non-blocking I/O retry */
+                case PRF_RETRY_GENERATE_MASTER_SECRET_STATE:
+                    s->s3->pkeystate = 0; /* No longer needed, reset it */
+                    premaster_secret =
+                        s->s3->send_client_key_exchange.tmp_buf;
+                    n = s->s3->send_client_key_exchange.n;
+                    goto pre_prf_gost;
+                case PRF_GENERATE_MASTER_SECRET_STATE:
+                    s->s3->pkeystate = 0; /* No longer needed, reset it */
+                    premaster_secret =
+                        s->s3->send_client_key_exchange.tmp_buf;
+                    n = s->s3->send_client_key_exchange.n;
+                    goto post_prf_gost;
+                default:
+                    premaster_secret = OPENSSL_malloc(32);
+                    break;
+                }
 
             /*
              * Get server sertificate PKEY and create ctx from it
@@ -3254,17 +3377,41 @@ int ssl3_send_client_key_exchange(SSL *s)
                 s->s3->flags |= TLS1_FLAGS_SKIP_CERT_VERIFY;
             }
             EVP_PKEY_CTX_free(pkey_ctx);
-            s->session->master_key_length =
+            EVP_PKEY_free(pub_key);
+
+            s->s3->send_client_key_exchange.tmp_buf = premaster_secret;
+            s->s3->send_client_key_exchange.n = n;
+ pre_prf_gost:
+            tmp_master_key_length =
                 s->method->ssl3_enc->generate_master_secret(s,
                                                             s->
                                                             session->master_key,
                                                             premaster_secret,
                                                             32);
-            EVP_PKEY_free(pub_key);
+            if ((s->s3->flags & SSL3_FLAGS_ASYNCH)
+                && (s->s3->pkeystate != 0))
+                return -1;
+            s->session->master_key_length = tmp_master_key_length;
+ post_prf_gost:
+            OPENSSL_cleanse(premaster_secret, 32);
+            if (premaster_secret != _premaster_secret)
+                OPENSSL_free(premaster_secret);
 
         }
 #ifndef OPENSSL_NO_SRP
         else if (alg_k & SSL_kSRP) {
+            if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+                switch (s->s3->pkeystate) {
+                case -1:       /* Ongoing */
+                    return -1;  /* Simulate non-blocking I/O retry */
+                case PRF_RETRY_GENERATE_MASTER_SECRET_STATE:
+                case PRF_GENERATE_MASTER_SECRET_STATE:
+                    n = s->s3->send_client_key_exchange.n;
+                    goto prf_srp;
+                default:
+                    break;
+                }
+
             if (s->srp_ctx.A != NULL) {
                 /* send off the data */
                 n = BN_num_bytes(s->srp_ctx.A);
@@ -3285,14 +3432,19 @@ int ssl3_send_client_key_exchange(SSL *s)
                 goto err;
             }
 
-            if ((s->session->master_key_length =
-                 SRP_generate_client_master_secret(s,
-                                                   s->session->master_key)) <
-                0) {
+ prf_srp:
+            tmp_master_key_length =
+                SRP_generate_client_master_secret(s, s->session->master_key);
+            if (s->session->master_key_length < 0
+                && s->session->master_key_length != -3) {
                 SSLerr(SSL_F_SSL3_SEND_CLIENT_KEY_EXCHANGE,
                        ERR_R_INTERNAL_ERROR);
                 goto err;
             }
+            if ((s->s3->flags & SSL3_FLAGS_ASYNCH)
+                && (s->s3->pkeystate != 0))
+                return -1;
+            s->session->master_key_length = tmp_master_key_length;
         }
 #endif
 #ifndef OPENSSL_NO_PSK
@@ -3305,9 +3457,31 @@ int ssl3_send_client_key_exchange(SSL *s)
             char identity[PSK_MAX_IDENTITY_LEN + 2];
             size_t identity_len;
             unsigned char *t = NULL;
-            unsigned char psk_or_pre_ms[PSK_MAX_PSK_LEN * 2 + 4];
+            unsigned char _psk_or_pre_ms[PSK_MAX_PSK_LEN * 2 + 4];
+            unsigned char *psk_or_pre_ms = _psk_or_pre_ms;
             unsigned int pre_ms_len = 0, psk_len = 0;
             int psk_err = 1;
+
+            if (s->s3->flags & SSL3_FLAGS_ASYNCH)
+                switch (s->s3->pkeystate) {
+                case -1:       /* Ongoing */
+                    return -1;  /* Simulate non-blocking I/O retry */
+                case PRF_RETRY_GENERATE_MASTER_SECRET_STATE:
+                    s->s3->pkeystate = 0; /* No longer needed, reset it */
+                    psk_or_pre_ms = s->s3->send_client_key_exchange.tmp_buf;
+                    pre_ms_len = s->s3->send_client_key_exchange.tmp_buf_len;
+                    n = s->s3->send_client_key_exchange.n;
+                    goto pre_prf_psk;
+                case PRF_GENERATE_MASTER_SECRET_STATE:
+                    s->s3->pkeystate = 0; /* No longer needed, reset it */
+                    psk_or_pre_ms = s->s3->send_client_key_exchange.tmp_buf;
+                    pre_ms_len = s->s3->send_client_key_exchange.tmp_buf_len;
+                    n = s->s3->send_client_key_exchange.n;
+                    goto post_prf_psk;
+                default:
+                    psk_or_pre_ms = OPENSSL_malloc(PSK_MAX_PSK_LEN * 2 + 4);
+                    break;
+                }
 
             n = 0;
             if (s->psk_client_callback == NULL) {
@@ -3366,23 +3540,38 @@ int ssl3_send_client_key_exchange(SSL *s)
                 goto psk_err;
             }
 
-            s->session->master_key_length =
-                s->method->ssl3_enc->generate_master_secret(s,
-                                                            s->
-                                                            session->master_key,
-                                                            psk_or_pre_ms,
-                                                            pre_ms_len);
             s2n(identity_len, p);
             memcpy(p, identity, identity_len);
             n = 2 + identity_len;
             psk_err = 0;
  psk_err:
             OPENSSL_cleanse(identity, sizeof(identity));
-            OPENSSL_cleanse(psk_or_pre_ms, sizeof(psk_or_pre_ms));
             if (psk_err != 0) {
+                OPENSSL_cleanse(psk_or_pre_ms, sizeof(psk_or_pre_ms));
+                if (psk_or_pre_ms != _psk_or_pre_ms)
+                    OPENSSL_free(psk_or_pre_ms);
                 ssl3_send_alert(s, SSL3_AL_FATAL, SSL_AD_HANDSHAKE_FAILURE);
                 goto err;
             }
+
+            s->s3->send_client_key_exchange.tmp_buf = psk_or_pre_ms;
+            s->s3->send_client_key_exchange.tmp_buf_len = pre_ms_len;
+            s->s3->send_client_key_exchange.n = n;
+ pre_prf_psk:
+            tmp_master_key_length =
+                s->method->ssl3_enc->generate_master_secret(s,
+                                                            s->
+                                                            session->master_key,
+                                                            psk_or_pre_ms,
+                                                            pre_ms_len);
+            if ((s->s3->flags & SSL3_FLAGS_ASYNCH)
+                && (s->s3->pkeystate != 0))
+                return -1;
+            s->session->master_key_length = tmp_master_key_length;
+ post_prf_psk:
+            OPENSSL_cleanse(psk_or_pre_ms, sizeof(psk_or_pre_ms));
+            if (psk_or_pre_ms != _psk_or_pre_ms)
+                OPENSSL_free(psk_or_pre_ms);
         }
 #endif
         else {

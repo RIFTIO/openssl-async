@@ -546,7 +546,7 @@ int dtls1_connect(SSL *s)
             else
                 s->session->compress_meth = s->s3->tmp.new_compression->id;
 #endif
-            if (!s->method->ssl3_enc->setup_key_block(s)) {
+            if (s->method->ssl3_enc->setup_key_block(s) <= 0) {
                 ret = -1;
                 goto end;
             }
