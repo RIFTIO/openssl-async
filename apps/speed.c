@@ -2266,10 +2266,12 @@ int MAIN(int argc, char **argv)
                              /* The job is not ready to be resumed */
                              count--;
 
+# ifndef OPENSSL_NO_HW_QAT
                              /* Sometimes I still need to poll */
                              if (requestno == 0) {
                                  poll_engine(engine, batch);
                              }
+# endif
 
                              continue;
                          }
@@ -2498,12 +2500,13 @@ int MAIN(int argc, char **argv)
                     /* The job is not ready to be resumed */
                     count--;
 
+# ifndef OPENSSL_NO_HW_QAT
                     /* Sometimes I still need to poll */
                     if (requestno == 0) {
                         poll_calls++;
                         poll_engine(engine, batch);
                     }
-
+# endif
                     continue;
                 }
 
@@ -2760,7 +2763,9 @@ int MAIN(int argc, char **argv)
             do {
                 // ret = ECDSA_sign(0, buf, 20, ecdsasig, &ecdsasiglen, ecdsa[j]);
                 ret = ECDSA_sign_async(0, buf, 20, ecdsasig, &ecdsasiglen, ecdsa[j]);
+# ifndef OPENSSL_NO_HW_QAT
                 poll_engine(engine, batch);
+# endif
             } while (ret == -1 && EC_KEY_get_job(ecdsa[j]) != NULL);
             if (ret == 0) {
                 BIO_printf(bio_err,
