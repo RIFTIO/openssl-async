@@ -510,7 +510,7 @@ static int get_server_hello(SSL *s)
 
         s->session->peer = s->session->sess_cert->peer_key->x509;
         /* peer_key->x509 has been set by ssl2_set_certificate. */
-        CRYPTO_add(&s->session->peer->references, 1, CRYPTO_LOCK_X509);
+        ssl_atomic_inc(s->session->peer->references);
     }
 
     if (s->session->sess_cert == NULL

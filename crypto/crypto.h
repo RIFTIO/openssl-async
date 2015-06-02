@@ -255,6 +255,11 @@ typedef struct openssl_item_st {
 #  define CRYPTO_add(a,b,c)       ((*(a))+=(b))
 # endif
 
+# define crypto_atomic_inc(crypto_int) \
+    (__sync_add_and_fetch(&(crypto_int), 1))
+# define crypto_atomic_dec(crypto_int) \
+    (__sync_sub_and_fetch(&(crypto_int), 1))
+
 /*
  * Some applications as well as some parts of OpenSSL need to allocate and
  * deallocate locks in a dynamic fashion.  The following typedef makes this

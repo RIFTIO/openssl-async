@@ -380,7 +380,7 @@ void EVP_PKEY_free(EVP_PKEY *x)
     if (x == NULL)
         return;
 
-    i = CRYPTO_add(&x->references, -1, CRYPTO_LOCK_EVP_PKEY);
+    i = crypto_atomic_dec(x->references);
 #ifdef REF_PRINT
     REF_PRINT("EVP_PKEY", x);
 #endif

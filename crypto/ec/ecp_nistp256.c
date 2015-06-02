@@ -1835,7 +1835,7 @@ static void *nistp256_pre_comp_dup(void *src_)
     NISTP256_PRE_COMP *src = src_;
 
     /* no need to actually copy, these objects never change! */
-    CRYPTO_add(&src->references, 1, CRYPTO_LOCK_EC_PRE_COMP);
+    crypto_atomic_inc(src->references);
 
     return src_;
 }
@@ -1848,7 +1848,7 @@ static void nistp256_pre_comp_free(void *pre_)
     if (!pre)
         return;
 
-    i = CRYPTO_add(&pre->references, -1, CRYPTO_LOCK_EC_PRE_COMP);
+    i = crypto_atomic_dec(pre->references);
     if (i > 0)
         return;
 
@@ -1863,7 +1863,7 @@ static void nistp256_pre_comp_clear_free(void *pre_)
     if (!pre)
         return;
 
-    i = CRYPTO_add(&pre->references, -1, CRYPTO_LOCK_EC_PRE_COMP);
+    i = crypto_atomic_dec(pre->references);
     if (i > 0)
         return;
 

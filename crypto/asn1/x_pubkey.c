@@ -132,7 +132,7 @@ EVP_PKEY *X509_PUBKEY_get(X509_PUBKEY *key)
         goto error;
 
     if (key->pkey != NULL) {
-        CRYPTO_add(&key->pkey->references, 1, CRYPTO_LOCK_EVP_PKEY);
+        crypto_atomic_inc(key->pkey->references);
         return key->pkey;
     }
 
@@ -169,7 +169,7 @@ EVP_PKEY *X509_PUBKEY_get(X509_PUBKEY *key)
         key->pkey = ret;
         CRYPTO_w_unlock(CRYPTO_LOCK_EVP_PKEY);
     }
-    CRYPTO_add(&ret->references, 1, CRYPTO_LOCK_EVP_PKEY);
+    crypto_atomic_inc(ret->references);
 
     return ret;
 

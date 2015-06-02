@@ -600,9 +600,9 @@ typedef struct sess_cert_st {
                 ((ssl)->method->get_cipher_by_char(ptr))
 
 # define ssl_atomic_inc(ssl_int) \
-    (__sync_fetch_and_add(&(ssl_int), 1))
+    (__sync_add_and_fetch(&(ssl_int), 1))
 # define ssl_atomic_dec(ssl_int) \
-    (__sync_fetch_and_sub(&(ssl_int), 1))
+    (__sync_sub_and_fetch(&(ssl_int), 1))
 
 /*
  * This is for the SSLv3/TLSv1.0 differences in crypto/hash stuff It is a bit

@@ -251,8 +251,7 @@ X509 *STORE_get_certificate(STORE *s, OPENSSL_ITEM attributes[],
                  STORE_R_FAILED_GETTING_CERTIFICATE);
         return 0;
     }
-    CRYPTO_add(&object->data.x509.certificate->references, 1,
-               CRYPTO_LOCK_X509);
+    crypto_atomic_inc(object->data.x509.certificate->references);
 #ifdef REF_PRINT
     REF_PRINT("X509", data);
 #endif
@@ -276,7 +275,7 @@ int STORE_store_certificate(STORE *s, X509 *data, OPENSSL_ITEM attributes[],
         return 0;
     }
 
-    CRYPTO_add(&data->references, 1, CRYPTO_LOCK_X509);
+    crypto_atomic_inc(data->references);
 #ifdef REF_PRINT
     REF_PRINT("X509", data);
 #endif
@@ -378,8 +377,8 @@ X509 *STORE_list_certificate_next(STORE *s, void *handle)
                  STORE_R_FAILED_LISTING_CERTIFICATES);
         return 0;
     }
-    CRYPTO_add(&object->data.x509.certificate->references, 1,
-               CRYPTO_LOCK_X509);
+    crypto_atomic_inc(object->data.x509.certificate->references);
+
 #ifdef REF_PRINT
     REF_PRINT("X509", data);
 #endif
@@ -429,7 +428,7 @@ EVP_PKEY *STORE_generate_key(STORE *s, OPENSSL_ITEM attributes[],
         STOREerr(STORE_F_STORE_GENERATE_KEY, STORE_R_FAILED_GENERATING_KEY);
         return 0;
     }
-    CRYPTO_add(&object->data.key->references, 1, CRYPTO_LOCK_EVP_PKEY);
+    crypto_atomic_inc(object->data.key->references);
 #ifdef REF_PRINT
     REF_PRINT("EVP_PKEY", data);
 #endif
@@ -453,7 +452,7 @@ EVP_PKEY *STORE_get_private_key(STORE *s, OPENSSL_ITEM attributes[],
         STOREerr(STORE_F_STORE_GET_PRIVATE_KEY, STORE_R_FAILED_GETTING_KEY);
         return 0;
     }
-    CRYPTO_add(&object->data.key->references, 1, CRYPTO_LOCK_EVP_PKEY);
+    crypto_atomic_inc(object->data.key->references);
 #ifdef REF_PRINT
     REF_PRINT("EVP_PKEY", data);
 #endif
@@ -483,7 +482,7 @@ int STORE_store_private_key(STORE *s, EVP_PKEY *data,
         return 0;
     }
 
-    CRYPTO_add(&data->references, 1, CRYPTO_LOCK_EVP_PKEY);
+    crypto_atomic_inc(data->references);
 #ifdef REF_PRINT
     REF_PRINT("EVP_PKEY", data);
 #endif
@@ -587,7 +586,7 @@ EVP_PKEY *STORE_list_private_key_next(STORE *s, void *handle)
                  STORE_R_FAILED_LISTING_KEYS);
         return 0;
     }
-    CRYPTO_add(&object->data.key->references, 1, CRYPTO_LOCK_EVP_PKEY);
+    crypto_atomic_inc(object->data.key->references);
 #ifdef REF_PRINT
     REF_PRINT("EVP_PKEY", data);
 #endif
@@ -637,7 +636,7 @@ EVP_PKEY *STORE_get_public_key(STORE *s, OPENSSL_ITEM attributes[],
         STOREerr(STORE_F_STORE_GET_PUBLIC_KEY, STORE_R_FAILED_GETTING_KEY);
         return 0;
     }
-    CRYPTO_add(&object->data.key->references, 1, CRYPTO_LOCK_EVP_PKEY);
+    crypto_atomic_inc(object->data.key->references);
 #ifdef REF_PRINT
     REF_PRINT("EVP_PKEY", data);
 #endif
@@ -667,7 +666,7 @@ int STORE_store_public_key(STORE *s, EVP_PKEY *data,
         return 0;
     }
 
-    CRYPTO_add(&data->references, 1, CRYPTO_LOCK_EVP_PKEY);
+    crypto_atomic_inc(data->references);
 #ifdef REF_PRINT
     REF_PRINT("EVP_PKEY", data);
 #endif
@@ -771,7 +770,7 @@ EVP_PKEY *STORE_list_public_key_next(STORE *s, void *handle)
                  STORE_R_FAILED_LISTING_KEYS);
         return 0;
     }
-    CRYPTO_add(&object->data.key->references, 1, CRYPTO_LOCK_EVP_PKEY);
+    crypto_atomic_inc(object->data.key->references);
 #ifdef REF_PRINT
     REF_PRINT("EVP_PKEY", data);
 #endif

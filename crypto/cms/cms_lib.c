@@ -475,7 +475,7 @@ int CMS_add1_cert(CMS_ContentInfo *cms, X509 *cert)
     int r;
     r = CMS_add0_cert(cms, cert);
     if (r > 0)
-        CRYPTO_add(&cert->references, 1, CRYPTO_LOCK_X509);
+        crypto_atomic_inc(cert->references);
     return r;
 }
 
@@ -560,7 +560,7 @@ STACK_OF(X509) *CMS_get1_certs(CMS_ContentInfo *cms)
                 sk_X509_pop_free(certs, X509_free);
                 return NULL;
             }
-            CRYPTO_add(&cch->d.certificate->references, 1, CRYPTO_LOCK_X509);
+            crypto_atomic_inc(cch->d.certificate->references);
         }
     }
     return certs;

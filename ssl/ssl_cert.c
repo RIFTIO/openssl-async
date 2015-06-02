@@ -267,13 +267,12 @@ CERT *ssl_cert_dup(CERT *cert)
     for (i = 0; i < SSL_PKEY_NUM; i++) {
         if (cert->pkeys[i].x509 != NULL) {
             ret->pkeys[i].x509 = cert->pkeys[i].x509;
-            CRYPTO_add(&ret->pkeys[i].x509->references, 1, CRYPTO_LOCK_X509);
+            ssl_atomic_inc(ret->pkeys[i].x509->references);
         }
 
         if (cert->pkeys[i].privatekey != NULL) {
             ret->pkeys[i].privatekey = cert->pkeys[i].privatekey;
-            CRYPTO_add(&ret->pkeys[i].privatekey->references, 1,
-                       CRYPTO_LOCK_EVP_PKEY);
+            ssl_atomic_inc(ret->pkeys[i].privatekey->references);
 
             switch (i) {
                 /*
@@ -353,7 +352,7 @@ void ssl_cert_free(CERT *c)
     if (c == NULL)
         return;
 
-    i = CRYPTO_add(&c->references, -1, CRYPTO_LOCK_SSL_CERT);
+    i = ssl_atomic_dec(c->references);
 #ifdef REF_PRINT
     REF_PRINT("CERT", c);
 #endif
@@ -441,7 +440,7 @@ void ssl_sess_cert_free(SESS_CERT *sc)
     if (sc == NULL)
         return;
 
-    i = CRYPTO_add(&sc->references, -1, CRYPTO_LOCK_SSL_SESS_CERT);
+    i = ssl_atomic_dec(sc->references);
 #ifdef REF_PRINT
     REF_PRINT("SESS_CERT", sc);
 #endif

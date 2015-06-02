@@ -389,7 +389,7 @@ void X509_OBJECT_up_ref_count(X509_OBJECT *a)
 {
     switch (a->type) {
     case X509_LU_X509:
-        CRYPTO_add(&a->data.x509->references, 1, CRYPTO_LOCK_X509);
+        crypto_atomic_inc(a->data.x509->references);
         break;
     case X509_LU_CRL:
         CRYPTO_add(&a->data.crl->references, 1, CRYPTO_LOCK_X509_CRL);
@@ -500,7 +500,7 @@ STACK_OF(X509) *X509_STORE_get1_certs(X509_STORE_CTX *ctx, X509_NAME *nm)
     for (i = 0; i < cnt; i++, idx++) {
         obj = sk_X509_OBJECT_value(ctx->ctx->objs, idx);
         x = obj->data.x509;
-        CRYPTO_add(&x->references, 1, CRYPTO_LOCK_X509);
+        crypto_atomic_inc(x->references);
         if (!sk_X509_push(sk, x)) {
             CRYPTO_w_unlock(CRYPTO_LOCK_X509_STORE);
             X509_free(x);

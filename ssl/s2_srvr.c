@@ -760,7 +760,7 @@ static int server_hello(SSL *s)
 # else                          /* That's what used to be done when cert_st
                                  * and sess_cert_st were * the same. */
         if (!hit) {             /* else add cert to session */
-            CRYPTO_add(&s->cert->references, 1, CRYPTO_LOCK_SSL_CERT);
+            ssl_atomic_inc(s->cert->references);
             if (s->session->sess_cert != NULL)
                 ssl_cert_free(s->session->sess_cert);
             s->session->sess_cert = s->cert;
@@ -770,7 +770,7 @@ static int server_hello(SSL *s)
                                  * 'old' one * listed against the SSL
                                  * connection */
             if (s->session->sess_cert == NULL) {
-                CRYPTO_add(&s->cert->references, 1, CRYPTO_LOCK_SSL_CERT);
+                crypto_atomic_inc(s->cert->references);
                 s->session->sess_cert = s->cert;
             }
         }
@@ -1108,7 +1108,7 @@ static int request_certificate(SSL *s)
             if (s->session->peer != NULL)
                 X509_free(s->session->peer);
             s->session->peer = x509;
-            CRYPTO_add(&x509->references, 1, CRYPTO_LOCK_X509);
+            ssl_atomic_inc(x509->references);
             s->session->verify_result = s->verify_result;
             ret = 1;
             goto end;

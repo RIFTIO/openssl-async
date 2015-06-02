@@ -110,7 +110,7 @@ void EC_KEY_free(EC_KEY *r)
     if (r == NULL)
         return;
 
-    i = CRYPTO_add(&r->references, -1, CRYPTO_LOCK_EC);
+    i = crypto_atomic_dec(r->references);
 #ifdef REF_PRINT
     REF_PRINT("EC_KEY", r);
 #endif
@@ -214,7 +214,7 @@ EC_KEY *EC_KEY_dup(const EC_KEY *ec_key)
 
 int EC_KEY_up_ref(EC_KEY *r)
 {
-    int i = CRYPTO_add(&r->references, 1, CRYPTO_LOCK_EC);
+    int i = crypto_atomic_inc(r->references);
 #ifdef REF_PRINT
     REF_PRINT("EC_KEY", r);
 #endif

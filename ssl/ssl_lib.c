@@ -353,7 +353,7 @@ SSL *SSL_new(SSL_CTX *ctx)
     s->conn_status = 1;
     s->max_send_fragment = ctx->max_send_fragment;
 
-    CRYPTO_add(&ctx->references, 1, CRYPTO_LOCK_SSL_CTX);
+    ssl_atomic_inc(ctx->references);
     s->ctx = ctx;
 #ifndef OPENSSL_NO_TLSEXT
     s->tlsext_debug_cb = 0;
@@ -365,7 +365,7 @@ SSL *SSL_new(SSL_CTX *ctx)
     s->tlsext_ocsp_exts = NULL;
     s->tlsext_ocsp_resp = NULL;
     s->tlsext_ocsp_resplen = -1;
-    CRYPTO_add(&ctx->references, 1, CRYPTO_LOCK_SSL_CTX);
+    ssl_atomic_inc(ctx->references);
     s->initial_ctx = ctx;
 # ifndef OPENSSL_NO_NEXTPROTONEG
     s->next_proto_negotiated = NULL;
@@ -516,7 +516,7 @@ void SSL_free(SSL *s)
     if (s == NULL)
         return;
 
-    i = CRYPTO_add(&s->references, -1, CRYPTO_LOCK_SSL);
+    i = ssl_atomic_dec(s->references);
 #ifdef REF_PRINT
     REF_PRINT("SSL", s);
 #endif
@@ -862,7 +862,7 @@ X509 *SSL_get_peer_certificate(const SSL *s)
     if (r == NULL)
         return (r);
 
-    CRYPTO_add(&r->references, 1, CRYPTO_LOCK_X509);
+    ssl_atomic_inc(r->references);
 
     return (r);
 }
@@ -907,7 +907,7 @@ void SSL_copy_session_id(SSL *t, const SSL *f)
 
     tmp = t->cert;
     if (f->cert != NULL) {
-        CRYPTO_add(&f->cert->references, 1, CRYPTO_LOCK_SSL_CERT);
+        ssl_atomic_inc(f->cert->references);
         t->cert = f->cert;
     } else
         t->cert = NULL;
@@ -1986,7 +1986,7 @@ void SSL_CTX_free(SSL_CTX *a)
     if (a == NULL)
         return;
 
-    i = CRYPTO_add(&a->references, -1, CRYPTO_LOCK_SSL_CTX);
+    i = ssl_atomic_dec(a->references);
 #ifdef REF_PRINT
     REF_PRINT("SSL_CTX", a);
 #endif
@@ -3117,7 +3117,7 @@ SSL_CTX *SSL_set_SSL_CTX(SSL *ssl, SSL_CTX *ctx)
         memcpy(&ssl->sid_ctx, &ctx->sid_ctx, sizeof(ssl->sid_ctx));
     }
 
-    CRYPTO_add(&ctx->references, 1, CRYPTO_LOCK_SSL_CTX);
+    ssl_atomic_inc(ctx->references);
     if (ssl->ctx != NULL)
         SSL_CTX_free(ssl->ctx); /* decrement reference count */
     ssl->ctx = ctx;
