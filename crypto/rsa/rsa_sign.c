@@ -67,6 +67,46 @@
 /* Size of an SSL signature: MD5+SHA1 */
 #define SSL_SIG_LENGTH  36
 
+#define QAT_CPU_CYCLES_COUNT
+
+#ifdef QAT_CPU_CYCLES_COUNT
+// uint64_t rdtsc(){
+//     unsigned int lo,hi;
+//     __asm__ __volatile__ ("rdtsc" : "=a" (lo), "=d" (hi));
+//     return ((uint64_t)hi << 32) | lo;
+// }
+
+
+typedef unsigned long long cpucycle_t;
+
+// This implementation is from speed
+static __inline__ unsigned long long rdtsc(void)
+{
+    unsigned long a, d;
+
+    asm volatile ("rdtsc":"=a" (a), "=d"(d));
+    return (((unsigned long long)a) | (((unsigned long long)d) << 32));
+}
+
+// For every operation I keep track of an accumulator + counter
+cpucycle_t fibre_startup_acc = 0;
+unsigned int fibre_startup_num = 0;
+
+#define QAT_FIBRE_STARTUP_SAMPLE 1000
+
+// Are we interested in these?
+cpucycle_t fibre_startup_min = 999999;
+cpucycle_t fibre_startup_max = 0;
+
+// I also need to remember the last start time
+cpucycle_t fibre_startup_start = 0;
+
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
+
+#endif
+
+
 struct rsa_async_args {
     int type;
     const unsigned char *m;
@@ -75,17 +115,46 @@ struct rsa_async_args {
     unsigned int *siglen;
     RSA *rsa;
     const unsigned char *verbuf;
-    unsigned int verlen; 
+    unsigned int verlen;
 };
 
 static int rsa_sign_async_internal(void *vargs)
 {
+#ifdef QAT_CPU_CYCLES_COUNT
+    // This is the cpu cycles count for the startup of the current fibre
+    cpucycle_t fibre_startup_current = rdtsc() - fibre_startup_start;
+
+    // Update the current max and min
+    fibre_startup_max = MAX(fibre_startup_max, fibre_startup_current);
+    fibre_startup_min = MIN(fibre_startup_min, fibre_startup_current);
+
+    // This is a very primitive way to detect outliers
+    if (fibre_startup_current > 1.5 * fibre_startup_min) {
+        fprintf(stderr, "Fibre startup: outlier = %llu \n", fibre_startup_current);
+    }
+    else {
+        // fprintf(stderr, "Fibre startup: current = %llu \n", fibre_startup_current);
+        ++fibre_startup_num;
+        fibre_startup_acc += fibre_startup_current;
+    }
+
+    // Every QAT_FIBRE_STARTUP_SAMPLE measures I print the avg e reset
+    if (fibre_startup_num == QAT_FIBRE_STARTUP_SAMPLE) {
+        fprintf(stderr, "Fibre startup: avg = %.2f\tmax = %llu\tmin = %llu \n",
+                (double) 1.0 * fibre_startup_acc / fibre_startup_num,
+                fibre_startup_max, fibre_startup_min);
+        fibre_startup_num = 0;
+        fibre_startup_acc = 0;
+        fibre_startup_min = 999999;
+        fibre_startup_max = 0;
+    }
+#endif
     struct rsa_async_args *args;
     args = (struct rsa_async_args *)vargs;
     if (!args)
         return 0;
     return RSA_sign(args->type, args->m, args->m_len,
-                    args->sigret, args->siglen, args->rsa); 
+                    args->sigret, args->siglen, args->rsa);
 }
 
 int RSA_sign(int type, const unsigned char *m, unsigned int m_len,
@@ -173,6 +242,9 @@ int RSA_sign_async(int type, const unsigned char *m, unsigned int m_len,
     args.rsa = rsa;
 
     if(!ASYNC_in_job()) {
+#ifdef QAT_CPU_CYCLES_COUNT
+        fibre_startup_start = rdtsc();
+#endif
         switch(ASYNC_start_job(&rsa->job, &ret, rsa_sign_async_internal, &args,
             sizeof(struct rsa_async_args))) {
         case ASYNC_ERR:
