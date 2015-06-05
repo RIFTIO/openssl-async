@@ -447,8 +447,8 @@ qat_rsa_decrypt(CpaCyRsaDecryptOpData * dec_op_data,
             fibre_switch_acc += fibre_switch_current;
         // }
 
-        // Every QAT_FIBRE_STARTUP_SAMPLE measures I print the avg e reset
-        if (fibre_switch_num == QAT_FIBRE_STARTUP_SAMPLE) {
+        // Every QAT_FIBRE_SWITCH_SAMPLE measures I print the avg e reset
+        if (fibre_switch_num == QAT_FIBRE_SWITCH_SAMPLE) {
             fprintf(stderr, "Fibre switch: avg = %.2f\tmax = %llu\tmin = %llu \n",
                     (double) 1.0 * fibre_switch_acc / fibre_switch_num,
                     fibre_switch_max, fibre_switch_min);
@@ -674,8 +674,8 @@ qat_rsa_encrypt(CpaCyRsaEncryptOpData * enc_op_data,
             fibre_switch_acc += fibre_switch_current;
         // }
 
-        // Every QAT_FIBRE_STARTUP_SAMPLE measures I print the avg e reset
-        if (fibre_switch_num == QAT_FIBRE_STARTUP_SAMPLE) {
+        // Every QAT_FIBRE_SWITCH_SAMPLE measures I print the avg e reset
+        if (fibre_switch_num == QAT_FIBRE_SWITCH_SAMPLE) {
             fprintf(stderr, "Fibre switch: avg = %.2f\tmax = %llu\tmin = %llu \n",
                     (double) 1.0 * fibre_switch_acc / fibre_switch_num,
                     fibre_switch_max, fibre_switch_min);

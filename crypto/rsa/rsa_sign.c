@@ -243,8 +243,8 @@ int RSA_sign_async(int type, const unsigned char *m, unsigned int m_len,
                 fibre_destroy_acc += fibre_destroy_current;
             }
 
-            // Every QAT_FIBRE_STARTUP_SAMPLE measures I print the avg e reset
-            if (fibre_destroy_num == QAT_FIBRE_STARTUP_SAMPLE) {
+            // Every QAT_FIBRE_DESTROY_SAMPLE measures I print the avg e reset
+            if (fibre_destroy_num == QAT_FIBRE_DESTROY_SAMPLE) {
                 fprintf(stderr, "Fibre destroy: avg = %.2f\tmax = %llu\tmin = %llu \n",
                         (double) 1.0 * fibre_destroy_acc / fibre_destroy_num,
                         fibre_destroy_max, fibre_destroy_min);
@@ -504,8 +504,8 @@ int RSA_verify_async(int dtype, const unsigned char *m, unsigned int m_len,
                 fibre_destroy_acc += fibre_destroy_current;
             }
 
-            // Every QAT_FIBRE_STARTUP_SAMPLE measures I print the avg e reset
-            if (fibre_destroy_num == QAT_FIBRE_STARTUP_SAMPLE) {
+            // Every QAT_FIBRE_DESTROY_SAMPLE measures I print the avg e reset
+            if (fibre_destroy_num == QAT_FIBRE_DESTROY_SAMPLE) {
                 fprintf(stderr, "Fibre destroy: avg = %.2f\tmax = %llu\tmin = %llu \n",
                         (double) 1.0 * fibre_destroy_acc / fibre_destroy_num,
                         fibre_destroy_max, fibre_destroy_min);
