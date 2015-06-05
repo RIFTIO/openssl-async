@@ -64,48 +64,11 @@
 #include <openssl/x509.h>
 #include "rsa_locl.h"
 
+#include <crypto/async/cpu_cycles.h>
+cpucycle_t fibre_switch_start;
+
 /* Size of an SSL signature: MD5+SHA1 */
 #define SSL_SIG_LENGTH  36
-
-#define QAT_CPU_CYCLES_COUNT
-
-#ifdef QAT_CPU_CYCLES_COUNT
-// uint64_t rdtsc(){
-//     unsigned int lo,hi;
-//     __asm__ __volatile__ ("rdtsc" : "=a" (lo), "=d" (hi));
-//     return ((uint64_t)hi << 32) | lo;
-// }
-
-
-typedef unsigned long long cpucycle_t;
-
-// This implementation is from speed
-static __inline__ unsigned long long rdtsc(void)
-{
-    unsigned long a, d;
-
-    asm volatile ("rdtsc":"=a" (a), "=d"(d));
-    return (((unsigned long long)a) | (((unsigned long long)d) << 32));
-}
-
-// For every operation I keep track of an accumulator + counter
-cpucycle_t fibre_startup_acc = 0;
-unsigned int fibre_startup_num = 0;
-
-#define QAT_FIBRE_STARTUP_SAMPLE 1000
-
-// Are we interested in these?
-cpucycle_t fibre_startup_min = 999999;
-cpucycle_t fibre_startup_max = 0;
-
-// I also need to remember the last start time
-cpucycle_t fibre_startup_start = 0;
-
-#define MIN(a,b) (((a)<(b))?(a):(b))
-#define MAX(a,b) (((a)>(b))?(a):(b))
-
-#endif
-
 
 struct rsa_async_args {
     int type;
@@ -244,6 +207,7 @@ int RSA_sign_async(int type, const unsigned char *m, unsigned int m_len,
     if(!ASYNC_in_job()) {
 #ifdef QAT_CPU_CYCLES_COUNT
         fibre_startup_start = rdtsc();
+        fibre_switch_start = fibre_startup_start;
 #endif
         switch(ASYNC_start_job(&rsa->job, &ret, rsa_sign_async_internal, &args,
             sizeof(struct rsa_async_args))) {
@@ -260,7 +224,7 @@ int RSA_sign_async(int type, const unsigned char *m, unsigned int m_len,
             /* Shouldn't happen */
             return -1;
         }
-    } 
+    }
     return RSA_sign(type, m, m_len, sigret, siglen, rsa);
 
 }
