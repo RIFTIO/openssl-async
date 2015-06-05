@@ -655,6 +655,36 @@ qat_rsa_encrypt(CpaCyRsaEncryptOpData * enc_op_data,
     //rc = waitForOpToComplete(&op_done);
     do {
         ASYNC_pause_job();
+#ifdef QAT_CPU_CYCLES_COUNT
+        // This is the cpu cycles count for the switch of the current fibre
+        // TODO the variable fibre_switch_start is not set correctly...
+        cpucycle_t fibre_switch_current = rdtsc() - fibre_switch_start;
+
+        // Update the current max and min
+        fibre_switch_max = MAX(fibre_switch_max, fibre_switch_current);
+        fibre_switch_min = MIN(fibre_switch_min, fibre_switch_current);
+
+        // // This is a very primitive way to detect outliers
+        // if (fibre_switch_current > 2 * fibre_switch_min) {
+        //     fprintf(stderr, "Fibre switch: outlier = %llu \n", fibre_switch_current);
+        // }
+        // else {
+            // fprintf(stderr, "Fibre switch: current = %llu \n", fibre_switch_current);
+            ++fibre_switch_num;
+            fibre_switch_acc += fibre_switch_current;
+        // }
+
+        // Every QAT_FIBRE_STARTUP_SAMPLE measures I print the avg e reset
+        if (fibre_switch_num == QAT_FIBRE_STARTUP_SAMPLE) {
+            fprintf(stderr, "Fibre switch: avg = %.2f\tmax = %llu\tmin = %llu \n",
+                    (double) 1.0 * fibre_switch_acc / fibre_switch_num,
+                    fibre_switch_max, fibre_switch_min);
+            fibre_switch_num = 0;
+            fibre_switch_acc = 0;
+            fibre_switch_min = 999999;
+            fibre_switch_max = 0;
+        }
+#endif
         if(!getEnableExternalPolling())
             poll_instances();
     }

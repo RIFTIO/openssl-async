@@ -405,12 +405,47 @@ int int_rsa_verify(int dtype, const unsigned char *m,
 
 static int rsa_verify_async_internal(void *vargs)
 {
+#ifdef QAT_CPU_CYCLES_COUNT
+    // This is the cpu cycles count for the startup of the current fibre
+    cpucycle_t fibre_startup_current = rdtsc() - fibre_startup_start;
+
+    // Update the current max and min
+    fibre_startup_max = MAX(fibre_startup_max, fibre_startup_current);
+    fibre_startup_min = MIN(fibre_startup_min, fibre_startup_current);
+
+    // This is a very primitive way to detect outliers
+    if (fibre_startup_current > 1.5 * fibre_startup_min) {
+        fprintf(stderr, "Fibre startup: outlier = %llu \n", fibre_startup_current);
+    }
+    else {
+        // fprintf(stderr, "Fibre startup: current = %llu \n", fibre_startup_current);
+        ++fibre_startup_num;
+        fibre_startup_acc += fibre_startup_current;
+    }
+
+    // Every QAT_FIBRE_STARTUP_SAMPLE measures I print the avg e reset
+    if (fibre_startup_num == QAT_FIBRE_STARTUP_SAMPLE) {
+        fprintf(stderr, "Fibre startup: avg = %.2f\tmax = %llu\tmin = %llu \n",
+                (double) 1.0 * fibre_startup_acc / fibre_startup_num,
+                fibre_startup_max, fibre_startup_min);
+        fibre_startup_num = 0;
+        fibre_startup_acc = 0;
+        fibre_startup_min = 999999;
+        fibre_startup_max = 0;
+    }
+#endif
     struct rsa_async_args *args;
     args = (struct rsa_async_args *)vargs;
     if (!args)
         return 0;
-    return RSA_verify(args->type, args->m, args->m_len,
-                    args->verbuf, args->verlen, args->rsa); 
+    int result = RSA_verify(args->type, args->m, args->m_len,
+                    args->verbuf, args->verlen, args->rsa);
+
+#ifdef QAT_CPU_CYCLES_COUNT
+    fibre_destroy_start = rdtsc();
+#endif
+
+    return result;
 }
 
 int RSA_verify(int dtype, const unsigned char *m, unsigned int m_len,
@@ -438,6 +473,11 @@ int RSA_verify_async(int dtype, const unsigned char *m, unsigned int m_len,
     args.rsa = rsa;
 
     if(!ASYNC_in_job()) {
+#ifdef QAT_CPU_CYCLES_COUNT
+        fibre_startup_start = rdtsc();
+        fibre_switch_start = fibre_startup_start;
+        cpucycle_t fibre_destroy_current;
+#endif
         switch(ASYNC_start_job(&rsa->job, &ret, rsa_verify_async_internal, &args,
             sizeof(struct rsa_async_args))) {
         case ASYNC_ERR:
@@ -446,6 +486,35 @@ int RSA_verify_async(int dtype, const unsigned char *m, unsigned int m_len,
         case ASYNC_PAUSE:
             return -1;
         case ASYNC_FINISH:
+#ifdef QAT_CPU_CYCLES_COUNT
+            // This is the cpu cycles count for the destruction of the fibre
+            fibre_destroy_current = rdtsc() - fibre_destroy_start;
+
+            // Update the current max and min
+            fibre_destroy_max = MAX(fibre_destroy_max, fibre_destroy_current);
+            fibre_destroy_min = MIN(fibre_destroy_min, fibre_destroy_current);
+
+            // This is a very primitive way to detect outliers
+            if (fibre_destroy_current > 1.5 * fibre_destroy_min) {
+                fprintf(stderr, "Fibre destroy: outlier = %llu \n", fibre_destroy_current);
+            }
+            else {
+                // fprintf(stderr, "Fibre destroy: current = %llu \n", fibre_destroy_current);
+                ++fibre_destroy_num;
+                fibre_destroy_acc += fibre_destroy_current;
+            }
+
+            // Every QAT_FIBRE_STARTUP_SAMPLE measures I print the avg e reset
+            if (fibre_destroy_num == QAT_FIBRE_STARTUP_SAMPLE) {
+                fprintf(stderr, "Fibre destroy: avg = %.2f\tmax = %llu\tmin = %llu \n",
+                        (double) 1.0 * fibre_destroy_acc / fibre_destroy_num,
+                        fibre_destroy_max, fibre_destroy_min);
+                fibre_destroy_num = 0;
+                fibre_destroy_acc = 0;
+                fibre_destroy_min = 999999;
+                fibre_destroy_max = 0;
+            }
+#endif
             rsa->job = NULL;
             return ret;
         default:
