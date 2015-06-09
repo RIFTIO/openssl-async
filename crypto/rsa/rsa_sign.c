@@ -87,29 +87,31 @@ static int rsa_sign_async_internal(void *vargs)
     // This is the cpu cycles count for the startup of the current fibre
     cpucycle_t fibre_startup_current = rdtsc() - fibre_startup_start;
 
-    // Update the current max and min
-    fibre_startup_max = MAX(fibre_startup_max, fibre_startup_current);
-    fibre_startup_min = MIN(fibre_startup_min, fibre_startup_current);
-
     // This is a very primitive way to detect outliers
     if (fibre_startup_current > 1.5 * fibre_startup_min) {
-        fprintf(stderr, "Fibre startup: outlier = %llu \n", fibre_startup_current);
+        // fprintf(stderr, "Fibre startup: outlier = %llu \n", fibre_startup_current);
+        ++fibre_startup_out;
     }
     else {
         // fprintf(stderr, "Fibre startup: current = %llu \n", fibre_startup_current);
         ++fibre_startup_num;
         fibre_startup_acc += fibre_startup_current;
+
+        // Update the current max and min
+        fibre_startup_max = MAX(fibre_startup_max, fibre_startup_current);
+        fibre_startup_min = MIN(fibre_startup_min, fibre_startup_current);
     }
 
     // Every QAT_FIBRE_STARTUP_SAMPLE measures I print the avg e reset
     if (fibre_startup_num == QAT_FIBRE_STARTUP_SAMPLE) {
-        fprintf(stderr, "Fibre startup: avg = %.2f\tmax = %llu\tmin = %llu \n",
+        fprintf(stderr, "Fibre startup: avg = %.2f\tmax = %llu\tmin = %llu\toutliers = %d\n",
                 (double) 1.0 * fibre_startup_acc / fibre_startup_num,
-                fibre_startup_max, fibre_startup_min);
+                fibre_startup_max, fibre_startup_min, fibre_startup_out);
         fibre_startup_num = 0;
         fibre_startup_acc = 0;
-        fibre_startup_min = 999999;
+        fibre_startup_min = QAT_FIBRE_CYCLES_MIN;
         fibre_startup_max = 0;
+        fibre_startup_out = 0;
     }
 #endif
     struct rsa_async_args *args;
@@ -229,29 +231,32 @@ int RSA_sign_async(int type, const unsigned char *m, unsigned int m_len,
             // This is the cpu cycles count for the destruction of the fibre
             fibre_destroy_current = rdtsc() - fibre_destroy_start;
 
-            // Update the current max and min
-            fibre_destroy_max = MAX(fibre_destroy_max, fibre_destroy_current);
-            fibre_destroy_min = MIN(fibre_destroy_min, fibre_destroy_current);
 
             // This is a very primitive way to detect outliers
             if (fibre_destroy_current > 1.5 * fibre_destroy_min) {
-                fprintf(stderr, "Fibre destroy: outlier = %llu \n", fibre_destroy_current);
+                // fprintf(stderr, "Fibre destroy: outlier = %llu \n", fibre_destroy_current);
+                ++fibre_destroy_out;
             }
             else {
                 // fprintf(stderr, "Fibre destroy: current = %llu \n", fibre_destroy_current);
                 ++fibre_destroy_num;
                 fibre_destroy_acc += fibre_destroy_current;
+
+                // Update the current max and min
+                fibre_destroy_max = MAX(fibre_destroy_max, fibre_destroy_current);
+                fibre_destroy_min = MIN(fibre_destroy_min, fibre_destroy_current);
             }
 
             // Every QAT_FIBRE_DESTROY_SAMPLE measures I print the avg e reset
             if (fibre_destroy_num == QAT_FIBRE_DESTROY_SAMPLE) {
-                fprintf(stderr, "Fibre destroy: avg = %.2f\tmax = %llu\tmin = %llu \n",
+                fprintf(stderr, "Fibre destroy: avg = %.2f\tmax = %llu\tmin = %llu\toutliers = %d\n",
                         (double) 1.0 * fibre_destroy_acc / fibre_destroy_num,
-                        fibre_destroy_max, fibre_destroy_min);
+                        fibre_destroy_max, fibre_destroy_min, fibre_destroy_out);
                 fibre_destroy_num = 0;
                 fibre_destroy_acc = 0;
-                fibre_destroy_min = 999999;
+                fibre_destroy_min = QAT_FIBRE_CYCLES_MIN;
                 fibre_destroy_max = 0;
+                fibre_destroy_out = 0;
             }
 #endif
             rsa->job = NULL;
@@ -409,29 +414,31 @@ static int rsa_verify_async_internal(void *vargs)
     // This is the cpu cycles count for the startup of the current fibre
     cpucycle_t fibre_startup_current = rdtsc() - fibre_startup_start;
 
-    // Update the current max and min
-    fibre_startup_max = MAX(fibre_startup_max, fibre_startup_current);
-    fibre_startup_min = MIN(fibre_startup_min, fibre_startup_current);
-
     // This is a very primitive way to detect outliers
     if (fibre_startup_current > 1.5 * fibre_startup_min) {
-        fprintf(stderr, "Fibre startup: outlier = %llu \n", fibre_startup_current);
+        ++fibre_startup_out;
+        // fprintf(stderr, "Fibre startup: outlier = %llu \n", fibre_startup_current);
     }
     else {
         // fprintf(stderr, "Fibre startup: current = %llu \n", fibre_startup_current);
         ++fibre_startup_num;
         fibre_startup_acc += fibre_startup_current;
+
+        // Update the current max and min
+        fibre_startup_max = MAX(fibre_startup_max, fibre_startup_current);
+        fibre_startup_min = MIN(fibre_startup_min, fibre_startup_current);
     }
 
     // Every QAT_FIBRE_STARTUP_SAMPLE measures I print the avg e reset
     if (fibre_startup_num == QAT_FIBRE_STARTUP_SAMPLE) {
-        fprintf(stderr, "Fibre startup: avg = %.2f\tmax = %llu\tmin = %llu \n",
+        fprintf(stderr, "Fibre startup: avg = %.2f\tmax = %llu\tmin = %llu\toutliers = %d\n",
                 (double) 1.0 * fibre_startup_acc / fibre_startup_num,
-                fibre_startup_max, fibre_startup_min);
+                fibre_startup_max, fibre_startup_min, fibre_startup_out);
         fibre_startup_num = 0;
         fibre_startup_acc = 0;
-        fibre_startup_min = 999999;
+        fibre_startup_min = QAT_FIBRE_CYCLES_MIN;
         fibre_startup_max = 0;
+        fibre_startup_out = 0;
     }
 #endif
     struct rsa_async_args *args;
@@ -490,29 +497,31 @@ int RSA_verify_async(int dtype, const unsigned char *m, unsigned int m_len,
             // This is the cpu cycles count for the destruction of the fibre
             fibre_destroy_current = rdtsc() - fibre_destroy_start;
 
-            // Update the current max and min
-            fibre_destroy_max = MAX(fibre_destroy_max, fibre_destroy_current);
-            fibre_destroy_min = MIN(fibre_destroy_min, fibre_destroy_current);
-
             // This is a very primitive way to detect outliers
             if (fibre_destroy_current > 1.5 * fibre_destroy_min) {
-                fprintf(stderr, "Fibre destroy: outlier = %llu \n", fibre_destroy_current);
+                // fprintf(stderr, "Fibre destroy: outlier = %llu \n", fibre_destroy_current);
+                ++fibre_destroy_out;
             }
             else {
                 // fprintf(stderr, "Fibre destroy: current = %llu \n", fibre_destroy_current);
                 ++fibre_destroy_num;
                 fibre_destroy_acc += fibre_destroy_current;
+
+                // Update the current max and min
+                fibre_destroy_max = MAX(fibre_destroy_max, fibre_destroy_current);
+                fibre_destroy_min = MIN(fibre_destroy_min, fibre_destroy_current);
             }
 
             // Every QAT_FIBRE_DESTROY_SAMPLE measures I print the avg e reset
             if (fibre_destroy_num == QAT_FIBRE_DESTROY_SAMPLE) {
-                fprintf(stderr, "Fibre destroy: avg = %.2f\tmax = %llu\tmin = %llu \n",
+                fprintf(stderr, "Fibre destroy: avg = %.2f\tmax = %llu\tmin = %llu\t outliers = %d\n",
                         (double) 1.0 * fibre_destroy_acc / fibre_destroy_num,
-                        fibre_destroy_max, fibre_destroy_min);
+                        fibre_destroy_max, fibre_destroy_min, fibre_destroy_out);
                 fibre_destroy_num = 0;
                 fibre_destroy_acc = 0;
-                fibre_destroy_min = 999999;
+                fibre_destroy_min = QAT_FIBRE_CYCLES_MIN;
                 fibre_destroy_max = 0;
+                fibre_destroy_out = 0;
             }
 #endif
             rsa->job = NULL;
