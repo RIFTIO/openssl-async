@@ -88,7 +88,8 @@ static int rsa_sign_async_internal(void *vargs)
     cpucycle_t fibre_startup_current = rdtsc() - fibre_startup_start;
 
     // This is a very primitive way to detect outliers
-    if (fibre_startup_current > 1.5 * fibre_startup_min) {
+    if (fibre_startup_current > 1.5 * fibre_startup_min ||
+        (fibre_startup_avg && fibre_startup_current > 1.3 * fibre_startup_avg)) {
         // fprintf(stderr, "Fibre startup: outlier = %llu \n", fibre_startup_current);
         ++fibre_startup_out;
     }
@@ -107,6 +108,8 @@ static int rsa_sign_async_internal(void *vargs)
         fprintf(stderr, "Fibre startup: avg = %.2f\tmax = %llu\tmin = %llu\toutliers = %d\n",
                 (double) 1.0 * fibre_startup_acc / fibre_startup_num,
                 fibre_startup_max, fibre_startup_min, fibre_startup_out);
+
+        fibre_startup_avg = fibre_startup_acc / fibre_startup_num;
         fibre_startup_num = 0;
         fibre_startup_acc = 0;
         fibre_startup_min = QAT_FIBRE_CYCLES_MIN;
