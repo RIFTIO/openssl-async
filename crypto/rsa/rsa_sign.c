@@ -65,7 +65,9 @@
 #include "rsa_locl.h"
 
 #include <crypto/async/cpu_cycles.h>
+#ifdef QAT_CPU_CYCLES_COUNT
 cpucycle_t fibre_switch_start;
+#endif
 
 /* Size of an SSL signature: MD5+SHA1 */
 #define SSL_SIG_LENGTH  36
@@ -220,7 +222,10 @@ int RSA_sign_async(int type, const unsigned char *m, unsigned int m_len,
 #ifdef QAT_CPU_CYCLES_COUNT
         fibre_startup_start = rdtsc();
         fibre_switch_start = fibre_startup_start;
+        fibre_total_start = fibre_startup_start;
         cpucycle_t fibre_destroy_current;
+        cpucycle_t fibre_total_current;
+        cpucycle_t last_rdtsc;
 #endif
         switch(ASYNC_start_job(&rsa->job, &ret, rsa_sign_async_internal, &args,
             sizeof(struct rsa_async_args))) {
@@ -228,12 +233,31 @@ int RSA_sign_async(int type, const unsigned char *m, unsigned int m_len,
             //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
+#ifdef QAT_CPU_CYCLES_COUNT
+            // This is the cpu cycles count for the startup of the current fibre
+            fibre_total_current = rdtsc() - fibre_total_start;
+
+            /* Problem:
+             * The total cycles are measured in two separate parts of code.
+             * This means I cannot track the outliers we the same strategy
+             * Actually, it is quite difficult because I should reject the entire
+             * cycles count if one of the two parts is wrong.
+             *
+             * In general I don't have any mechanism at the moment to keep track
+             * of the pairs so I cannot do much in this case.
+             */
+
+            // fprintf(stderr, "Fibre total (1): current = %llu \n", fibre_total_current);
+            fibre_total_acc += fibre_total_current;
+            // Note: I don't increase the count here...
+
+#endif
             return -1;
         case ASYNC_FINISH:
 #ifdef QAT_CPU_CYCLES_COUNT
             // This is the cpu cycles count for the destruction of the fibre
-            fibre_destroy_current = rdtsc() - fibre_destroy_start;
-
+            last_rdtsc = rdtsc();
+            fibre_destroy_current = last_rdtsc - fibre_destroy_start;
 
             // This is a very primitive way to detect outliers
             if (fibre_destroy_current > 1.5 * fibre_destroy_min) {
@@ -260,6 +284,24 @@ int RSA_sign_async(int type, const unsigned char *m, unsigned int m_len,
                 fibre_destroy_min = QAT_FIBRE_CYCLES_MIN;
                 fibre_destroy_max = 0;
                 fibre_destroy_out = 0;
+            }
+
+            // This is the cpu cycles count for the total time
+            fibre_total_current = last_rdtsc - fibre_total_start;
+
+            // As before, I cannot filter these values
+            fibre_total_acc += fibre_total_current;
+            ++fibre_total_num;
+
+            // fprintf(stderr, "Fibre total (2): current = %llu \n", fibre_total_current);
+
+            // Every QAT_FIBRE_TOTAL_SAMPLE measures I print the avg e reset
+            if (fibre_total_num == QAT_FIBRE_TOTAL_SAMPLE) {
+                fprintf(stderr, "Fibre total: avg = %.2f\tmax = %llu\tmin = %llu\toutliers = %d\n",
+                        (double) 1.0 * fibre_total_acc / fibre_total_num,
+                        fibre_total_max, fibre_total_min, fibre_total_out);
+                fibre_total_num = 0;
+                fibre_total_acc = 0;
             }
 #endif
             rsa->job = NULL;
@@ -486,7 +528,10 @@ int RSA_verify_async(int dtype, const unsigned char *m, unsigned int m_len,
 #ifdef QAT_CPU_CYCLES_COUNT
         fibre_startup_start = rdtsc();
         fibre_switch_start = fibre_startup_start;
+        fibre_total_start = fibre_startup_start;
         cpucycle_t fibre_destroy_current;
+        cpucycle_t fibre_total_current;
+        cpucycle_t last_rdtsc;
 #endif
         switch(ASYNC_start_job(&rsa->job, &ret, rsa_verify_async_internal, &args,
             sizeof(struct rsa_async_args))) {
@@ -494,11 +539,23 @@ int RSA_verify_async(int dtype, const unsigned char *m, unsigned int m_len,
             //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
+#ifdef QAT_CPU_CYCLES_COUNT
+            // This is the cpu cycles count for the startup of the current fibre
+            fibre_total_current = rdtsc() - fibre_total_start;
+
+            // Same considerations as for Sign
+
+            // fprintf(stderr, "Fibre total (1): current = %llu \n", fibre_total_current);
+            fibre_total_acc += fibre_total_current;
+            // Note: I don't increase the count here...
+
+#endif
             return -1;
         case ASYNC_FINISH:
 #ifdef QAT_CPU_CYCLES_COUNT
             // This is the cpu cycles count for the destruction of the fibre
-            fibre_destroy_current = rdtsc() - fibre_destroy_start;
+            last_rdtsc = rdtsc();
+            fibre_destroy_current = last_rdtsc - fibre_destroy_start;
 
             // This is a very primitive way to detect outliers
             if (fibre_destroy_current > 1.5 * fibre_destroy_min) {
@@ -526,6 +583,24 @@ int RSA_verify_async(int dtype, const unsigned char *m, unsigned int m_len,
                 fibre_destroy_max = 0;
                 fibre_destroy_out = 0;
             }
+
+            // This is the cpu cycles count for the total time
+            fibre_total_current = last_rdtsc - fibre_total_start;
+
+            // As before, I cannot filter these values
+            fibre_total_acc += fibre_total_current;
+            ++fibre_total_num;
+
+            // fprintf(stderr, "Fibre total (2): current = %llu \n", fibre_total_current);
+
+            // Every QAT_FIBRE_TOTAL_SAMPLE measures I print the avg e reset
+            if (fibre_total_num == QAT_FIBRE_TOTAL_SAMPLE) {
+                fprintf(stderr, "Fibre total: avg = %.2f\tmax = %llu\tmin = %llu\toutliers = %d\n",
+                        (double) 1.0 * fibre_total_acc / fibre_total_num,
+                        fibre_total_max, fibre_total_min, fibre_total_out);
+                fibre_total_num = 0;
+                fibre_total_acc = 0;
+            }
 #endif
             rsa->job = NULL;
             return ret;
@@ -535,6 +610,6 @@ int RSA_verify_async(int dtype, const unsigned char *m, unsigned int m_len,
             return -1;
         }
     }
- 
+
     return RSA_verify(dtype, m, m_len, sigbuf, siglen, rsa);
 }

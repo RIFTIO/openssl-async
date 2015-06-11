@@ -27,12 +27,18 @@ unsigned int fibre_switch_num = 0;
 cpucycle_t fibre_destroy_acc = 0;
 unsigned int fibre_destroy_num = 0;
 
+cpucycle_t fibre_total_acc = 0;
+unsigned int fibre_total_num = 0;
+
+
+// Size of the sample used to calculate the average
+// Values are printed only after collecting QAT_FIBRE_*_SAMPLE values
 #define QAT_FIBRE_STARTUP_SAMPLE 2000
 #define QAT_FIBRE_SWITCH_SAMPLE 2000
 #define QAT_FIBRE_DESTROY_SAMPLE 2000
+#define QAT_FIBRE_TOTAL_SAMPLE 2000
 
 #define QAT_FIBRE_CYCLES_MIN 999999
-
 
 // TODO are we interested in these?
 // I think they are useful to detect anomalies
@@ -45,21 +51,27 @@ cpucycle_t fibre_switch_max = 0;
 cpucycle_t fibre_destroy_min = QAT_FIBRE_CYCLES_MIN;
 cpucycle_t fibre_destroy_max = 0;
 
+cpucycle_t fibre_total_min = QAT_FIBRE_CYCLES_MIN;
+cpucycle_t fibre_total_max = 0;
+
 // I also need to remember when the count started
 cpucycle_t fibre_startup_start = 0;
 extern cpucycle_t fibre_switch_start;
 cpucycle_t fibre_destroy_start = 0;
+cpucycle_t fibre_total_start = 0;
 
 // I keep track of the number of outliers
 // http://stackoverflow.com/q/19941588/556141
 unsigned int fibre_startup_out = 0;
 unsigned int fibre_switch_out = 0;
 unsigned int fibre_destroy_out = 0;
+unsigned int fibre_total_out = 0;
 
 // This is the previous average
 cpucycle_t fibre_startup_avg = 0;
 cpucycle_t fibre_switch_avg = 0;
 cpucycle_t fibre_destroy_avg = 0;
+cpucycle_t fibre_total_avg = 0;
 #endif
 
 
