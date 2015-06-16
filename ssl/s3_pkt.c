@@ -1549,10 +1549,10 @@ static int ssl3_write_pending2(SSL *s, SSL3_BUFFER *wb)
                 wb->left = 0;
                 return (i);
             }
-            if (!s3_async || (s3_async && !cipher_async) ||
-                !BIO_should_retry(s->wbio)) {
-                if (!BIO_should_retry(s->wbio))
-                    ssl3_set_conn_status(s, i);
+            if (!s3_async || (s3_async && !cipher_async))
+                return (i);
+            else if (s->wbio && !BIO_should_retry(s->wbio)) { 
+                ssl3_set_conn_status(s, i);
                 return (i);
             }
 #ifndef DISABLE_ASYNCH_BULK_PERF
