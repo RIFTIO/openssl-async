@@ -1573,7 +1573,7 @@ if (!defined($disabled{"hw-qat"}))
             }
 		
         $lflags .= ' -lz -lpthread -lrt';
-        $cflags .= ' -I'.$icp_eng_qat_dir.' -I'.$icp_api_dir.' -I'.$icp_lac_api_dir.'';
+        $cflags .= ' -DQAT_COUNT_CPU_CYCLES -I'.$icp_eng_qat_dir.' -I'.$icp_api_dir.' -I'.$icp_lac_api_dir.'';
         }
 
 # You will find shlib_mark1 and shlib_mark2 explained in Makefile.org

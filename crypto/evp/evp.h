@@ -668,8 +668,6 @@ __owur int EVP_EncryptInit(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
                                   const unsigned char *iv);
 /*__owur*/ int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out,
                                  int *outl, const unsigned char *in, int inl);
-/*__owur*/ int EVP_EncryptUpdate_async(EVP_CIPHER_CTX *ctx, unsigned char *out,
-                                 int *outl, const unsigned char *in, int inl);
 /*__owur*/ int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out,
                                    int *outl);
 /*__owur*/ int EVP_EncryptFinal_ex_async(EVP_CIPHER_CTX *ctx, unsigned char *out,

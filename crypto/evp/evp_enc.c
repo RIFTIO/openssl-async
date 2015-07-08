@@ -66,6 +66,12 @@
 #endif
 #include "evp_locl.h"
 
+#include <crypto/async/cpu_cycles.h>
+#ifdef QAT_CPU_CYCLES_COUNT
+cpucycle_t fibre_switch_start;
+#endif
+
+
 struct evp_encrypt_async_args {
     EVP_CIPHER_CTX *ctx;
     unsigned char *out;
@@ -87,7 +93,6 @@ const char EVP_version[] = "EVP" OPENSSL_VERSION_PTEXT;
 void EVP_CIPHER_CTX_init(EVP_CIPHER_CTX *ctx)
 {
     memset(ctx, 0, sizeof(EVP_CIPHER_CTX));
-    /* ctx->cipher=NULL; */
 }
 
 EVP_CIPHER_CTX *EVP_CIPHER_CTX_new(void)
@@ -308,17 +313,7 @@ int EVP_DecryptInit_ex(EVP_CIPHER_CTX *ctx, const EVP_CIPHER *cipher,
     return EVP_CipherInit_ex(ctx, cipher, impl, key, iv, 0);
 }
 
-static int evp_encrypt_update_async_internal(void *vargs)
-{
-    struct evp_encrypt_async_args *args;
-    args = (struct evp_encrypt_async_args *)vargs;
-    if (!args)
-        return 0;
-    return EVP_EncryptUpdate(args->ctx, args->out, args->outl,
-                             args->in, args->inl);
-}
-
-int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
+int evp_encrypt_update_internal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
                       const unsigned char *in, int inl)
 {
     int i, j, bl;
@@ -381,7 +376,29 @@ int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
     return 1;
 }
 
-int EVP_EncryptUpdate_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
+static int evp_encrypt_update_async_internal(void *vargs)
+{
+#ifdef QAT_CPU_CYCLES_COUNT
+    cpucycle_t fibre_startup_current = rdtsc() - fibre_startup_start;
+    ++fibre_startup_num;
+    fibre_startup_acc += fibre_startup_current;
+#endif
+
+    struct evp_encrypt_async_args *args;
+    args = (struct evp_encrypt_async_args *)vargs;
+    if (!args)
+        return 0;
+    int result = evp_encrypt_update_internal(args->ctx, args->out, args->outl,
+                             args->in, args->inl);
+
+#ifdef QAT_CPU_CYCLES_COUNT
+    fibre_destroy_start = rdtsc();
+#endif
+
+    return result;
+}
+
+int EVP_EncryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
                       const unsigned char *in, int inl)
 {
     int ret;
@@ -394,14 +411,35 @@ int EVP_EncryptUpdate_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
     args.inl = inl;
 
     if(!ASYNC_in_job()) {
+#ifdef QAT_CPU_CYCLES_COUNT
+        fibre_startup_start = rdtsc();
+        fibre_switch_start = fibre_startup_start;
+        fibre_total_start = fibre_startup_start;
+        cpucycle_t fibre_destroy_current;
+        cpucycle_t fibre_total_current;
+        cpucycle_t last_rdtsc;
+#endif
         switch(ASYNC_start_job(&ctx->job, &ret, evp_encrypt_update_async_internal, &args,
             sizeof(struct evp_encrypt_async_args))) {
         case ASYNC_ERR:
             //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
+#ifdef QAT_CPU_CYCLES_COUNT
+            fibre_total_current = rdtsc() - fibre_total_start;
+            fibre_total_acc += fibre_total_current;
+#endif
             return -1;
         case ASYNC_FINISH:
+#ifdef QAT_CPU_CYCLES_COUNT
+            last_rdtsc = rdtsc();
+            fibre_destroy_current = last_rdtsc - fibre_destroy_start;
+            ++fibre_destroy_num;
+            fibre_destroy_acc += fibre_destroy_current;
+            fibre_total_current = last_rdtsc - fibre_total_start;
+            fibre_total_acc += fibre_total_current;
+            ++fibre_total_num;
+#endif
             ctx->job = NULL;
             return ret;
         default:
@@ -410,7 +448,7 @@ int EVP_EncryptUpdate_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
             return -1;
         }
     }
-    return EVP_EncryptUpdate(ctx, out, outl, in, inl);
+    return evp_encrypt_update_internal(ctx, out, outl, in, inl);
 }
 
 int EVP_EncryptFinal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
@@ -420,16 +458,7 @@ int EVP_EncryptFinal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
     return ret;
 }
 
-static int evp_encrypt_final_ex_async_internal(void *vargs)
-{
-    struct evp_encrypt_async_args *args;
-    args = (struct evp_encrypt_async_args *)vargs;
-    if (!args)
-        return 0;
-    return EVP_EncryptFinal_ex(args->ctx, args->out, args->outl);
-}
-
-int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
+int evp_encrypt_final_ex_internal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 {
     int n, ret;
     unsigned int i, b, bl;
@@ -471,7 +500,25 @@ int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
     return ret;
 }
 
-int EVP_EncryptFinal_ex_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
+static int evp_encrypt_final_ex_async_internal(void *vargs)
+{
+#ifdef QAT_CPU_CYCLES_COUNT
+    cpucycle_t fibre_startup_current = rdtsc() - fibre_startup_start;
+    ++fibre_startup_num;
+    fibre_startup_acc += fibre_startup_current;
+#endif
+    struct evp_encrypt_async_args *args;
+    args = (struct evp_encrypt_async_args *)vargs;
+    if (!args)
+        return 0;
+    int result = evp_encrypt_final_ex_internal(args->ctx, args->out, args->outl);
+#ifdef QAT_CPU_CYCLES_COUNT
+    fibre_destroy_start = rdtsc();
+#endif
+    return result;
+}
+
+int EVP_EncryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 {
     int ret;
     struct evp_encrypt_async_args args;
@@ -481,14 +528,35 @@ int EVP_EncryptFinal_ex_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl
     args.outl = outl;
 
     if(!ASYNC_in_job()) {
+#ifdef QAT_CPU_CYCLES_COUNT
+        fibre_startup_start = rdtsc();
+        fibre_switch_start = fibre_startup_start;
+        fibre_total_start = fibre_startup_start;
+        cpucycle_t fibre_destroy_current;
+        cpucycle_t fibre_total_current;
+        cpucycle_t last_rdtsc;
+#endif
         switch(ASYNC_start_job(&ctx->job, &ret, evp_encrypt_final_ex_async_internal, &args,
             sizeof(struct evp_encrypt_async_args))) {
         case ASYNC_ERR:
             //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
+#ifdef QAT_CPU_CYCLES_COUNT
+            fibre_total_current = rdtsc() - fibre_total_start;
+            fibre_total_acc += fibre_total_current;
+#endif
             return -1;
         case ASYNC_FINISH:
+#ifdef QAT_CPU_CYCLES_COUNT
+            last_rdtsc = rdtsc();
+            fibre_destroy_current = last_rdtsc - fibre_destroy_start;
+            ++fibre_destroy_num;
+            fibre_destroy_acc += fibre_destroy_current;
+            fibre_total_current = last_rdtsc - fibre_total_start;
+            fibre_total_acc += fibre_total_current;
+            ++fibre_total_num;
+#endif
             ctx->job = NULL;
             return ret;
         default:
@@ -497,20 +565,10 @@ int EVP_EncryptFinal_ex_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl
             return -1;
         }
     }
-    return EVP_EncryptFinal_ex(ctx, out, outl);
+    return evp_encrypt_final_ex_internal(ctx, out, outl);
 }
 
-static int evp_decrypt_update_async_internal(void *vargs)
-{
-    struct evp_decrypt_async_args *args;
-    args = (struct evp_decrypt_async_args *)vargs;
-    if (!args)
-        return 0;
-    return EVP_DecryptUpdate(args->ctx, args->out, args->outl,
-                             args->in, args->inl);
-}
-
-int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
+int evp_decrypt_update_internal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
                       const unsigned char *in, int inl)
 {
     int fix_len;
@@ -532,7 +590,7 @@ int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
     }
 
     if (ctx->flags & EVP_CIPH_NO_PADDING)
-        return EVP_EncryptUpdate(ctx, out, outl, in, inl);
+        return evp_encrypt_update_internal(ctx, out, outl, in, inl);
 
     b = ctx->cipher->block_size;
     OPENSSL_assert(b <= sizeof ctx->final);
@@ -544,7 +602,7 @@ int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
     } else
         fix_len = 0;
 
-    if (!EVP_EncryptUpdate(ctx, out, outl, in, inl))
+    if (!evp_encrypt_update_internal(ctx, out, outl, in, inl))
         return 0;
 
     /*
@@ -564,7 +622,29 @@ int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
     return 1;
 }
 
-int EVP_DecryptUpdate_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
+static int evp_decrypt_update_async_internal(void *vargs)
+{
+#ifdef QAT_CPU_CYCLES_COUNT
+    cpucycle_t fibre_startup_current = rdtsc() - fibre_startup_start;
+    ++fibre_startup_num;
+    fibre_startup_acc += fibre_startup_current;
+#endif
+
+    struct evp_decrypt_async_args *args;
+    args = (struct evp_decrypt_async_args *)vargs;
+    if (!args)
+        return 0;
+    int result = evp_decrypt_update_internal(args->ctx, args->out, args->outl,
+                             args->in, args->inl);
+
+#ifdef QAT_CPU_CYCLES_COUNT
+    fibre_destroy_start = rdtsc();
+#endif
+
+    return result;
+}
+
+int EVP_DecryptUpdate(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
                       const unsigned char *in, int inl)
 {
     int ret;
@@ -575,16 +655,36 @@ int EVP_DecryptUpdate_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
     args.outl = outl;
     args.in = in;
     args.inl = inl;
-
     if(!ASYNC_in_job()) {
+#ifdef QAT_CPU_CYCLES_COUNT
+        fibre_startup_start = rdtsc();
+        fibre_switch_start = fibre_startup_start;
+        fibre_total_start = fibre_startup_start;
+        cpucycle_t fibre_destroy_current;
+        cpucycle_t fibre_total_current;
+        cpucycle_t last_rdtsc;
+#endif
         switch(ASYNC_start_job(&ctx->job, &ret, evp_decrypt_update_async_internal, &args,
             sizeof(struct evp_decrypt_async_args))) {
         case ASYNC_ERR:
             //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
+#ifdef QAT_CPU_CYCLES_COUNT
+            fibre_total_current = rdtsc() - fibre_total_start;
+            fibre_total_acc += fibre_total_current;
+#endif
             return -1;
         case ASYNC_FINISH:
+#ifdef QAT_CPU_CYCLES_COUNT
+            last_rdtsc = rdtsc();
+            fibre_destroy_current = last_rdtsc - fibre_destroy_start;
+            ++fibre_destroy_num;
+            fibre_destroy_acc += fibre_destroy_current;
+            fibre_total_current = last_rdtsc - fibre_total_start;
+            fibre_total_acc += fibre_total_current;
+            ++fibre_total_num;
+#endif
             ctx->job = NULL;
             return ret;
         default:
@@ -593,7 +693,7 @@ int EVP_DecryptUpdate_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl,
             return -1;
         }
     }
-    return EVP_DecryptUpdate(ctx, out, outl, in, inl);
+    return evp_decrypt_update_internal(ctx, out, outl, in, inl);
 }
 
 int EVP_DecryptFinal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
@@ -603,16 +703,7 @@ int EVP_DecryptFinal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
     return ret;
 }
 
-static int evp_decrypt_final_ex_async_internal(void *vargs)
-{
-    struct evp_decrypt_async_args *args;
-    args = (struct evp_decrypt_async_args *)vargs;
-    if (!args)
-        return 0;
-    return EVP_DecryptFinal_ex(args->ctx, args->out, args->outl);
-}
-
-int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
+int evp_decrypt_final_ex_internal(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 {
     int i, n;
     unsigned int b;
@@ -668,7 +759,28 @@ int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
     return (1);
 }
 
-int EVP_DecryptFinal_ex_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
+static int evp_decrypt_final_ex_async_internal(void *vargs)
+{
+#ifdef QAT_CPU_CYCLES_COUNT
+    cpucycle_t fibre_startup_current = rdtsc() - fibre_startup_start;
+    ++fibre_startup_num;
+    fibre_startup_acc += fibre_startup_current;
+#endif
+
+    struct evp_decrypt_async_args *args;
+    args = (struct evp_decrypt_async_args *)vargs;
+    if (!args)
+        return 0;
+    int result = evp_decrypt_final_ex_internal(args->ctx, args->out, args->outl);
+
+#ifdef QAT_CPU_CYCLES_COUNT
+    fibre_destroy_start = rdtsc();
+#endif
+
+    return result;
+}
+
+int EVP_DecryptFinal_ex(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl)
 {
     int ret;
     struct evp_decrypt_async_args args;
@@ -678,14 +790,35 @@ int EVP_DecryptFinal_ex_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl
     args.outl = outl;
 
     if(!ASYNC_in_job()) {
+#ifdef QAT_CPU_CYCLES_COUNT
+        fibre_startup_start = rdtsc();
+        fibre_switch_start = fibre_startup_start;
+        fibre_total_start = fibre_startup_start;
+        cpucycle_t fibre_destroy_current;
+        cpucycle_t fibre_total_current;
+        cpucycle_t last_rdtsc;
+#endif
         switch(ASYNC_start_job(&ctx->job, &ret, evp_decrypt_final_ex_async_internal, &args,
             sizeof(struct evp_decrypt_async_args))) {
         case ASYNC_ERR:
             //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
+#ifdef QAT_CPU_CYCLES_COUNT
+            fibre_total_current = rdtsc() - fibre_total_start;
+            fibre_total_acc += fibre_total_current;
+#endif
             return -1;
         case ASYNC_FINISH:
+#ifdef QAT_CPU_CYCLES_COUNT
+            last_rdtsc = rdtsc();
+            fibre_destroy_current = last_rdtsc - fibre_destroy_start;
+            ++fibre_destroy_num;
+            fibre_destroy_acc += fibre_destroy_current;
+            fibre_total_current = last_rdtsc - fibre_total_start;
+            fibre_total_acc += fibre_total_current;
+            ++fibre_total_num;
+#endif
             ctx->job = NULL;
             return ret;
         default:
@@ -694,7 +827,7 @@ int EVP_DecryptFinal_ex_async(EVP_CIPHER_CTX *ctx, unsigned char *out, int *outl
             return -1;
         }
     }
-    return EVP_DecryptFinal_ex(ctx, out, outl);
+    return evp_decrypt_final_ex_internal(ctx, out, outl);
 }
 
 void EVP_CIPHER_CTX_free(EVP_CIPHER_CTX *ctx)

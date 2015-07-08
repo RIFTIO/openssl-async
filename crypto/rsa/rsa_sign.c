@@ -83,58 +83,7 @@ struct rsa_async_args {
     unsigned int verlen;
 };
 
-static int rsa_sign_async_internal(void *vargs)
-{
-#ifdef QAT_CPU_CYCLES_COUNT
-    // This is the cpu cycles count for the startup of the current fibre
-    cpucycle_t fibre_startup_current = rdtsc() - fibre_startup_start;
-
-    // This is a very primitive way to detect outliers
-    if (fibre_startup_current > 1.5 * fibre_startup_min ||
-        (fibre_startup_avg && fibre_startup_current > 1.3 * fibre_startup_avg)) {
-        // fprintf(stderr, "Fibre startup: outlier = %llu \n", fibre_startup_current);
-        ++fibre_startup_out;
-    }
-    else {
-        // fprintf(stderr, "Fibre startup: current = %llu \n", fibre_startup_current);
-        ++fibre_startup_num;
-        fibre_startup_acc += fibre_startup_current;
-
-        // Update the current max and min
-        fibre_startup_max = MAX(fibre_startup_max, fibre_startup_current);
-        fibre_startup_min = MIN(fibre_startup_min, fibre_startup_current);
-    }
-
-    // Every QAT_FIBRE_STARTUP_SAMPLE measures I print the avg e reset
-    if (fibre_startup_num == QAT_FIBRE_STARTUP_SAMPLE) {
-        fprintf(stderr, "Fibre startup: avg = %.2f\tmax = %llu\tmin = %llu\toutliers = %d\n",
-                (double) 1.0 * fibre_startup_acc / fibre_startup_num,
-                fibre_startup_max, fibre_startup_min, fibre_startup_out);
-
-        fibre_startup_avg = fibre_startup_acc / fibre_startup_num;
-        fibre_startup_num = 0;
-        fibre_startup_acc = 0;
-        fibre_startup_min = QAT_FIBRE_CYCLES_MIN;
-        fibre_startup_max = 0;
-        fibre_startup_out = 0;
-    }
-#endif
-    struct rsa_async_args *args;
-    args = (struct rsa_async_args *)vargs;
-    if (!args)
-        return 0;
-
-    int result = RSA_sign(args->type, args->m, args->m_len,
-                    args->sigret, args->siglen, args->rsa);
-
-#ifdef QAT_CPU_CYCLES_COUNT
-    fibre_destroy_start = rdtsc();
-#endif
-
-    return result;
-}
-
-int RSA_sign(int type, const unsigned char *m, unsigned int m_len,
+int rsa_sign_internal(int type, const unsigned char *m, unsigned int m_len,
              unsigned char *sigret, unsigned int *siglen, RSA *rsa)
 {
     X509_SIG sig;
@@ -205,7 +154,29 @@ int RSA_sign(int type, const unsigned char *m, unsigned int m_len,
     return (ret);
 }
 
-int RSA_sign_async(int type, const unsigned char *m, unsigned int m_len,
+static int rsa_sign_async_internal(void *vargs)
+{
+#ifdef QAT_CPU_CYCLES_COUNT
+    cpucycle_t fibre_startup_current = rdtsc() - fibre_startup_start;
+    ++fibre_startup_num;
+    fibre_startup_acc += fibre_startup_current;
+#endif
+    struct rsa_async_args *args;
+    args = (struct rsa_async_args *)vargs;
+    if (!args)
+        return 0;
+
+    int result = rsa_sign_internal(args->type, args->m, args->m_len,
+                    args->sigret, args->siglen, args->rsa);
+
+#ifdef QAT_CPU_CYCLES_COUNT
+    fibre_destroy_start = rdtsc();
+#endif
+
+    return result;
+}
+
+int RSA_sign(int type, const unsigned char *m, unsigned int m_len,
              unsigned char *sigret, unsigned int *siglen, RSA *rsa)
 {
     int ret;
@@ -230,89 +201,31 @@ int RSA_sign_async(int type, const unsigned char *m, unsigned int m_len,
         switch(ASYNC_start_job(&rsa->job, &ret, rsa_sign_async_internal, &args,
             sizeof(struct rsa_async_args))) {
         case ASYNC_ERR:
-            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
 #ifdef QAT_CPU_CYCLES_COUNT
-            // This is the cpu cycles count for the startup of the current fibre
             fibre_total_current = rdtsc() - fibre_total_start;
-
-            /* Problem:
-             * The total cycles are measured in two separate parts of code.
-             * This means I cannot track the outliers we the same strategy
-             * Actually, it is quite difficult because I should reject the entire
-             * cycles count if one of the two parts is wrong.
-             *
-             * In general I don't have any mechanism at the moment to keep track
-             * of the pairs so I cannot do much in this case.
-             */
-
-            // fprintf(stderr, "Fibre total (1): current = %llu \n", fibre_total_current);
             fibre_total_acc += fibre_total_current;
-            // Note: I don't increase the count here...
-
 #endif
             return -1;
         case ASYNC_FINISH:
 #ifdef QAT_CPU_CYCLES_COUNT
-            // This is the cpu cycles count for the destruction of the fibre
             last_rdtsc = rdtsc();
             fibre_destroy_current = last_rdtsc - fibre_destroy_start;
-
-            // This is a very primitive way to detect outliers
-            if (fibre_destroy_current > 1.5 * fibre_destroy_min) {
-                // fprintf(stderr, "Fibre destroy: outlier = %llu \n", fibre_destroy_current);
-                ++fibre_destroy_out;
-            }
-            else {
-                // fprintf(stderr, "Fibre destroy: current = %llu \n", fibre_destroy_current);
-                ++fibre_destroy_num;
-                fibre_destroy_acc += fibre_destroy_current;
-
-                // Update the current max and min
-                fibre_destroy_max = MAX(fibre_destroy_max, fibre_destroy_current);
-                fibre_destroy_min = MIN(fibre_destroy_min, fibre_destroy_current);
-            }
-
-            // Every QAT_FIBRE_DESTROY_SAMPLE measures I print the avg e reset
-            if (fibre_destroy_num == QAT_FIBRE_DESTROY_SAMPLE) {
-                fprintf(stderr, "Fibre destroy: avg = %.2f\tmax = %llu\tmin = %llu\toutliers = %d\n",
-                        (double) 1.0 * fibre_destroy_acc / fibre_destroy_num,
-                        fibre_destroy_max, fibre_destroy_min, fibre_destroy_out);
-                fibre_destroy_num = 0;
-                fibre_destroy_acc = 0;
-                fibre_destroy_min = QAT_FIBRE_CYCLES_MIN;
-                fibre_destroy_max = 0;
-                fibre_destroy_out = 0;
-            }
-
-            // This is the cpu cycles count for the total time
+            ++fibre_destroy_num;
+            fibre_destroy_acc += fibre_destroy_current;
             fibre_total_current = last_rdtsc - fibre_total_start;
-
-            // As before, I cannot filter these values
             fibre_total_acc += fibre_total_current;
             ++fibre_total_num;
-
-            // fprintf(stderr, "Fibre total (2): current = %llu \n", fibre_total_current);
-
-            // Every QAT_FIBRE_TOTAL_SAMPLE measures I print the avg e reset
-            if (fibre_total_num == QAT_FIBRE_TOTAL_SAMPLE) {
-                fprintf(stderr, "Fibre total: avg = %.2f\tmax = %llu\tmin = %llu\toutliers = %d\n",
-                        (double) 1.0 * fibre_total_acc / fibre_total_num,
-                        fibre_total_max, fibre_total_min, fibre_total_out);
-                fibre_total_num = 0;
-                fibre_total_acc = 0;
-            }
 #endif
             rsa->job = NULL;
             return ret;
         default:
-            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
             /* Shouldn't happen */
             return -1;
         }
     }
-    return RSA_sign(type, m, m_len, sigret, siglen, rsa);
+    return rsa_sign_internal(type, m, m_len, sigret, siglen, rsa);
 
 }
 
@@ -453,54 +366,7 @@ int int_rsa_verify(int dtype, const unsigned char *m,
     return (ret);
 }
 
-static int rsa_verify_async_internal(void *vargs)
-{
-#ifdef QAT_CPU_CYCLES_COUNT
-    // This is the cpu cycles count for the startup of the current fibre
-    cpucycle_t fibre_startup_current = rdtsc() - fibre_startup_start;
-
-    // This is a very primitive way to detect outliers
-    if (fibre_startup_current > 1.5 * fibre_startup_min) {
-        ++fibre_startup_out;
-        // fprintf(stderr, "Fibre startup: outlier = %llu \n", fibre_startup_current);
-    }
-    else {
-        // fprintf(stderr, "Fibre startup: current = %llu \n", fibre_startup_current);
-        ++fibre_startup_num;
-        fibre_startup_acc += fibre_startup_current;
-
-        // Update the current max and min
-        fibre_startup_max = MAX(fibre_startup_max, fibre_startup_current);
-        fibre_startup_min = MIN(fibre_startup_min, fibre_startup_current);
-    }
-
-    // Every QAT_FIBRE_STARTUP_SAMPLE measures I print the avg e reset
-    if (fibre_startup_num == QAT_FIBRE_STARTUP_SAMPLE) {
-        fprintf(stderr, "Fibre startup: avg = %.2f\tmax = %llu\tmin = %llu\toutliers = %d\n",
-                (double) 1.0 * fibre_startup_acc / fibre_startup_num,
-                fibre_startup_max, fibre_startup_min, fibre_startup_out);
-        fibre_startup_num = 0;
-        fibre_startup_acc = 0;
-        fibre_startup_min = QAT_FIBRE_CYCLES_MIN;
-        fibre_startup_max = 0;
-        fibre_startup_out = 0;
-    }
-#endif
-    struct rsa_async_args *args;
-    args = (struct rsa_async_args *)vargs;
-    if (!args)
-        return 0;
-    int result = RSA_verify(args->type, args->m, args->m_len,
-                    args->verbuf, args->verlen, args->rsa);
-
-#ifdef QAT_CPU_CYCLES_COUNT
-    fibre_destroy_start = rdtsc();
-#endif
-
-    return result;
-}
-
-int RSA_verify(int dtype, const unsigned char *m, unsigned int m_len,
+int rsa_verify_internal(int dtype, const unsigned char *m, unsigned int m_len,
                const unsigned char *sigbuf, unsigned int siglen, RSA *rsa)
 {
 
@@ -511,7 +377,28 @@ int RSA_verify(int dtype, const unsigned char *m, unsigned int m_len,
     return int_rsa_verify(dtype, m, m_len, NULL, NULL, sigbuf, siglen, rsa);
 }
 
-int RSA_verify_async(int dtype, const unsigned char *m, unsigned int m_len,
+static int rsa_verify_async_internal(void *vargs)
+{
+#ifdef QAT_CPU_CYCLES_COUNT
+    cpucycle_t fibre_startup_current = rdtsc() - fibre_startup_start;
+    ++fibre_startup_num;
+    fibre_startup_acc += fibre_startup_current;
+#endif
+    struct rsa_async_args *args;
+    args = (struct rsa_async_args *)vargs;
+    if (!args)
+        return 0;
+    int result = rsa_verify_internal(args->type, args->m, args->m_len,
+                    args->verbuf, args->verlen, args->rsa);
+
+#ifdef QAT_CPU_CYCLES_COUNT
+    fibre_destroy_start = rdtsc();
+#endif
+
+    return result;
+}
+
+int RSA_verify(int dtype, const unsigned char *m, unsigned int m_len,
                const unsigned char *sigbuf, unsigned int siglen, RSA *rsa)
 {
     int ret;
@@ -536,80 +423,30 @@ int RSA_verify_async(int dtype, const unsigned char *m, unsigned int m_len,
         switch(ASYNC_start_job(&rsa->job, &ret, rsa_verify_async_internal, &args,
             sizeof(struct rsa_async_args))) {
         case ASYNC_ERR:
-            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
 #ifdef QAT_CPU_CYCLES_COUNT
-            // This is the cpu cycles count for the startup of the current fibre
             fibre_total_current = rdtsc() - fibre_total_start;
-
-            // Same considerations as for Sign
-
-            // fprintf(stderr, "Fibre total (1): current = %llu \n", fibre_total_current);
             fibre_total_acc += fibre_total_current;
-            // Note: I don't increase the count here...
-
 #endif
             return -1;
         case ASYNC_FINISH:
 #ifdef QAT_CPU_CYCLES_COUNT
-            // This is the cpu cycles count for the destruction of the fibre
             last_rdtsc = rdtsc();
             fibre_destroy_current = last_rdtsc - fibre_destroy_start;
-
-            // This is a very primitive way to detect outliers
-            if (fibre_destroy_current > 1.5 * fibre_destroy_min) {
-                // fprintf(stderr, "Fibre destroy: outlier = %llu \n", fibre_destroy_current);
-                ++fibre_destroy_out;
-            }
-            else {
-                // fprintf(stderr, "Fibre destroy: current = %llu \n", fibre_destroy_current);
-                ++fibre_destroy_num;
-                fibre_destroy_acc += fibre_destroy_current;
-
-                // Update the current max and min
-                fibre_destroy_max = MAX(fibre_destroy_max, fibre_destroy_current);
-                fibre_destroy_min = MIN(fibre_destroy_min, fibre_destroy_current);
-            }
-
-            // Every QAT_FIBRE_DESTROY_SAMPLE measures I print the avg e reset
-            if (fibre_destroy_num == QAT_FIBRE_DESTROY_SAMPLE) {
-                fprintf(stderr, "Fibre destroy: avg = %.2f\tmax = %llu\tmin = %llu\t outliers = %d\n",
-                        (double) 1.0 * fibre_destroy_acc / fibre_destroy_num,
-                        fibre_destroy_max, fibre_destroy_min, fibre_destroy_out);
-                fibre_destroy_num = 0;
-                fibre_destroy_acc = 0;
-                fibre_destroy_min = QAT_FIBRE_CYCLES_MIN;
-                fibre_destroy_max = 0;
-                fibre_destroy_out = 0;
-            }
-
-            // This is the cpu cycles count for the total time
+            ++fibre_destroy_num;
+            fibre_destroy_acc += fibre_destroy_current;
             fibre_total_current = last_rdtsc - fibre_total_start;
-
-            // As before, I cannot filter these values
             fibre_total_acc += fibre_total_current;
             ++fibre_total_num;
-
-            // fprintf(stderr, "Fibre total (2): current = %llu \n", fibre_total_current);
-
-            // Every QAT_FIBRE_TOTAL_SAMPLE measures I print the avg e reset
-            if (fibre_total_num == QAT_FIBRE_TOTAL_SAMPLE) {
-                fprintf(stderr, "Fibre total: avg = %.2f\tmax = %llu\tmin = %llu\toutliers = %d\n",
-                        (double) 1.0 * fibre_total_acc / fibre_total_num,
-                        fibre_total_max, fibre_total_min, fibre_total_out);
-                fibre_total_num = 0;
-                fibre_total_acc = 0;
-            }
 #endif
             rsa->job = NULL;
             return ret;
         default:
-            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
             /* Shouldn't happen */
             return -1;
         }
     }
 
-    return RSA_verify(dtype, m, m_len, sigbuf, siglen, rsa);
+    return rsa_verify_internal(dtype, m, m_len, sigbuf, siglen, rsa);
 }

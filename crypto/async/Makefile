@@ -17,13 +17,13 @@ TEST=
 APPS=
 
 LIB=$(TOP)/libcrypto.a
-LIBSRC=async.c arch/async_posix.c arch/async_win.c
-LIBOBJ=async.o arch/async_posix.o arch/async_win.o
+LIBSRC=async.c cpu_cycles.c arch/async_posix.c arch/async_win.c
+LIBOBJ=async.o cpu_cycles.o arch/async_posix.o arch/async_win.o
 
 SRC= $(LIBSRC)
 
 EXHEADER= async.h
-HEADER=	$(EXHEADER) async_locl.h arch/async_posix.h arch/async_win.h arch/async_null.h
+HEADER=	$(EXHEADER) cpu_cycles.h async_locl.h arch/async_posix.h arch/async_win.h arch/async_null.h
 
 ALL=    $(GENERAL) $(SRC) $(HEADER)
 
@@ -75,8 +75,22 @@ clean:
 
 # DO NOT DELETE THIS LINE -- make depend depends on it.
 
-async.o: ../../include/openssl/async.h ../../include/openssl/crypto.h
-async.o: ../../include/openssl/e_os2.h ../../include/openssl/opensslconf.h
-async.o: ../../include/openssl/opensslv.h ../../include/openssl/ossl_typ.h
-async.o: ../../include/openssl/safestack.h ../../include/openssl/stack.h
-async.o: ../../include/openssl/symhacks.h async.c
+async.o: ../../e_os.h ../../include/openssl/async.h
+async.o: ../../include/openssl/crypto.h ../../include/openssl/e_os2.h
+async.o: ../../include/openssl/opensslconf.h ../../include/openssl/opensslv.h
+async.o: ../../include/openssl/ossl_typ.h ../../include/openssl/safestack.h
+async.o: ../../include/openssl/stack.h ../../include/openssl/symhacks.h
+async.o: arch/async_null.h arch/async_posix.h arch/async_win.h async.c
+async.o: async_locl.h
+async_posix.o: ../../e_os.h ../../include/openssl/async.h
+async_posix.o: ../../include/openssl/crypto.h ../../include/openssl/e_os2.h
+async_posix.o: ../../include/openssl/opensslconf.h
+async_posix.o: ../../include/openssl/opensslv.h
+async_posix.o: ../../include/openssl/ossl_typ.h
+async_posix.o: ../../include/openssl/safestack.h ../../include/openssl/stack.h
+async_posix.o: ../../include/openssl/symhacks.h arch/../arch/async_null.h
+async_posix.o: arch/../arch/async_posix.h arch/../arch/async_win.h
+async_posix.o: arch/../async_locl.h arch/async_posix.c async_posix.c
+async_win.o: ../../include/openssl/async.h arch/async_win.c arch/async_win.h
+async_win.o: async_win.c
+cpu_cycles.o: cpu_cycles.c

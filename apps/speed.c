@@ -186,7 +186,12 @@
 #include <openssl/bn.h>
 
 #include <openssl/async.h>
+ 
+#include <openssl/cpu_cycles.h>
+
+# ifndef OPENSSL_NO_HW_QAT
 #include <e_qat.h>
+# endif
 
 #ifndef HAVE_FORK
 # if defined(OPENSSL_SYS_VMS) || defined(OPENSSL_SYS_WINDOWS) || defined(OPENSSL_SYS_OS2) || defined(OPENSSL_SYS_NETWARE)
@@ -211,13 +216,13 @@
 
 # ifdef RDTSC_INSTRUMENTED
 
-static __inline__ unsigned long long rdtsc(void)
-{
-    unsigned long a, d;
+//static __inline__ unsigned long long rdtsc(void)
+//{
+//    unsigned long a, d;
 
-    asm volatile ("rdtsc":"=a" (a), "=d"(d));
-    return (((unsigned long long)a) | (((unsigned long long)d) << 32));
-}
+//    asm volatile ("rdtsc":"=a" (a), "=d"(d));
+//    return (((unsigned long long)a) | (((unsigned long long)d) << 32));
+//}
 
 #  define RDTSC_FUNC_START() \
        unsigned long long rdtsc_func_start = 0; \
@@ -245,6 +250,10 @@ static void print_message(const char *s, long num, int length);
 static void pkey_print_message(const char *str, const char *str2,
                                long num, int bits, int sec);
 static void print_result(int alg, int run_no, int count, double time_used);
+#ifdef QAT_CPU_CYCLES_COUNT
+static void reset_fibre_stats();
+static void print_fibre_stats(int size);
+#endif
 #ifndef NO_FORK
 static int do_multi(int multi);
 #endif
@@ -295,6 +304,7 @@ static int rnd_fake = 0;
 
 ENGINE* engine = NULL;
 
+# ifndef OPENSSL_NO_HW_QAT
 static int poll_engine(ENGINE *eng, unsigned int no_resp) 
 {
     int poll_status = 0;
@@ -305,7 +315,7 @@ static int poll_engine(ENGINE *eng, unsigned int no_resp)
     }
     return 1;
 }
-
+# endif
 
 #ifdef SIGALRM
 # if defined(__STDC__) || defined(sgi) || defined(_AIX)
@@ -1391,6 +1401,7 @@ int MAIN(int argc, char **argv)
         ENGINE_free(engine);
         goto end;
     }
+    BIO_printf(bio_err, "enabling polling on engine\n");
 # endif
 
     engine = setup_engine(bio_err, engine_id, 0);
@@ -2221,13 +2232,43 @@ int MAIN(int argc, char **argv)
                         requestno=requestno%num_ctx;
                         ctx = ctxs + requestno;
 # endif
+                        if (ctx->job != NULL && !ASYNC_is_ready(ctx->job)) {
+                            /* The job is not ready to be resumed */
+                            count--;
+
+# ifndef OPENSSL_NO_HW_QAT
+                            /* Sometimes I still need to poll */
+                            if (requestno == 0) {
+                                poll_engine(engine, batch);
+                            }
+# endif
+
+                            continue;
+                        }
                         retval =
-                            EVP_DecryptUpdate_async(ctx, buf, &outl, buf,
+                            EVP_DecryptUpdate(ctx, buf, &outl, buf,
                                                     lengths[j]);
                         if (retval == -1 && ctx->job != NULL) { 
-                            count--; /* Decrement count as the request
-                                      * was not completed */
-                        } 
+                             /* Retry detected so need to resubmit:
+                              * it can be HW retry or an in-fligth
+                              */
+# ifndef OPENSSL_NO_HW_QAT
+                             if (ERR_R_RETRY == ERR_GET_REASON(ERR_peek_error())) {
+                                 // In case of HW retry I must not wait for an event
+                                 ASYNC_set_ready(ctx->job, 1);
+                                 // Remove the error from the stack
+                                 ERR_get_error();
+                             }
+                             else {
+                                 ASYNC_set_ready(ctx->job, 0);
+                             }
+# else
+                             ASYNC_set_ready(ctx->job, 1);
+
+# endif
+                             count--; /* Decrement count as the request
+                                       * was not completed */
+                         }
 
 # ifndef OPENSSL_NO_HW_QAT
                         if (requestno == 0)
@@ -2241,12 +2282,14 @@ int MAIN(int argc, char **argv)
 # ifndef OPENSSL_NO_HW_QAT
                     for (k = 0; k < num_ctx; k++) {
                         ctx = ctxs + k;
-                        do {
 # endif
-                            retval = EVP_DecryptFinal_ex_async(ctx, buf, &outl);
+                        do {
+                            retval = EVP_DecryptFinal_ex(ctx, buf, &outl);
 # ifndef OPENSSL_NO_HW_QAT
                             poll_engine(engine, num_ctx);
+# endif
                         } while (retval == -1 && ctx->job != NULL);
+# ifndef OPENSSL_NO_HW_QAT
                     }
                     poll_engine(engine, num_ctx);
 # endif
@@ -2277,12 +2320,13 @@ int MAIN(int argc, char **argv)
                          }
 
                          retval =
-                            EVP_EncryptUpdate_async(ctx, buf, &outl, buf,
+                            EVP_EncryptUpdate(ctx, buf, &outl, buf,
                                                     lengths[j]);
                          if (retval == -1 && ctx->job != NULL) { 
                              /* Retry detected so need to resubmit:
                               * it can be HW retry or an in-fligth
                               */
+# ifndef OPENSSL_NO_HW_QAT
                              if (ERR_R_RETRY == ERR_GET_REASON(ERR_peek_error())) {
                                  // In case of HW retry I must not wait for an event
                                  ASYNC_set_ready(ctx->job, 1);
@@ -2292,6 +2336,10 @@ int MAIN(int argc, char **argv)
                              else {
                                  ASYNC_set_ready(ctx->job, 0);
                              }
+# else
+                             ASYNC_set_ready(ctx->job, 1);
+
+# endif
                              count--; /* Decrement count as the request
                                        * was not completed */
                          }
@@ -2307,12 +2355,14 @@ int MAIN(int argc, char **argv)
 # ifndef OPENSSL_NO_HW_QAT
                     for (k = 0; k < num_ctx; k++) {
                         ctx = ctxs + k;
-                        do {
 # endif
-                            retval = EVP_EncryptFinal_ex_async(ctx, buf, &outl);
+                        do {
+                            retval = EVP_EncryptFinal_ex(ctx, buf, &outl);
 # ifndef OPENSSL_NO_HW_QAT
                             poll_engine(engine, num_ctx);
+# endif
                         } while (retval == -1 && ctx->job != NULL);
+# ifndef OPENSSL_NO_HW_QAT
                     }
                     poll_engine(engine, num_ctx);
 # endif
@@ -2333,6 +2383,12 @@ int MAIN(int argc, char **argv)
 # endif
                 if (ctx)
                     OPENSSL_free(ctx);
+
+#ifdef QAT_CPU_CYCLES_COUNT
+            fprintf(stderr,"Calls total cycles: %llu\n", fibre_total_acc);
+            fprintf(stderr,"Number of calls: %u\n", fibre_total_num);
+            print_fibre_stats(lengths[j]);
+#endif 
             }
 
             if (evp_md) {
@@ -2380,11 +2436,14 @@ int MAIN(int argc, char **argv)
         if (!rsa_doit[j])
             continue;
         do {
-            ret = RSA_sign_async(NID_md5_sha1, buf, 36, buf2, &rsa_num, rsa_key[j]);
+            ret = RSA_sign(NID_md5_sha1, buf, 36, buf2, &rsa_num, rsa_key[j]);
 # ifndef OPENSSL_NO_HW_QAT
             poll_engine(engine, batch);
 # endif
         } while (ret == -1 && rsa_key[j]->job != NULL);
+#ifdef QAT_CPU_CYCLES_COUNT
+        reset_fibre_stats();
+#endif
         if (ret == 0) {
             BIO_printf(bio_err,
                        "RSA sign failure.  No RSA sign will be done.\n");
@@ -2404,11 +2463,13 @@ int MAIN(int argc, char **argv)
                     /* The job is not ready to be resumed */
                     count--;
 
+# ifndef OPENSSL_NO_HW_QAT
                     /* Sometimes I still need to poll */
                     if (requestno == 0) {
                         poll_calls++;
                         poll_engine(engine, batch);
                     }
+# endif
 
                     continue;
                 }
@@ -2416,12 +2477,13 @@ int MAIN(int argc, char **argv)
                 //ret = RSA_sign(NID_md5_sha1, buf, 36, buf2,
                 //               &rsa_num, rsa_key[j]);
                 async_calls++;
-                ret = RSA_sign_async(NID_md5_sha1, buf, 36, buf2,
+                ret = RSA_sign(NID_md5_sha1, buf, 36, buf2,
                                &rsa_num, rsa_inflights[requestno]);
                 if (ret == -1 && rsa_inflights[requestno]->job != NULL) {
                     /* Retry detected so need to resubmit:
                      * it can be HW retry or an in-fligth
                      */
+# ifndef OPENSSL_NO_HW_QAT
                     if (ERR_R_RETRY == ERR_GET_REASON(ERR_peek_error())) {
                         // In case of HW retry I must not wait for an event
                         ASYNC_set_ready(rsa_inflights[requestno]->job, 1);
@@ -2433,7 +2495,9 @@ int MAIN(int argc, char **argv)
                     else {
                         ASYNC_set_ready(rsa_inflights[requestno]->job, 0);
                     }
-
+# else
+                    ASYNC_set_ready(rsa_inflights[requestno]->job, 1);
+# endif
                     count--;
                 }
                 if (ret == 0) {
@@ -2453,6 +2517,8 @@ int MAIN(int argc, char **argv)
             poll_engine(engine, batch);
 # endif
             d = Time_F(STOP);
+            fprintf(stderr,"Calls total cycles: %llu\n", fibre_total_acc);
+            fprintf(stderr,"Number of calls: %u\n", fibre_total_num);
             BIO_printf(bio_err,
                        mr ? "+R1:%ld:%d:%.2f\n"
                        : "%ld %d bit private RSA's in %.2fs\n",
@@ -2469,13 +2535,19 @@ int MAIN(int argc, char **argv)
 
         BIO_printf(bio_err,"HW Retries: %ld - Retries/Op: %.2f\n",
                 hw_retries, hw_retries * 1.0 / count);
+#ifdef QAT_CPU_CYCLES_COUNT
+        print_fibre_stats(rsa_data_length[j]);
+#endif 
 
         do {
-            ret = RSA_verify_async(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
+            ret = RSA_verify(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
 # ifndef OPENSSL_NO_HW_QAT
             poll_engine(engine, batch);
 # endif
         } while (ret == -1 && rsa_key[j]->job != NULL);
+#ifdef QAT_CPU_CYCLES_COUNT
+        reset_fibre_stats();
+#endif
         if (ret <= 0) {
             BIO_printf(bio_err,
                        "RSA verify failure.  No RSA verify will be done.\n");
@@ -2513,11 +2585,12 @@ int MAIN(int argc, char **argv)
                 //ret = RSA_verify(NID_md5_sha1, buf, 36, buf2,
                 //                 rsa_num, rsa_key[j]);
                 async_calls++;
-                ret = RSA_verify_async(NID_md5_sha1, buf, 36, buf2,
+                ret = RSA_verify(NID_md5_sha1, buf, 36, buf2,
                                  rsa_num, rsa_inflights[requestno]);
                 if (ret == -1 && rsa_inflights[requestno]->job != NULL) {
                     /* Retry detected so need to resubmit: it can be HW retry or an in-fligth
                      */
+# ifndef OPENSSL_NO_HW_QAT
                     if (ERR_R_RETRY == ERR_GET_REASON(ERR_peek_error())) {
                         // In case of HW retry I must not wait for an event
                         ASYNC_set_ready(rsa_inflights[requestno]->job, 1);
@@ -2529,7 +2602,9 @@ int MAIN(int argc, char **argv)
                     else {
                         ASYNC_set_ready(rsa_inflights[requestno]->job, 0);
                     }
-
+# else
+                    ASYNC_set_ready(rsa_inflights[requestno]->job, 1);
+# endif
                     count--;
                 } else {
                     if (ret <= 0) {
@@ -2550,6 +2625,8 @@ int MAIN(int argc, char **argv)
             poll_engine(engine, batch);
 # endif
             d = Time_F(STOP);
+            fprintf(stderr,"Calls total cycles: %llu\n", fibre_total_acc);
+            fprintf(stderr,"Number of calls: %u\n", fibre_total_num);
             BIO_printf(bio_err,
                        mr ? "+R2:%ld:%d:%.2f\n"
                        : "%ld %d bit public RSA's in %.2fs\n",
@@ -2565,6 +2642,9 @@ int MAIN(int argc, char **argv)
 
         BIO_printf(bio_err,"HW Retries: %ld - Retries/Op: %.2f\n",
                 hw_retries, hw_retries * 1.0 / count);
+#ifdef QAT_CPU_CYCLES_COUNT
+        print_fibre_stats(rsa_data_length[j]);
+#endif 
 
         if (rsa_count <= 1) {
             /* if longer than 10s, don't do any more */
@@ -2621,7 +2701,7 @@ int MAIN(int argc, char **argv)
         /* DSA_sign_setup(dsa_key[j],NULL); */
         do {
             //ret = DSA_sign(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]); 
-            ret = DSA_sign_async(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]);
+            ret = DSA_sign(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]);
 # ifndef OPENSSL_NO_HW_QAT
             poll_engine(engine, batch);
 # endif
@@ -2639,7 +2719,7 @@ int MAIN(int argc, char **argv)
                 requestno++;
                 requestno = requestno % batch;
                 // ret = DSA_sign(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]);
-                ret = DSA_sign_async(EVP_PKEY_DSA, buf, 20, buf2, &kk,
+                ret = DSA_sign(EVP_PKEY_DSA, buf, 20, buf2, &kk,
                                     dsa_inflights[requestno]);
                 if (ret == -1 && dsa_inflights[requestno]->job != NULL) {
                     count--; /*Retry detected so need to resubmit*/
@@ -2669,7 +2749,7 @@ int MAIN(int argc, char **argv)
 
         do {
             // ret = DSA_verify(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
-            ret = DSA_verify_async(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
+            ret = DSA_verify(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
 # ifndef OPENSSL_NO_HW_QAT
             poll_engine(engine, batch);
 # endif
@@ -2687,7 +2767,7 @@ int MAIN(int argc, char **argv)
                 requestno++;
                 requestno=requestno%batch;
                 // ret = DSA_verify(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
-                ret = DSA_verify_async(EVP_PKEY_DSA, buf, 20, buf2, kk,
+                ret = DSA_verify(EVP_PKEY_DSA, buf, 20, buf2, kk,
                                     dsa_inflights[requestno]);
                 if (ret == -1 && dsa_inflights[requestno]->job != NULL) {
                     count--; /*Retry detected so need to resubmit*/
@@ -2762,7 +2842,7 @@ int MAIN(int argc, char **argv)
 
             do {
                 // ret = ECDSA_sign(0, buf, 20, ecdsasig, &ecdsasiglen, ecdsa[j]);
-                ret = ECDSA_sign_async(0, buf, 20, ecdsasig, &ecdsasiglen, ecdsa[j]);
+                ret = ECDSA_sign(0, buf, 20, ecdsasig, &ecdsasiglen, ecdsa[j]);
 # ifndef OPENSSL_NO_HW_QAT
                 poll_engine(engine, batch);
 # endif
@@ -2792,7 +2872,7 @@ int MAIN(int argc, char **argv)
                     requestno = requestno % batch;
                     // ret = ECDSA_sign(0, buf, 20,
                     //                 ecdsasig, &ecdsasiglen, ecdsa[j]);
-                    ret = ECDSA_sign_async(0, buf, 20,
+                    ret = ECDSA_sign(0, buf, 20,
                                      ecdsasig, &ecdsasiglen, ecdsa_inflights[requestno]);
                     if (ret == -1 && EC_KEY_get_job(ecdsa_inflights[requestno]) != NULL) {
                         count--; /*Retry detected so need to resubmit*/
@@ -2824,7 +2904,7 @@ int MAIN(int argc, char **argv)
             /* Perform ECDSA verification test */
             do {
                 // ret = ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen, ecdsa[j]);
-                ret = ECDSA_verify_async(0, buf, 20, ecdsasig, ecdsasiglen, ecdsa[j]);
+                ret = ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen, ecdsa[j]);
 # ifndef OPENSSL_NO_HW_QAT
                 poll_engine(engine, batch);
 # endif
@@ -2843,7 +2923,7 @@ int MAIN(int argc, char **argv)
                     requestno++;
                     requestno=requestno%batch;
                     //ret = ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen, ecdsa[j]);
-                    ret = ECDSA_verify_async(0, buf, 20, ecdsasig, ecdsasiglen,
+                    ret = ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen,
                                      ecdsa_inflights[requestno]);
                     if (ret == -1 && EC_KEY_get_job(ecdsa_inflights[requestno]) != NULL) {
                         count--; /*Retry detected so need to resubmit*/
@@ -2939,7 +3019,7 @@ int MAIN(int argc, char **argv)
                 }
                 do {
                     secret_size_a =
-                        ECDH_compute_key_async(secret_a, outlen,
+                        ECDH_compute_key(secret_a, outlen,
                                          EC_KEY_get0_public_key(ecdh_b[j]),
                                          ecdh_a[j], kdf);
 # ifndef OPENSSL_NO_HW_QAT
@@ -2948,7 +3028,7 @@ int MAIN(int argc, char **argv)
                 } while (secret_size_a == -1 && EC_KEY_get_job(ecdh_a[j]) != NULL);
                 do {
                     secret_size_b =
-                        ECDH_compute_key_async(secret_b, outlen,
+                        ECDH_compute_key(secret_b, outlen,
                                          EC_KEY_get0_public_key(ecdh_a[j]),
                                          ecdh_b[j], kdf);
 # ifndef OPENSSL_NO_HW_QAT
@@ -2979,7 +3059,7 @@ int MAIN(int argc, char **argv)
                 for (count = 0, run = 1; COND(ecdh_c[j][0]); count++) {
                     requestno++;
                     requestno=requestno%batch;
-                    secret_size_a = ECDH_compute_key_async(secret_a, outlen,
+                    secret_size_a = ECDH_compute_key(secret_a, outlen,
                                      EC_KEY_get0_public_key(ecdh_b[j]),
                                      ecdh_inflights[requestno], kdf);
                     if (secret_size_a == -1 && EC_KEY_get_job(ecdh_inflights[requestno]) != NULL) {
@@ -3047,7 +3127,7 @@ int MAIN(int argc, char **argv)
                     exit(EXIT_FAILURE);
             }
             do {
-                dh_gen_status_a = DH_generate_key_async(dh_inflights[k]) ;
+                dh_gen_status_a = DH_generate_key(dh_inflights[k]) ;
 # ifndef OPENSSL_NO_HW_QAT
                 poll_engine(engine, batch);
 # endif
@@ -3085,13 +3165,13 @@ int MAIN(int argc, char **argv)
 
                 /* generate two DH key pairs */
                 do {
-                    dh_gen_status_a = DH_generate_key_async(dh_a[j]) ;
+                    dh_gen_status_a = DH_generate_key(dh_a[j]) ;
 # ifndef OPENSSL_NO_HW_QAT
                     poll_engine(engine, batch);
 # endif
                 } while (dh_gen_status_a == -1 && dh_a[j]->job != NULL);
                 do {
-                    dh_gen_status_b = DH_generate_key_async(dh_b[j]) ;
+                    dh_gen_status_b = DH_generate_key(dh_b[j]) ;
 # ifndef OPENSSL_NO_HW_QAT
                     poll_engine(engine, batch);
 # endif
@@ -3104,7 +3184,7 @@ int MAIN(int argc, char **argv)
                 } else {
                     do {
                         sec_size_a =
-                            DH_compute_key_async(sec_a, dh_b[j]->pub_key, dh_a[j]);
+                            DH_compute_key(sec_a, dh_b[j]->pub_key, dh_a[j]);
 # ifndef OPENSSL_NO_HW_QAT
                             poll_engine(engine, batch);
 # endif
@@ -3112,7 +3192,7 @@ int MAIN(int argc, char **argv)
 
                     do {
                         sec_size_b =
-                            DH_compute_key_async(sec_b, dh_a[j]->pub_key, dh_b[j]);
+                            DH_compute_key(sec_b, dh_a[j]->pub_key, dh_b[j]);
 # ifndef OPENSSL_NO_HW_QAT
                             poll_engine(engine, batch);
 # endif
@@ -3141,7 +3221,7 @@ int MAIN(int argc, char **argv)
                     for (count = 0, run = 1; COND(dh_c[j][0]); count++) {
                         requestno++;
                         requestno = requestno % batch;
-                        sec_size_a = DH_compute_key_async(sec_a, dh_b[j]->pub_key, dh_inflights[requestno]);
+                        sec_size_a = DH_compute_key(sec_a, dh_b[j]->pub_key, dh_inflights[requestno]);
                         if (sec_size_a == -1 && dh_inflights[requestno]->job != NULL) {
                             count--; /*Retry detected so need to resubmit*/
                         }
@@ -3735,3 +3815,34 @@ end:
     if(out)
         OPENSSL_free(out);
 }
+
+#ifdef QAT_CPU_CYCLES_COUNT
+static void reset_fibre_stats()
+{
+    fibre_total_acc=0;
+    fibre_total_num=0;
+    fibre_total_avg=0;
+    fibre_startup_acc=0;
+    fibre_startup_num=0;
+    fibre_startup_avg=0;
+    fibre_switch_acc=0;
+    fibre_switch_num=0;
+    fibre_switch_avg=0;
+    fibre_destroy_acc=0;
+    fibre_destroy_num=0;
+    fibre_destroy_avg=0;
+}
+
+static void print_fibre_stats(int size)
+{
+    fibre_total_avg=fibre_total_acc/fibre_total_num;
+    fibre_startup_avg=fibre_startup_acc/fibre_startup_num;
+    fibre_switch_avg=fibre_switch_acc/fibre_switch_num;
+    fibre_destroy_avg=fibre_destroy_acc/fibre_destroy_num;
+
+    fprintf(stderr, "\ncsv,Type,Avg Call Cycles,Avg Fibre Startup Cycles,Avg Fibre Switch 1 Cycles,Avg Fibre Switch 2 Cycles,Avg Fibre Destroy Cycles,Work Excluding Fibre Overhead Cycle Cost,Fibre Overhead,Fibre Overhead (exl Startup/Destroy)\n");
+    fprintf(stderr, "csv,%d,%llu,%llu,%llu,%llu,%llu,%llu,%.2f,%.2f\n\n", size, fibre_total_avg, fibre_startup_avg, fibre_switch_avg, fibre_switch_avg, fibre_destroy_avg, fibre_total_avg-(fibre_startup_avg+fibre_switch_avg+fibre_switch_avg+fibre_destroy_avg), ((double)(fibre_startup_avg+fibre_switch_avg+fibre_switch_avg+fibre_destroy_avg)/(double)fibre_total_avg)*100, ((double)(fibre_switch_avg+fibre_switch_avg)/(double)(fibre_total_avg-fibre_startup_avg-fibre_destroy_avg))*100); 
+    reset_fibre_stats();
+}
+
+#endif 

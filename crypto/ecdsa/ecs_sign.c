@@ -68,16 +68,6 @@ struct ecdsa_sign_async_args {
     EC_KEY *eckey;
 };
 
-static int ecdsa_sign_async_internal(void *vargs)
-{
-    struct ecdsa_sign_async_args *args;
-    args = (struct ecdsa_sign_async_args *)vargs;
-    if (!args)
-        return 0;
-    return ECDSA_sign(args->type, args->dgst, args->dlen,
-                    args->sig, args->siglen, args->eckey);
-}
-
 ECDSA_SIG *ECDSA_do_sign(const unsigned char *dgst, int dlen, EC_KEY *eckey)
 {
     return ECDSA_do_sign_ex(dgst, dlen, NULL, NULL, eckey);
@@ -93,13 +83,23 @@ ECDSA_SIG *ECDSA_do_sign_ex(const unsigned char *dgst, int dlen,
     return ecdsa->meth->ecdsa_do_sign(dgst, dlen, kinv, rp, eckey);
 }
 
-int ECDSA_sign(int type, const unsigned char *dgst, int dlen, unsigned char
+int ecdsa_sign_internal(int type, const unsigned char *dgst, int dlen, unsigned char
                *sig, unsigned int *siglen, EC_KEY *eckey)
 {
     return ECDSA_sign_ex(type, dgst, dlen, sig, siglen, NULL, NULL, eckey);
 }
 
-int ECDSA_sign_async(int type, const unsigned char *dgst, int dlen,
+static int ecdsa_sign_async_internal(void *vargs)
+{
+    struct ecdsa_sign_async_args *args;
+    args = (struct ecdsa_sign_async_args *)vargs;
+    if (!args)
+        return 0;
+    return ecdsa_sign_internal(args->type, args->dgst, args->dlen,
+                    args->sig, args->siglen, args->eckey);
+}
+
+int ECDSA_sign(int type, const unsigned char *dgst, int dlen,
             unsigned char *sig, unsigned int *siglen, EC_KEY *eckey)
 {
     int ret;
@@ -117,7 +117,6 @@ int ECDSA_sign_async(int type, const unsigned char *dgst, int dlen,
         switch(ASYNC_start_job(&tmp_job, &ret, ecdsa_sign_async_internal, &args,
             sizeof(struct ecdsa_sign_async_args))) {
         case ASYNC_ERR:
-            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
             EC_KEY_set_job(eckey, tmp_job);
@@ -126,12 +125,11 @@ int ECDSA_sign_async(int type, const unsigned char *dgst, int dlen,
             EC_KEY_set_job(eckey, NULL);
             return ret;
         default:
-            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
             /* Shouldn't happen */
             return -1;
         }
     }
-    return ECDSA_sign(type, dgst, dlen, sig, siglen, eckey);
+    return ecdsa_sign_internal(type, dgst, dlen, sig, siglen, eckey);
 }
 
 int ECDSA_sign_ex(int type, const unsigned char *dgst, int dlen, unsigned char

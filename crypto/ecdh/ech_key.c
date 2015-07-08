@@ -78,17 +78,7 @@ struct ecdh_compute_key_async_args {
     void *(*KDF) (const void *in, size_t inlen, void *out, size_t *outlen);
 };
 
-static int ecdh_compute_key_async_internal(void *vargs)
-{
-    struct ecdh_compute_key_async_args *args;
-    args = (struct ecdh_compute_key_async_args *)vargs;
-    if (!args)
-        return 0;
-    return ECDH_compute_key(args->out, args->outlen, args->pub_key,
-                    args->eckey, args->KDF);
-}
-
-int ECDH_compute_key(void *out, size_t outlen, const EC_POINT *pub_key,
+int ecdh_compute_key_internal(void *out, size_t outlen, const EC_POINT *pub_key,
                      EC_KEY *eckey,
                      void *(*KDF) (const void *in, size_t inlen, void *out,
                                    size_t *outlen))
@@ -99,7 +89,17 @@ int ECDH_compute_key(void *out, size_t outlen, const EC_POINT *pub_key,
     return ecdh->meth->compute_key(out, outlen, pub_key, eckey, KDF);
 }
 
-int ECDH_compute_key_async(void *out, size_t outlen, const EC_POINT *pub_key,
+static int ecdh_compute_key_async_internal(void *vargs)
+{
+    struct ecdh_compute_key_async_args *args;
+    args = (struct ecdh_compute_key_async_args *)vargs;
+    if (!args)
+        return 0;
+    return ecdh_compute_key_internal(args->out, args->outlen, args->pub_key,
+                    args->eckey, args->KDF);
+}
+
+int ECDH_compute_key(void *out, size_t outlen, const EC_POINT *pub_key,
                      EC_KEY *eckey,
                      void *(*KDF) (const void *in, size_t inlen, void *out,
                                    size_t *outlen))
@@ -118,7 +118,6 @@ int ECDH_compute_key_async(void *out, size_t outlen, const EC_POINT *pub_key,
         switch(ASYNC_start_job(&tmp_job, &ret, ecdh_compute_key_async_internal, &args,
             sizeof(struct ecdh_compute_key_async_args))) {
         case ASYNC_ERR:
-            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
             EC_KEY_set_job(eckey, tmp_job);
@@ -127,10 +126,9 @@ int ECDH_compute_key_async(void *out, size_t outlen, const EC_POINT *pub_key,
             EC_KEY_set_job(eckey, NULL);
             return ret;
         default:
-            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
             /* Shouldn't happen */
             return -1;
         }
     }
-    return ECDH_compute_key(out, outlen, pub_key, eckey, KDF);
+    return ecdh_compute_key_internal(out, outlen, pub_key, eckey, KDF);
 }

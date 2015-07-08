@@ -383,7 +383,6 @@ qat_rsa_decrypt(CpaCyRsaDecryptOpData * dec_op_data,
     int rc = 1;
 
     initOpDone(&op_done);
-
     /*
      * cpaCyRsaDecrypt() is the function called for RSA verify in API, the
      * DecOpData [IN] contains both private key value and input file (hash)
@@ -405,7 +404,6 @@ qat_rsa_decrypt(CpaCyRsaDecryptOpData * dec_op_data,
             //qatPerformOpRetries++;
 
             QATerr(QAT_F_QAT_RSA_DECRYPT, ERR_R_RETRY);
-            // fprintf(stderr, "Retry decrypt\n");
 
             ASYNC_pause_job();
             if(!getEnableExternalPolling())
@@ -429,35 +427,9 @@ qat_rsa_decrypt(CpaCyRsaDecryptOpData * dec_op_data,
         ASYNC_pause_job();
 
 #ifdef QAT_CPU_CYCLES_COUNT
-        // This is the cpu cycles count for the switch of the current fibre
         cpucycle_t fibre_switch_current = rdtsc() - fibre_switch_start;
-
-        // This is a very primitive way to detect outliers
-        if (fibre_switch_current > 1.5 * fibre_switch_min) {
-            // fprintf(stderr, "Fibre switch: outlier = %llu \n", fibre_switch_current);
-            ++fibre_switch_out;
-        }
-        else {
-            // fprintf(stderr, "Fibre switch: current = %llu \n", fibre_switch_current);
-            ++fibre_switch_num;
-            fibre_switch_acc += fibre_switch_current;
-
-            // Update the current max and min
-            fibre_switch_max = MAX(fibre_switch_max, fibre_switch_current);
-            fibre_switch_min = MIN(fibre_switch_min, fibre_switch_current);
-        }
-
-        // Every QAT_FIBRE_SWITCH_SAMPLE measures I print the avg e reset
-        if (fibre_switch_num == QAT_FIBRE_SWITCH_SAMPLE) {
-            fprintf(stderr, "Fibre switch: avg = %.2f\tmax = %llu\tmin = %llu\toutliers = %d\n",
-                    (double) 1.0 * fibre_switch_acc / fibre_switch_num,
-                    fibre_switch_max, fibre_switch_min, fibre_switch_out);
-            fibre_switch_num = 0;
-            fibre_switch_acc = 0;
-            fibre_switch_min = QAT_FIBRE_CYCLES_MIN;
-            fibre_switch_max = 0;
-            fibre_switch_out = 0;
-        }
+        ++fibre_switch_num;
+        fibre_switch_acc += fibre_switch_current;
 #endif
         if(!getEnableExternalPolling())
             poll_instances();
@@ -635,7 +607,6 @@ qat_rsa_encrypt(CpaCyRsaEncryptOpData * enc_op_data,
             //qatPerformOpRetries++;
 
             QATerr(QAT_F_QAT_RSA_ENCRYPT, ERR_R_RETRY);
-            // fprintf(stderr, "Retry encrypt\n");
             ASYNC_pause_job();
             if(!getEnableExternalPolling())
                 poll_instances();
@@ -657,38 +628,14 @@ qat_rsa_encrypt(CpaCyRsaEncryptOpData * enc_op_data,
     do {
         ASYNC_pause_job();
 #ifdef QAT_CPU_CYCLES_COUNT
-        // This is the cpu cycles count for the switch of the current fibre
         cpucycle_t fibre_switch_current = rdtsc() - fibre_switch_start;
-
-        // This is a very primitive way to detect outliers
-        if (fibre_switch_current > 1.5 * fibre_switch_min) {
-            // fprintf(stderr, "Fibre switch: outlier = %llu \n", fibre_switch_current);
-            ++fibre_switch_out;
-        }
-        else {
-            // fprintf(stderr, "Fibre switch: current = %llu \n", fibre_switch_current);
-            ++fibre_switch_num;
-            fibre_switch_acc += fibre_switch_current;
-
-            // Update the current max and min
-            fibre_switch_max = MAX(fibre_switch_max, fibre_switch_current);
-            fibre_switch_min = MIN(fibre_switch_min, fibre_switch_current);
-        }
-
-        // Every QAT_FIBRE_SWITCH_SAMPLE measures I print the avg e reset
-        if (fibre_switch_num == QAT_FIBRE_SWITCH_SAMPLE) {
-            fprintf(stderr, "Fibre switch: avg = %.2f\tmax = %llu\tmin = %llu\toutliers = %d\n",
-                    (double) 1.0 * fibre_switch_acc / fibre_switch_num,
-                    fibre_switch_max, fibre_switch_min, fibre_switch_out);
-            fibre_switch_num = 0;
-            fibre_switch_acc = 0;
-            fibre_switch_min = QAT_FIBRE_CYCLES_MIN;
-            fibre_switch_max = 0;
-            fibre_switch_out = 0;
-        }
+        ++fibre_switch_num;
+        fibre_switch_acc += fibre_switch_current;
 #endif
         if(!getEnableExternalPolling())
+        {
             poll_instances();
+        }
     }
     while (!op_done.flag);
     cleanupOpDone(&op_done);

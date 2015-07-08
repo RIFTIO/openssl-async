@@ -163,17 +163,7 @@ DSA *DSAparams_dup(DSA *dsa)
     return ASN1_item_dup(ASN1_ITEM_rptr(DSAparams), dsa);
 }
 
-static int dsa_sign_async_internal(void *vargs)
-{
-    struct dsa_async_args *args;
-    args = (struct dsa_async_args *)vargs;
-    if (!args)
-        return 0;
-    return DSA_sign(args->type, args->dgst, args->dlen,
-                    args->sig, args->siglen, args->dsa); 
-}
-
-int DSA_sign(int type, const unsigned char *dgst, int dlen,
+int dsa_sign_internal(int type, const unsigned char *dgst, int dlen,
              unsigned char *sig, unsigned int *siglen, DSA *dsa)
 {
     DSA_SIG *s;
@@ -188,7 +178,17 @@ int DSA_sign(int type, const unsigned char *dgst, int dlen,
     return (1);
 }
 
-int DSA_sign_async(int type, const unsigned char *dgst, int dlen,
+static int dsa_sign_async_internal(void *vargs)
+{
+    struct dsa_async_args *args;
+    args = (struct dsa_async_args *)vargs;
+    if (!args)
+        return 0;
+    return dsa_sign_internal(args->type, args->dgst, args->dlen,
+                    args->sig, args->siglen, args->dsa); 
+}
+
+int DSA_sign(int type, const unsigned char *dgst, int dlen,
              unsigned char *sig, unsigned int *siglen, DSA *dsa)
 {
     int ret;
@@ -205,7 +205,6 @@ int DSA_sign_async(int type, const unsigned char *dgst, int dlen,
         switch(ASYNC_start_job(&dsa->job, &ret, dsa_sign_async_internal, &args,
             sizeof(struct dsa_async_args))) {
         case ASYNC_ERR:
-            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
             return -1;
@@ -213,22 +212,11 @@ int DSA_sign_async(int type, const unsigned char *dgst, int dlen,
             dsa->job = NULL;
             return ret;
         default:
-            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
             /* Shouldn't happen */
             return -1;
         }
     }
-    return DSA_sign(type, dgst, dlen, sig, siglen, dsa);
-}
-
-static int dsa_verify_async_internal(void *vargs)
-{
-    struct dsa_async_args *args;
-    args = (struct dsa_async_args *)vargs;
-    if (!args)
-        return 0;
-    return DSA_verify(args->type, args->dgst, args->dlen,
-                    args->sigbuf, args->sigbuflen, args->dsa); 
+    return dsa_sign_internal(type, dgst, dlen, sig, siglen, dsa);
 }
 
 /* data has already been hashed (probably with SHA or SHA-1). */
@@ -238,7 +226,7 @@ static int dsa_verify_async_internal(void *vargs)
  *      0: incorrect signature
  *     -1: error
  */
-int DSA_verify(int type, const unsigned char *dgst, int dgst_len,
+int dsa_verify_internal(int type, const unsigned char *dgst, int dgst_len,
                const unsigned char *sigbuf, int siglen, DSA *dsa)
 {
     DSA_SIG *s;
@@ -266,7 +254,17 @@ int DSA_verify(int type, const unsigned char *dgst, int dgst_len,
     return (ret);
 }
 
-int DSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
+static int dsa_verify_async_internal(void *vargs)
+{
+    struct dsa_async_args *args;
+    args = (struct dsa_async_args *)vargs;
+    if (!args)
+        return 0;
+    return dsa_verify_internal(args->type, args->dgst, args->dlen,
+                    args->sigbuf, args->sigbuflen, args->dsa); 
+}
+
+int DSA_verify(int type, const unsigned char *dgst, int dgst_len,
                const unsigned char *sigbuf, int siglen, DSA *dsa)
 {
     int ret;
@@ -283,7 +281,6 @@ int DSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
         switch(ASYNC_start_job(&dsa->job, &ret, dsa_verify_async_internal, &args,
             sizeof(struct dsa_async_args))) {
         case ASYNC_ERR:
-            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
             return -1;
@@ -291,11 +288,10 @@ int DSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
             dsa->job = NULL;
             return ret;
         default:
-            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
             /* Shouldn't happen */
             return -1;
         }
     }
-    return DSA_verify(type, dgst, dgst_len, sigbuf, siglen, dsa);
+    return dsa_verify_internal(type, dgst, dgst_len, sigbuf, siglen, dsa);
 }
 

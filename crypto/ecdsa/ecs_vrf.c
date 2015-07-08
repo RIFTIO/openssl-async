@@ -77,16 +77,6 @@ struct ecdsa_verify_async_args {
 };
 
 
-static int ecdsa_verify_async_internal(void *vargs)
-{
-    struct ecdsa_verify_async_args *args;
-    args = (struct ecdsa_verify_async_args *)vargs;
-    if (!args)
-        return 0;
-    return ECDSA_verify(args->type, args->dgst, args->dgst_len,
-                    args->sigbuf, args->sig_len, args->eckey);
-}
-
 /*-
  * returns
  *      1: correct signature
@@ -108,7 +98,7 @@ int ECDSA_do_verify(const unsigned char *dgst, int dgst_len,
  *      0: incorrect signature
  *     -1: error
  */
-int ECDSA_verify(int type, const unsigned char *dgst, int dgst_len,
+int ecdsa_verify_internal(int type, const unsigned char *dgst, int dgst_len,
                  const unsigned char *sigbuf, int sig_len, EC_KEY *eckey)
 {
     ECDSA_SIG *s;
@@ -136,7 +126,17 @@ int ECDSA_verify(int type, const unsigned char *dgst, int dgst_len,
     return (ret);
 }
 
-int ECDSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
+static int ecdsa_verify_async_internal(void *vargs)
+{
+    struct ecdsa_verify_async_args *args;
+    args = (struct ecdsa_verify_async_args *)vargs;
+    if (!args)
+        return 0;
+    return ecdsa_verify_internal(args->type, args->dgst, args->dgst_len,
+                    args->sigbuf, args->sig_len, args->eckey);
+}
+
+int ECDSA_verify(int type, const unsigned char *dgst, int dgst_len,
                  const unsigned char *sigbuf, int sig_len, EC_KEY *eckey)
 {
     int ret;
@@ -154,7 +154,6 @@ int ECDSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
         switch(ASYNC_start_job(&tmp_job, &ret, ecdsa_verify_async_internal, &args,
             sizeof(struct ecdsa_verify_async_args))) {
         case ASYNC_ERR:
-            //SSLerr(SSL_F_SSL_READ, SSL_R_FAILED_TO_INIT_ASYNC);
             return -1;
         case ASYNC_PAUSE:
             EC_KEY_set_job(eckey, tmp_job);
@@ -163,11 +162,10 @@ int ECDSA_verify_async(int type, const unsigned char *dgst, int dgst_len,
             EC_KEY_set_job(eckey, NULL);
             return ret;
         default:
-            //SSLerr(SSL_F_SSL_READ, ERR_R_INTERNAL_ERROR);
             /* Shouldn't happen */
             return -1;
         }
     }
-    return ECDSA_verify(type, dgst, dgst_len, sigbuf, sig_len, eckey);
+    return ecdsa_verify_internal(type, dgst, dgst_len, sigbuf, sig_len, eckey);
 }
 
