@@ -110,14 +110,6 @@
 #  include <signal.h>
 # endif
 
-# ifndef OPENSSL_NO_HW_QAT
-#  ifdef USE_QAT_MEM
-#   include "qae_mem_utils.h"
-#  endif
-#  ifdef USE_QAE_MEM
-#   include "qat_mem_drv_inf.h"
-#  endif
-# endif
 
 # if defined(_WIN32) || defined(__CYGWIN__)
 #  include <windows.h>
@@ -372,19 +364,6 @@ static void async_cb(unsigned char *out, unsigned int outl, void *vparams,
         cbData->stats->resp++;
 }
 
-# ifndef OPENSSL_NO_HW_QAT
-static void digest_async_num_ctx_cb(unsigned char *out, unsigned int outl,
-                                    void *vparams, int status)
-{
-    CallbackData_t *cbData = (CallbackData_t *) vparams;
-
-    if (status && outl != 0 && cbData) {
-        cbData->stats->resp++;
-        EVP_MD_CTX_destroy(cbData->ctx.digest);
-        OPENSSL_free(cbData);
-    }
-}
-# endif
 
 static int async_cb_ex(unsigned char *out, size_t outl, void *vparams,
                        int status)
@@ -554,10 +533,6 @@ static void dumpError_ex(char *errStr, CallbackStats_t * stats, int retry,
 
     if ((retry == RETRY) && (ERR_R_RETRY == ERR_GET_REASON(error))) {
         stats->submission_retries++;
-# ifndef OPENSSL_NO_HW_QAT
-        if (*k != -1)
-            (*k)--;
-# endif
     } else {
         stats->gen_errors++;
         ERR_error_string(error, error_string);
@@ -879,14 +854,8 @@ int MAIN(int argc, char **argv)
     int decrypt = 0;
     int async = 0;
     int batch = 1;
-# ifndef OPENSSL_NO_HW_QAT
-    int num_ctx = 1;
-# endif
 # ifndef NO_FORK
     int multi = 0;
-# endif
-# ifndef OPENSSL_NO_HW_QAT
-    int zero_copy = 0;
 # endif
 # ifndef TIMES
     usertime = -1;
@@ -1031,23 +1000,6 @@ int MAIN(int argc, char **argv)
             j--;                /* Otherwise, -elapsed gets confused with an
                                  * algorithm. */
         }
-# ifndef OPENSSL_NO_HW_QAT
-        else if ((argc > 0) && (strcmp(*argv, "-num_ctx") == 0)) {
-            argc--;
-            argv++;
-            if (argc == 0) {
-                BIO_printf(bio_err, "no num_ctx value given\n");
-                goto end;
-            }
-            num_ctx = atoi(argv[0]);
-            if (num_ctx <= 0) {
-                BIO_printf(bio_err, "bad num_ctx value\n");
-                goto end;
-            }
-            j--;                /* Otherwise, -num_ctx gets confused with an
-                                 * algorithm. */
-        }
-# endif
 # ifndef NO_FORK
         else if ((argc > 0) && (strcmp(*argv, "-multi") == 0)) {
             argc--;
@@ -1063,12 +1015,6 @@ int MAIN(int argc, char **argv)
             }
             j--;                /* Otherwise, -multi gets confused with an
                                  * algorithm. */
-        }
-# endif
-# ifndef OPENSSL_NO_HW_QAT
-        else if ((argc > 0) && (strcmp(*argv, "-zero_copy") == 0)) {
-            zero_copy = 1;
-            j--;
         }
 # endif
         else if (argc > 0 && !strcmp(*argv, "-mr")) {
@@ -1524,24 +1470,6 @@ int MAIN(int argc, char **argv)
             BIO_printf(bio_err,
                        "-batch n        "
                        "submit n requests back to back to the engine (only applicable in asynch mode).\n");
-#  ifndef OPENSSL_NO_HW_QAT
-            BIO_printf(bio_err,
-                       "-num_ctx n      "
-                       "submit requests across n ctxs (only applicable in asynch mode).\n");
-            BIO_printf(bio_err,
-                       "                "
-                       "For digests only any value of num_ctx > 1 will result in a unique.\n");
-            BIO_printf(bio_err,
-                       "                "
-                       "ctx being created for each request. This will result in better\n");
-            BIO_printf(bio_err,
-                       "                "
-                       "performance as the requests will be spread across all logical\n");
-            BIO_printf(bio_err,
-                       "                "
-                       "instances within the engine at the expense of needing to alloc\n");
-            BIO_printf(bio_err, "                " "and free each ctx.\n");
-#  endif
 # endif
             BIO_printf(bio_err, "-evp e          " "use EVP e.\n");
             BIO_printf(bio_err,
@@ -1554,9 +1482,6 @@ int MAIN(int argc, char **argv)
             BIO_printf(bio_err,
                        "-multi n        " "run n benchmarks in parallel.\n");
 # endif
-# ifndef OPENSSL_NO_HW_QAT
-            BIO_printf(bio_err, "-zero_copy      run in zero copy mode\n");
-# endif
             goto end;
         }
         argc--;
@@ -1568,10 +1493,6 @@ int MAIN(int argc, char **argv)
     if (multi && do_multi(multi))
         goto show_res;
 # endif
-# ifndef OPENSSL_NO_HW_QAT
-    if (multi)
-        qaeCryptoAtFork();
-# endif
 # ifndef OPENSSL_NO_ENGINE
     /*
      * Now that we are after the fork, each child can init the engine.
@@ -1580,22 +1501,6 @@ int MAIN(int argc, char **argv)
         engine = ENGINE_by_id(engine_id);
     if (engine != NULL) {
 
-#  ifndef OPENSSL_NO_HW_QAT
-        if (zero_copy) {
-            if (!ENGINE_ctrl_cmd
-                (engine, "SET_V2P", (long)qaeCryptoMemV2P, NULL, NULL, 0)) {
-                printf("Cannot set V2P function\n");
-                ENGINE_free(engine);
-                goto end;
-            }
-            if (!ENGINE_ctrl_cmd
-                (engine, "ENABLE_ZERO_COPY_MODE", 0, NULL, NULL, 0)) {
-                printf("Unable to enable zero copy mode on engine\n");
-                ENGINE_free(engine);
-                goto end;
-            }
-        }
-#  endif
         if (async) {
             if (!ENGINE_ctrl_cmd(engine, "ENABLE_POLLING", 0, NULL, NULL, 0)) {
                 BIO_printf(bio_err, "Unable to enabling polling on engine\n");
@@ -1607,10 +1512,6 @@ int MAIN(int argc, char **argv)
     }
     engine = setup_engine(bio_err, engine_id, 0);
 
-#  ifndef OPENSSL_NO_HW_QAT
-    if ((NULL == engine) && (zero_copy))
-        goto end;
-#  endif
     if ((NULL == engine) && (async))
         goto end;
 # endif
@@ -2376,10 +2277,6 @@ int MAIN(int argc, char **argv)
                  */
                 print_message(names[D_EVP], save_count, lengths[j]);
                 if (async) {
-# ifndef OPENSSL_NO_HW_QAT
-                    EVP_CIPHER_CTX *ctxs;
-                    int k = 0;
-# endif
                     EVP_CIPHER_CTX *ctx;
                     int outl;
                     int retval = 0;
@@ -2393,24 +2290,6 @@ int MAIN(int argc, char **argv)
                         ERR_print_errors(bio_err);
                         exit(EXIT_FAILURE);
                     }
-# ifndef OPENSSL_NO_HW_QAT
-                    if (ctx)
-                        OPENSSL_free(ctx);
-                    ctxs =
-                        (EVP_CIPHER_CTX *)OPENSSL_malloc((num_ctx) *
-                                                         (sizeof
-                                                          (EVP_CIPHER_CTX)));
-                    if (NULL == ctxs) {
-                        BIO_printf(bio_err,
-                                   "[%s] --- Failed to allocate ctx\n",
-                                   __func__);
-                        ERR_print_errors(bio_err);
-                        exit(EXIT_FAILURE);
-                    }
-
-                    for (k = 0; k < num_ctx; k++) {
-                        ctx = ctxs + k;
-# endif
                         EVP_CIPHER_CTX_init(ctx);
 
                         if (!EVP_CIPHER_CTX_ctrl_ex
@@ -2446,9 +2325,6 @@ int MAIN(int argc, char **argv)
                         EVP_CIPHER_CTX_set_padding(ctx, 0);
                         EVP_CIPHER_CTX_set_flags(ctx,
                                                  EVP_CIPH_CTX_FLAG_CAN_IGNORE_IV);
-# ifndef OPENSSL_NO_HW_QAT
-                    }
-# endif
                     /*
                      * Polling mode for speed measurements 1) Submit a
                      * 'batch' number of requests to the engine or until
@@ -2461,9 +2337,6 @@ int MAIN(int argc, char **argv)
                         for (count = 0, run = 1;
                              COND(save_count * 4 * lengths[0] / lengths[j]);
                              count++) {
-# ifndef OPENSSL_NO_HW_QAT
-                            ctx = ctxs + (count % num_ctx);
-# endif
                             retval =
                                 EVP_DecryptUpdate(ctx, buf, &outl, buf,
                                                   lengths[j]);
@@ -2485,22 +2358,12 @@ int MAIN(int argc, char **argv)
                          * No padding is set so the final request will not
                          * produce a callback
                          */
-# ifndef OPENSSL_NO_HW_QAT
-                        for (k = 0; k < num_ctx; k++) {
-                            ctx = ctxs + k;
-# endif
                             EVP_DecryptFinal_ex(ctx, buf, &outl);
-# ifndef OPENSSL_NO_HW_QAT
-                        }
-# endif
                         poll_engine(engine, &cb_stats, EMPTY_ENGINE);
                     } else {
                         for (count = 0, run = 1;
                              COND(save_count * 4 * lengths[0] / lengths[j]);
                              count++) {
-# ifndef OPENSSL_NO_HW_QAT
-                            ctx = ctxs + (count % num_ctx);
-# endif
                             retval =
                                 EVP_EncryptUpdate(ctx, buf, &outl, buf,
                                                   lengths[j]);
@@ -2521,10 +2384,6 @@ int MAIN(int argc, char **argv)
                          * No padding is set so the final request will not
                          * produce a callback
                          */
-# ifndef OPENSSL_NO_HW_QAT
-                        for (k = 0; k < num_ctx; k++) {
-                            ctx = ctxs + k;
-# endif
                             retval = EVP_EncryptFinal_ex(ctx, buf, &outl);
                             if (retval == 0) {
                                 dumpError_ex
@@ -2532,25 +2391,12 @@ int MAIN(int argc, char **argv)
                                      cb_data.stats, RETRY, &k);
                                 poll_engine(engine, &cb_stats, 0);
                             }
-# ifndef OPENSSL_NO_HW_QAT
-                        }
-# endif
                         poll_engine(engine, &cb_stats, EMPTY_ENGINE);
                     }
 
                     d = Time_F(STOP);
 
-# ifndef OPENSSL_NO_HW_QAT
-                    for (k = 0; k < num_ctx; k++) {
-                        ctx = ctxs + k;
-# endif
                         EVP_CIPHER_CTX_cleanup(ctx);
-# ifndef OPENSSL_NO_HW_QAT
-                    }
-                    if (ctxs)
-                        OPENSSL_free(ctxs);
-                    ctx = NULL;
-# endif
                     if (ctx)
                         OPENSSL_free(ctx);
                 } else {
@@ -2605,9 +2451,6 @@ int MAIN(int argc, char **argv)
                 names[D_EVP] = OBJ_nid2ln(evp_md->type);
                 print_message(names[D_EVP], save_count, lengths[j]);
                 if (async) {
-# ifndef OPENSSL_NO_HW_QAT
-                    if (1 == num_ctx) {
-# endif
                         CallbackData_t cb_data;
                         EVP_MD_CTX ctx;
                         EVP_MD_CTX_init(&ctx);
@@ -2636,67 +2479,6 @@ int MAIN(int argc, char **argv)
                         }
                         d = Time_F(STOP);
                         EVP_MD_CTX_cleanup(&ctx);
-# ifndef OPENSSL_NO_HW_QAT
-                    } else {
-                        int retval = 1;
-                        EVP_MD_CTX *pctx;
-                        CallbackData_t *pcb_data;
-                        Time_F(START);
-                        for (count = 0, run = 1;
-                             COND(save_count * 4 * lengths[0] / lengths[j]);
-                             count++) {
-                            pcb_data = (CallbackData_t *)
-                                OPENSSL_malloc(sizeof(CallbackData_t));
-                            pctx = EVP_MD_CTX_create();
-                            if (NULL == pctx || NULL == pcb_data) {
-                                BIO_printf(bio_err,
-                                           "[%s] --- Failed to allocate ctx or cb data\n",
-                                           __func__);
-                                ERR_print_errors(bio_err);
-                                exit(EXIT_FAILURE);
-                            }
-                            EVP_MD_CTX_set_flags(pctx,
-                                                 EVP_MD_CTX_FLAG_ONESHOT);
-
-                            pcb_data->ctx.digest = pctx;
-                            pcb_data->stats = &cb_stats;
-                            if (!EVP_MD_CTX_ctrl_ex
-                                (pctx, EVP_MD_CTRL_SETUP_ASYNCH_CALLBACK, 0,
-                                 pcb_data,
-                                 (void (*)(void))digest_async_num_ctx_cb)) {
-                                BIO_printf(bio_err,
-                                           "[%s] --- Failed to Enable async/polling"
-                                           "with EVP_MD_CTX_ctrl_ex\n",
-                                           __func__);
-                                ERR_print_errors(bio_err);
-                                exit(EXIT_FAILURE);
-                            }
-
-                            EVP_DigestInit_ex(pctx, evp_md, engine);
-                            EVP_DigestUpdate(pctx, buf, lengths[j]);
-                            retval = EVP_DigestFinal_ex(pctx, &(md[0]), NULL);
-                            if (retval == 0) {
-                                dumpError("Error reported by EVP interface",
-                                          pcb_data->stats, RETRY);
-                                poll_engine(engine, &cb_stats, 0);
-                                EVP_MD_CTX_destroy(pcb_data->ctx.digest);
-                                OPENSSL_free(pcb_data);
-                                count--;
-                                /*
-                                 * Decrement count as the request was not
-                                 * submitted
-                                 */
-
-                            } else {
-                                cb_stats.req++;
-                                if (count != 0 && (count % batch) == 0)
-                                    poll_engine(engine, &cb_stats, 0);
-                            }
-                        }
-                        poll_engine(engine, &cb_stats, EMPTY_ENGINE);
-                        d = Time_F(STOP);
-                    }
-# endif
                 } else {
                     Time_F(START);
                     for (count = 0, run = 1;

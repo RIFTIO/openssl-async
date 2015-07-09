@@ -112,9 +112,6 @@ void ENGINE_load_builtin_engines(void)
 #  ifndef OPENSSL_NO_HW_PADLOCK
     ENGINE_load_padlock();
 #  endif
-#  ifndef OPENSSL_NO_HW_QAT
-    ENGINE_load_qat();
-#  endif
 # endif
 # ifndef OPENSSL_NO_GOST
     ENGINE_load_gost();

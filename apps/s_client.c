@@ -1727,9 +1727,10 @@ int MAIN(int argc, char **argv)
 
             case SSL_ERROR_SYSCALL:
                 if ((k != 0) || (cbuf_len != 0)) {
-                    BIO_printf(bio_err, "write:errno=%d\n",
-                               get_last_socket_error());
-                    goto shut;
+	            ret = get_last_socket_error();
+		    if (ret != 0)
+	                BIO_printf(bio_err, "write:errno=%d\n", ret);
+                        goto shut;
                 } else {
                     read_tty = 1;
                     write_ssl = 0;
@@ -1833,7 +1834,8 @@ int MAIN(int argc, char **argv)
                 break;
             case SSL_ERROR_SYSCALL:
                 ret = get_last_socket_error();
-                BIO_printf(bio_err, "read:errno=%d\n", ret);
+		if (ret != 0)
+	            BIO_printf(bio_err, "read:errno=%d\n", ret);
                 if (EAGAIN == ret)
                     break;
                 else

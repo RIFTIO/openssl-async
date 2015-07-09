@@ -134,6 +134,176 @@
 # include <openssl/fips.h>
 #endif
 
+/*
+ * The LHASH callbacks ("hash" & "cmp") have been replaced by functions with
+ * the base prototypes (we cast each variable inside the function to the
+ * required type of "FUNCTION*"). This removes the necessity for
+ * macro-generated wrapper functions.
+ */
+
+static LHASH_OF(FUNCTION) *prog_init(void);
+static int do_cmd(LHASH_OF(FUNCTION) *prog, int argc, char *argv[]);
+static void list_pkey(BIO *out);
+static void list_cipher(BIO *out);
+static void list_md(BIO *out);
+char *default_config_file = NULL;
+
+/* Make sure there is only one when MONOLITH is defined */
+#ifdef MONOLITH
+CONF *config = NULL;
+BIO *bio_err = NULL;
+#endif
+
+static void lock_dbg_cb(int mode, int type, const char *file, int line)
+{
+    static int modes[CRYPTO_NUM_LOCKS]; /* = {0, 0, ... } */
+    const char *errstr = NULL;
+    int rw;
+
+    rw = mode & (CRYPTO_READ | CRYPTO_WRITE);
+    if (!((rw == CRYPTO_READ) || (rw == CRYPTO_WRITE))) {
+        errstr = "invalid mode";
+        goto err;
+    }
+
+    if (type < 0 || type >= CRYPTO_NUM_LOCKS) {
+        errstr = "type out of bounds";
+        goto err;
+    }
+
+    if (mode & CRYPTO_LOCK) {
+        if (modes[type]) {
+            errstr = "already locked";
+            /*
+             * must not happen in a single-threaded program (would deadlock)
+             */
+            goto err;
+        }
+
+        modes[type] = rw;
+    } else if (mode & CRYPTO_UNLOCK) {
+        if (!modes[type]) {
+            errstr = "not locked";
+            goto err;
+        }
+
+        if (modes[type] != rw) {
+            errstr = (rw == CRYPTO_READ) ?
+                "CRYPTO_r_unlock on write lock" :
+                "CRYPTO_w_unlock on read lock";
+        }
+
+        modes[type] = 0;
+    } else {
+        errstr = "invalid mode";
+        goto err;
+    }
+
+ err:
+    if (errstr) {
+        /* we cannot use bio_err here */
+        fprintf(stderr,
+                "openssl (lock_dbg_cb): %s (mode=%d, type=%d) at %s:%d\n",
+                errstr, mode, type, file, line);
+    }
+}
+
+#if defined( OPENSSL_SYS_VMS) && (__INITIAL_POINTER_SIZE == 64)
+# define ARGV _Argv
+#else
+# define ARGV Argv
+#endif
+
+int main(int Argc, char *ARGV[])
+{
+    ARGS arg;
+#define PROG_NAME_SIZE  39
+    char pname[PROG_NAME_SIZE + 1];
+    FUNCTION f, *fp;
+    MS_STATIC const char *prompt;
+    MS_STATIC char buf[1024];
+    char *to_free = NULL;
+    int n, i, ret = 0;
+    int argc;
+    char **argv, *p;
+    LHASH_OF(FUNCTION) *prog = NULL;
+    long errline;
+
+#if defined( OPENSSL_SYS_VMS) && (__INITIAL_POINTER_SIZE == 64)
+    /*-
+     * 2011-03-22 SMS.
+     * If we have 32-bit pointers everywhere, then we're safe, and
+     * we bypass this mess, as on non-VMS systems.  (See ARGV,
+     * above.)
+     * Problem 1: Compaq/HP C before V7.3 always used 32-bit
+     * pointers for argv[].
+     * Fix 1: For a 32-bit argv[], when we're using 64-bit pointers
+     * everywhere else, we always allocate and use a 64-bit
+     * duplicate of argv[].
+     * Problem 2: Compaq/HP C V7.3 (Alpha, IA64) before ECO1 failed
+     * to NULL-terminate a 64-bit argv[].  (As this was written, the
+     * compiler ECO was available only on IA64.)
+     * Fix 2: Unless advised not to (VMS_TRUST_ARGV), we test a
+     * 64-bit argv[argc] for NULL, and, if necessary, use a
+     * (properly) NULL-terminated (64-bit) duplicate of argv[].
+     * The same code is used in either case to duplicate argv[].
+     * Some of these decisions could be handled in preprocessing,
+     * but the code tends to get even uglier, and the penalty for
+     * deciding at compile- or run-time is tiny.
+     */
+    char **Argv = NULL;
+    int free_Argv = 0;
+
+    if ((sizeof(_Argv) < 8)     /* 32-bit argv[]. */
+# if !defined( VMS_TRUST_ARGV)
+        || (_Argv[Argc] != NULL) /* Untrusted argv[argc] not NULL. */
+# endif
+        ) {
+        int i;
+        Argv = OPENSSL_malloc((Argc + 1) * sizeof(char *));
+        if (Argv == NULL) {
+            ret = -1;
+            goto end;
+        }
+        for (i = 0; i < Argc; i++)
+            Argv[i] = _Argv[i];
+        Argv[Argc] = NULL;      /* Certain NULL termination. */
+        free_Argv = 1;
+    } else {
+        /*
+         * Use the known-good 32-bit argv[] (which needs the type cast to
+         * satisfy the compiler), or the trusted or tested-good 64-bit argv[]
+         * as-is.
+         */
+        Argv = (char **)_Argv;
+    }
+#endif                          /* defined( OPENSSL_SYS_VMS) &&
+                                 * (__INITIAL_POINTER_SIZE == 64) */
+
+
+    arg.data = NULL;
+    arg.count = 0;
+
+    if (bio_err == NULL)
+        if ((bio_err = BIO_new(BIO_s_file())) != NULL)
+            BIO_set_fp(bio_err, stderr, BIO_NOCLOSE | BIO_FP_TEXT);
+
+    if (getenv("OPENSSL_DEBUG_MEMORY") != NULL) { /* if not defined, use
+                                                   * compiled-in library
+                                                   * defaults */
+        if (!(0 == strcmp(getenv("OPENSSL_DEBUG_MEMORY"), "off"))) {
+            CRYPTO_malloc_debug_init();
+            CRYPTO_set_mem_debug_options(V_CRYPTO_MDEBUG_ALL);
+        } else {
+            /* OPENSSL_DEBUG_MEMORY=off */
+            CRYPTO_set_mem_debug_functions(0, 0, 0, 0, 0);
+        }
+    }
+    CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
+
+#if 0
+    if (getenv("OPENSSL_DEBUG_LOCKING") != NULL)
+#endif
     {
         CRYPTO_set_locking_callback(lock_dbg_cb);
     }

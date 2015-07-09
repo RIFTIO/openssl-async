@@ -273,12 +273,7 @@ extern "C" {
   * allocated region to its front, but makes data payload aligned, which
   * improves performance:-)
   */
-#  ifndef OPENSSL_NO_HW_QAT
-#   define SSL3_ALIGN_PAYLOAD        64
-#  endif
-#  ifdef OPENSSL_NO_HW_QAT
 #   define SSL3_ALIGN_PAYLOAD        8
-#  endif
 # else
 #  if (SSL3_ALIGN_PAYLOAD&(SSL3_ALIGN_PAYLOAD-1))!=0
 #   error "insane SSL3_ALIGN_PAYLOAD"

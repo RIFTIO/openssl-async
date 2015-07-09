@@ -1420,6 +1420,8 @@ int ssl3_get_key_exchange(SSL *s)
 #endif
     } else {
         s->session->sess_cert = ssl_sess_cert_new();
+        if (NULL == s->session->sess_cert)
+            goto f_err;
     }
 
     /* Total length of the parameters including the length prefix */

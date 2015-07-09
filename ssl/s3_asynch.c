@@ -386,7 +386,17 @@ void ssl3_release_transmission_skt(SSL3_TRANSMISSION * trans)
 
 void ssl3_cleanup_transmission_pool(SSL *s)
 {
+    struct transmission_queue_node *pnode = NULL;
     if (s->s3->transmission_pool) {
+        pnode = s->s3->transmission_pool->head;
+        s->s3->transmission_pool->head = NULL;
+        while(pnode) {
+            if(pnode->trans.buf.buf) {
+                CRYPTO_free(pnode->trans.buf.buf);
+                pnode->trans.buf.buf = NULL;
+            }
+            pnode = pnode->next;
+        }
         OPENSSL_cleanse(s->s3->transmission_pool,
                         sizeof *s->s3->transmission_pool);
         OPENSSL_free(s->s3->transmission_pool);
@@ -540,7 +550,14 @@ void ssl3_release_read_record(SSL3_READ_RECORD * rec)
 
 void ssl3_cleanup_read_record_pool(SSL *s)
 {
+    SSL3_READ_RECORD *arr=NULL;
     if (s->s3->read_record_pool) {
+        while((arr = ssl3_extract_read_record(s)) != NULL) {
+            if(arr->buf.buf) {
+                CRYPTO_free(arr->buf.buf);
+                arr->buf.buf = NULL;
+            }
+        }
         OPENSSL_cleanse(s->s3->read_record_pool,
                         sizeof *s->s3->read_record_pool);
         OPENSSL_free(s->s3->read_record_pool);
