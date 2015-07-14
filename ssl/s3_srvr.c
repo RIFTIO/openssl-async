@@ -1649,7 +1649,7 @@ int ssl3_send_server_key_exchange(SSL *s)
 #ifndef OPENSSL_NO_RSA
     unsigned char *q;
     int j, num;
-    RSA *rsa;
+    RSA *rsa = NULL;
     unsigned char md_buf[MD5_DIGEST_LENGTH + SHA_DIGEST_LENGTH];
     unsigned int u;
 #endif
@@ -1665,7 +1665,7 @@ int ssl3_send_server_key_exchange(SSL *s)
 #endif
     EVP_PKEY *pkey = NULL;
     const EVP_MD *md = NULL;
-    unsigned char *p = NULL, *d;
+    unsigned char *p = NULL, *d = NULL;
     int al = 0, i;
     unsigned long type;
     int n;
@@ -1713,6 +1713,15 @@ int ssl3_send_server_key_exchange(SSL *s)
                 pkey = s->s3->send_server_key_exchange.pkey;
                 rsa = s->s3->send_server_key_exchange.rsa;
                 goto post_rsa;
+            case 11: /* retry of post_rsa_md_1 */
+                s->s3->pkeystate = 0; /* No longer needed, reset it */
+                p = s->s3->send_server_key_exchange.p;
+                u = s->s3->send_server_key_exchange.u;
+                d = s->s3->send_server_key_exchange.d;
+                n = s->s3->send_server_key_exchange.n;
+                j = s->s3->send_server_key_exchange.j;
+                rsa = s->s3->send_server_key_exchange.rsa;
+                goto post_rsa_md_1;
 #endif
             case 3:
                 s->s3->pkeystate = 0; /* No longer needed, reset it */
@@ -2173,7 +2182,7 @@ int ssl3_send_server_key_exchange(SSL *s)
                                            s3->send_server_key_exchange.i);
                     }
                     return -1;
-                } else {
+                } else { /* synch mode */
                     q = md_buf;
                     j = 0;
                     for (num = 2; num > 0; num--) {
@@ -2200,18 +2209,23 @@ int ssl3_send_server_key_exchange(SSL *s)
                     s->s3->send_server_key_exchange.p = p;
                     s->s3->send_server_key_exchange.u = u;
                     s->s3->send_server_key_exchange.n = n;
+                    s->s3->send_server_key_exchange.j = j;
+                    s->s3->send_server_key_exchange.rsa = rsa;
                     if (!RSA_sign_asynch
                         (NID_md5_sha1, s->s3->send_server_key_exchange.md_buf,
                          j, &(p[2]), &s->s3->send_server_key_exchange.u,
                          s->s3->send_server_key_exchange.rsa,
                          (int (*)(unsigned char *, size_t, void *, int))
                          ssl3_send_server_key_exchange_post, s)) {
-                        /*
-                         * FIXME: Implement retries
-                         */
-                        s->s3->pkeystate = 0;
-                        SSLerr(SSL_F_SSL3_SEND_SERVER_KEY_EXCHANGE,
-                               ERR_LIB_RSA);
+                        int error = 0;
+                        error = ERR_get_error();
+                        if (ERR_R_RETRY == ERR_GET_REASON(error))
+                            s->s3->pkeystate = 11;
+                        else {
+                            s->s3->pkeystate = 0;
+                            SSLerr(SSL_F_SSL3_SEND_SERVER_KEY_EXCHANGE,
+                                   ERR_LIB_RSA);
+                        }
                         goto err;
                     }
                     EVP_MD_CTX_cleanup(&md_ctx);
@@ -2225,7 +2239,7 @@ int ssl3_send_server_key_exchange(SSL *s)
  post_rsa:
                 s2n(u, p);
                 n += u + 2;
-            } else
+            } else /* i.e., TLS1.2 or greater */
 #endif
             if (md) {
                 /*
