@@ -129,27 +129,23 @@ static void ASYNC_JOB_free(ASYNC_JOB *job)
 static ASYNC_JOB *async_get_pool_job(void) {
     ASYNC_JOB *job;
 
-    printf("Getting job from pool\n");
-
     if (pool == NULL) {
-        printf("Pool not inited\n");
         return NULL;
     }
 
     job = sk_ASYNC_JOB_pop(pool);
     if (job == NULL) {
         /* Pool is empty */
-        printf("Pool is empty, creating a new job\n");
         job = ASYNC_JOB_new();
         if (job)
             ASYNC_FIBRE_makecontext(&job->fibrectx);
     }
-    printf("Returning a job\n");
     return job;
 }
 
 static void async_release_job(ASYNC_JOB *job) {
-    printf("Releasing job back to pool\n");
+    if(job->funcargs)
+        OPENSSL_free(job->funcargs);
     /* Ignore error return */
     sk_ASYNC_JOB_push(pool, job);
 }
@@ -311,4 +307,5 @@ void ASYNC_free_pool(void)
         job = sk_ASYNC_JOB_pop(pool);
         ASYNC_JOB_free(job);
     } while (job);
+    sk_ASYNC_JOB_free(pool);
 }
