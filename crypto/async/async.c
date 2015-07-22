@@ -62,9 +62,10 @@
 #define ASYNC_JOB_STOPPING  3
 
 static size_t pool_max_size = 0;
+static size_t curr_size = 0;
 
 DECLARE_STACK_OF(ASYNC_JOB)
-static STACK_OF(ASYNC_JOB) *pool;
+static STACK_OF(ASYNC_JOB) *pool = NULL;
 
 
 static ASYNC_CTX *ASYNC_CTX_new(void)
@@ -130,15 +131,26 @@ static ASYNC_JOB *async_get_pool_job(void) {
     ASYNC_JOB *job;
 
     if (pool == NULL) {
-        return NULL;
+        /*
+         * Pool has not been initialised, so init with the defaults, i.e.
+         * global pool, with no max size and no pre-created jobs
+         */
+        if (ASYNC_init_pool(0, 0, 0) == 0)
+            return NULL;
     }
 
     job = sk_ASYNC_JOB_pop(pool);
     if (job == NULL) {
         /* Pool is empty */
+        if (pool_max_size && curr_size >= pool_max_size) {
+            /* Pool is at max size. We cannot continue */
+            return NULL;
+        }
         job = ASYNC_JOB_new();
-        if (job)
+        if (job) {
             ASYNC_FIBRE_makecontext(&job->fibrectx);
+            curr_size++;
+        }
     }
     return job;
 }
@@ -146,6 +158,7 @@ static ASYNC_JOB *async_get_pool_job(void) {
 static void async_release_job(ASYNC_JOB *job) {
     if(job->funcargs)
         OPENSSL_free(job->funcargs);
+    job->funcargs = NULL;
     /* Ignore error return */
     sk_ASYNC_JOB_push(pool, job);
 }
@@ -285,15 +298,28 @@ int ASYNC_init_pool(unsigned int local, size_t max_size, size_t init_size)
         return 0;
     }
 
-    if (init_size != 0) {
-        /* We don't support pre-creation of ASYNC_JOBs yet */
-        return 0;
-    }
-
     pool_max_size = max_size;
     pool = sk_ASYNC_JOB_new_null();
     if (pool == NULL) {
         return 0;
+    }
+    /* Pre-create jobs as required */
+    while (init_size) {
+        ASYNC_JOB *job;
+        job = ASYNC_JOB_new();
+        if (job) {
+            ASYNC_FIBRE_makecontext(&job->fibrectx);
+            job->funcargs = NULL;
+            sk_ASYNC_JOB_push(pool, job);
+            curr_size++;
+            init_size--;
+        } else {
+            /*
+             * Not actually fatal because we already created the pool, just skip
+             * creation of any more jobs
+             */
+            init_size = 0;
+        }
     }
 
     return 1;
