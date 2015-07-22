@@ -189,7 +189,8 @@ e_capi.o: ../include/openssl/pkcs7.h ../include/openssl/safestack.h
 e_capi.o: ../include/openssl/sha.h ../include/openssl/stack.h
 e_capi.o: ../include/openssl/symhacks.h ../include/openssl/x509.h
 e_capi.o: ../include/openssl/x509_vfy.h e_capi.c
-e_dasync.o: ../include/openssl/asn1.h ../include/openssl/bio.h
+e_dasync.o: ../include/openssl/asn1.h ../include/openssl/async.h
+e_dasync.o: ../include/openssl/bio.h ../include/openssl/bn.h
 e_dasync.o: ../include/openssl/buffer.h ../include/openssl/crypto.h
 e_dasync.o: ../include/openssl/e_os2.h ../include/openssl/ec.h
 e_dasync.o: ../include/openssl/ecdh.h ../include/openssl/ecdsa.h

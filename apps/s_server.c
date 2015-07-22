@@ -145,6 +145,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <openssl/async.h>
 
 #include <openssl/e_os2.h>
 
@@ -1728,8 +1729,10 @@ int MAIN(int argc, char *argv[])
     else
         SSL_CTX_sess_set_cache_size(ctx, 128);
 
-    if (async)
+    if (async) {
         SSL_CTX_set_mode(ctx, SSL_MODE_ASYNC);
+        ASYNC_init_pool(0, 0, 0);
+    }
 
 #ifndef OPENSSL_NO_SRTP
     if (srtp_profiles != NULL) {
@@ -2076,6 +2079,9 @@ int MAIN(int argc, char *argv[])
     if (bio_s_msg != NULL) {
         BIO_free(bio_s_msg);
         bio_s_msg = NULL;
+    }
+    if (async) {
+        ASYNC_free_pool();
     }
     apps_shutdown();
     OPENSSL_EXIT(ret);

@@ -4559,3 +4559,5 @@ ASYNC_start_job                         4917	EXIST::FUNCTION:
 X509_NAME_ENTRY_set                     4918	EXIST::FUNCTION:
 CRYPTO_set_thread_local                 4919	EXIST::FUNCTION:
 CRYPTO_get_thread_local                 4920	EXIST::FUNCTION:
+ASYNC_free_pool                         4921	EXIST::FUNCTION:
+ASYNC_init_pool                         4922	EXIST::FUNCTION:
