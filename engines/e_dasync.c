@@ -82,6 +82,7 @@ static int dasync_digests(ENGINE *e, const EVP_MD **digest,
 
 static int dasync_digest_nids[] = { NID_sha1, 0 };
 
+static void dummy_pause_job(void);
 
 /* SHA1 */
 static int digest_sha1_init(EVP_MD_CTX *ctx);
@@ -236,6 +237,25 @@ static int dasync_digests(ENGINE *e, const EVP_MD **digest,
     return ok;
 }
 
+static void dummy_pause_job(void) {
+    ASYNC_JOB *job;
+
+    if ((job = ASYNC_get_current_job()) == NULL)
+        return;
+
+    /*
+     * In the Dummy async engine we are cheating. We signal that the job
+     * is complete by waking it before the call to ASYNC_pause_job(). A real
+     * async engine would only wake when the job was actually complete
+     */
+    ASYNC_wake(job);
+
+    /* Ignore errors - we carry on anyway */
+    ASYNC_pause_job();
+
+    ASYNC_clear_wake(job);
+}
+
 
 /*
  * SHA1 implementation. At the moment we just defer to the standard
@@ -245,8 +265,7 @@ static int dasync_digests(ENGINE *e, const EVP_MD **digest,
 #define data(ctx) ((SHA_CTX *)(ctx)->md_data)
 static int digest_sha1_init(EVP_MD_CTX *ctx)
 {
-    /* Ignore errors - we carry on anyway */
-    ASYNC_pause_job();
+    dummy_pause_job();
 
     return SHA1_Init(data(ctx));
 }
@@ -254,16 +273,14 @@ static int digest_sha1_init(EVP_MD_CTX *ctx)
 static int digest_sha1_update(EVP_MD_CTX *ctx, const void *data,
                              unsigned long count)
 {
-    /* Ignore errors - we carry on anyway */
-    ASYNC_pause_job();
+    dummy_pause_job();
 
     return SHA1_Update(data(ctx), data, (size_t)count);
 }
 
 static int digest_sha1_final(EVP_MD_CTX *ctx, unsigned char *md)
 {
-    /* Ignore errors - we carry on anyway */
-    ASYNC_pause_job();
+    dummy_pause_job();
 
     return SHA1_Final(md, data(ctx));
 }
@@ -274,23 +291,20 @@ static int digest_sha1_final(EVP_MD_CTX *ctx, unsigned char *md)
 
 static int dasync_pub_enc(int flen, const unsigned char *from,
                     unsigned char *to, RSA *rsa, int padding) {
-    /* Ignore errors - we carry on anyway */
-    ASYNC_pause_job();
+    dummy_pause_job();
     return RSA_PKCS1_SSLeay()->rsa_pub_enc(flen, from, to, rsa, padding);
 }
 
 static int dasync_pub_dec(int flen, const unsigned char *from,
                     unsigned char *to, RSA *rsa, int padding) {
-    /* Ignore errors - we carry on anyway */
-    ASYNC_pause_job();
+    dummy_pause_job();
     return RSA_PKCS1_SSLeay()->rsa_pub_dec(flen, from, to, rsa, padding);
 }
 
 static int dasync_rsa_priv_enc(int flen, const unsigned char *from,
                       unsigned char *to, RSA *rsa, int padding)
 {
-    /* Ignore errors - we carry on anyway */
-    ASYNC_pause_job();
+    dummy_pause_job();
     return RSA_PKCS1_SSLeay()->rsa_priv_enc(flen, from, to, rsa, padding);
 }
 
@@ -304,8 +318,7 @@ static int dasync_rsa_priv_dec(int flen, const unsigned char *from,
 
 static int dasync_rsa_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa, BN_CTX *ctx)
 {
-    /* Ignore errors - we carry on anyway */
-    ASYNC_pause_job();
+    dummy_pause_job();
     return RSA_PKCS1_SSLeay()->rsa_mod_exp(r0, I, rsa, ctx);
 }
 

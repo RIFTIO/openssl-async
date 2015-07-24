@@ -196,6 +196,7 @@ typedef unsigned int u_int;
 static RSA *tmp_rsa_cb(SSL *s, int is_export, int keylength);
 #endif
 static int not_resumable_sess_cb(SSL *s, int is_forward_secure);
+static void wait_for_async(SSL *s);
 static int sv_body(char *hostname, int s, int stype, unsigned char *context);
 static int www_body(char *hostname, int s, int stype, unsigned char *context);
 static int rev_body(char *hostname, int s, int stype, unsigned char *context);
@@ -1808,7 +1809,7 @@ int MAIN(int argc, char *argv[])
             SSL_CTX_sess_set_cache_size(ctx2, 128);
 
         if (async)
-			SSL_CTX_set_mode(ctx2, SSL_MODE_ASYNC);
+            SSL_CTX_set_mode(ctx2, SSL_MODE_ASYNC);
 
         if ((!SSL_CTX_load_verify_locations(ctx2, CAfile, CApath)) ||
             (!SSL_CTX_set_default_verify_paths(ctx2))) {
@@ -2113,6 +2114,21 @@ static void print_stats(BIO *bio, SSL_CTX *ssl_ctx)
     BIO_printf(bio, "%4ld cache full overflows (%ld allowed)\n",
                SSL_CTX_sess_cache_full(ssl_ctx),
                SSL_CTX_sess_get_cache_size(ssl_ctx));
+}
+
+static void wait_for_async(SSL *s)
+{
+    int width, fd;
+    fd_set asyncfds;
+
+    fd = SSL_get_async_wait_fd(s);
+    if (!fd)
+        return;
+
+    width = fd + 1;
+    FD_ZERO(&asyncfds);
+    openssl_fdset(fd, &asyncfds);
+    select(width, (void *)&asyncfds, NULL, NULL, NULL);
 }
 
 static int sv_body(char *hostname, int s, int stype, unsigned char *context)
@@ -2426,6 +2442,7 @@ static int sv_body(char *hostname, int s, int stype, unsigned char *context)
                     break;
                 case SSL_ERROR_WANT_ASYNC:
                     BIO_printf(bio_s_out, "Write BLOCK (Async)\n");
+                    wait_for_async(con);
                     break;
                 case SSL_ERROR_WANT_WRITE:
                 case SSL_ERROR_WANT_READ:
@@ -2445,9 +2462,9 @@ static int sv_body(char *hostname, int s, int stype, unsigned char *context)
                     goto err;
                 }
                 if(k > 0) {
-					l += k;
-					i -= k;
-				}
+                    l += k;
+                    i -= k;
+                }
                 if (i <= 0)
                     break;
             }
@@ -2490,6 +2507,9 @@ static int sv_body(char *hostname, int s, int stype, unsigned char *context)
                         goto again;
                     break;
                 case SSL_ERROR_WANT_ASYNC:
+                    BIO_printf(bio_s_out, "Read BLOCK (Async)\n");
+                    wait_for_async(con);
+                    break;
                 case SSL_ERROR_WANT_WRITE:
                 case SSL_ERROR_WANT_READ:
                     BIO_printf(bio_s_out, "Read BLOCK\n");
