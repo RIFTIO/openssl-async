@@ -519,6 +519,7 @@ int tls1_change_cipher_state(SSL *s, int which)
         SSLerr(SSL_F_TLS1_CHANGE_CIPHER_STATE, ERR_R_INTERNAL_ERROR);
         goto err2;
     }
+
 #ifdef TLS_DEBUG
     printf("which = %04X\nkey=", which);
     {
@@ -789,7 +790,7 @@ static int tls1_enc_inner(SSL *s, int send, SSL3_TRANSMISSION * trans,
         bs = EVP_CIPHER_block_size(ds->cipher);
 
         if (EVP_CIPHER_flags(ds->cipher) & EVP_CIPH_FLAG_AEAD_CIPHER) {
-            unsigned char buf[13], *seq;
+            unsigned char buf[EVP_AEAD_TLS1_AAD_LEN], *seq;
 
             seq = send ? s->s3->write_sequence : s->s3->read_sequence;
 
@@ -813,7 +814,10 @@ static int tls1_enc_inner(SSL *s, int send, SSL3_TRANSMISSION * trans,
             buf[10] = (unsigned char)(s->version);
             buf[11] = rec->length >> 8;
             buf[12] = rec->length & 0xff;
-            pad = EVP_CIPHER_CTX_ctrl(ds, EVP_CTRL_AEAD_TLS1_AAD, 13, buf);
+            pad = EVP_CIPHER_CTX_ctrl(ds, EVP_CTRL_AEAD_TLS1_AAD,
+                                      EVP_AEAD_TLS1_AAD_LEN, buf);
+            if (pad <= 0)
+                return -1;
             if (send) {
                 l += pad;
                 rec->length += pad;

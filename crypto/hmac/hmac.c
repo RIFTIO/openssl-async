@@ -140,12 +140,18 @@ int HMAC_Init_ex(HMAC_CTX *ctx, const void *key, int len,
             return FIPS_hmac_init_ex(ctx, key, len, md, NULL);
     }
 #endif
+    /* If we are changing MD then we must have a key */
+    if (md != NULL && md != ctx->md && (key == NULL || len < 0))
+        return 0;
 
     if (md != NULL) {
         reset = 1;
         ctx->md = md;
-    } else
+    } else if (ctx->md) {
         md = ctx->md;
+    } else {
+        return 0;
+    }
 
     if (key != NULL) {
         reset = 1;
@@ -160,7 +166,8 @@ int HMAC_Init_ex(HMAC_CTX *ctx, const void *key, int len,
                                     &ctx->key_length))
                 goto err;
         } else {
-            OPENSSL_assert(len >= 0 && len <= (int)sizeof(ctx->key));
+            if (len < 0 || len > (int)sizeof(ctx->key))
+                return 0;
             memcpy(ctx->key, key, len);
             ctx->key_length = len;
         }
@@ -415,6 +422,9 @@ static int _hmac_Update_synch(HMAC_CTX *ctx, const unsigned char *data,
     if (FIPS_mode() && !ctx->i_ctx.engine)
         return FIPS_hmac_update(ctx, data, len);
 #endif
+    if (!ctx->md)
+        return 0;
+
     return EVP_DigestUpdate(&ctx->md_ctx, data, len);
 }
 
@@ -444,6 +454,9 @@ static int _hmac_Final_synch(HMAC_CTX *ctx, unsigned char *md,
     if (FIPS_mode() && !ctx->i_ctx.engine)
         return FIPS_hmac_final(ctx, md, len);
 #endif
+
+    if (!ctx->md)
+        goto err;
 
     if (!EVP_DigestFinal_ex(&ctx->md_ctx, buf, &i))
         goto err;
@@ -478,6 +491,7 @@ void HMAC_CTX_init(HMAC_CTX *ctx)
     EVP_MD_CTX_init(&ctx->o_ctx);
     EVP_MD_CTX_init(&ctx->md_ctx);
     ctx->ctx_asynch = NULL;
+    ctx->md = NULL;
 }
 
 int HMAC_CTX_copy(HMAC_CTX *dctx, HMAC_CTX *sctx)
@@ -534,6 +548,7 @@ unsigned char *HMAC(const EVP_MD *evp_md, const void *key, int key_len,
     HMAC_CTX_cleanup(&c);
     return md;
  err:
+    HMAC_CTX_cleanup(&c);
     return NULL;
 }
 

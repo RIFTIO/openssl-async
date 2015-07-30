@@ -469,12 +469,23 @@ static int ssl3_get_record_inner(SSL *s, SSL3_TRANSMISSION * trans)
                     SSLerr(SSL_F_SSL3_GET_RECORD_INNER,
                            SSL_R_WRONG_VERSION_NUMBER);
                     if ((s->version & 0xFF00) == (version & 0xFF00)
-                        && !s->enc_write_ctx && !s->write_hash)
+                        && !s->enc_write_ctx && !s->write_hash) {
+                        if (rr->type == SSL3_RT_ALERT) {
+                            /*
+                             * The record is using an incorrect version number, but
+                             * what we've got appears to be an alert. We haven't
+                             * read the body yet to check whether its a fatal or
+                             * not - but chances are it is. We probably shouldn't
+                             * send a fatal alert back. We'll just end.
+                             */
+                             goto err;
+                        }
                         /*
                          * Send back error using their minor version number
                          * :-)
                          */
                         s->version = (unsigned short)version;
+                    }
                     al = SSL_AD_PROTOCOL_VERSION;
                     goto f_err;
                 }
@@ -2156,6 +2167,7 @@ int ssl3_do_change_cipher_spec(SSL *s)
     }
  post_prf_final_finish:
     s->s3->tmp.peer_finish_md_len = i;
+
     return (1);
 }
 

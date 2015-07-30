@@ -103,7 +103,6 @@
 # define EVP_PKS_RSA     0x0100
 # define EVP_PKS_DSA     0x0200
 # define EVP_PKS_EC      0x0400
-# define EVP_PKT_EXP     0x1000 /* <= 512 bit key */
 
 # define EVP_PKEY_NONE   NID_undef
 # define EVP_PKEY_RSA    NID_rsaEncryption
@@ -499,6 +498,8 @@ struct evp_cipher_st {
 /* Minimum Algorithm specific ctrl value, above values nonwithstanding */
 
 # define         EVP_CTRL_ALG_CTRL               0x1000
+/* RFC 5246 defines additional data to be 13 bytes in length */
+# define         EVP_AEAD_TLS1_AAD_LEN           13
 
 /* GCM TLS constants */
 /* Length of fixed part of IV derived from PRF */
