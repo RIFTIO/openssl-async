@@ -1061,6 +1061,7 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
                 bio = SSL_get_wbio(s);
                 BIO_clear_retry_flags(bio);
                 BIO_set_retry_special(bio);
+		SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_RETRY);
                 return -1;      /* treat it like a non-blocking I/O that
                                  * couldn't transmit for the moment */
             }
