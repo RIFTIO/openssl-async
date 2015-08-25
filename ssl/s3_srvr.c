@@ -2419,8 +2419,10 @@ int ssl3_send_server_key_exchange(SSL *s)
     BN_CTX_free(bn_ctx);
 #endif
     EVP_MD_CTX_cleanup(&md_ctx);
-    s->state = SSL_ST_ERR;
-    return (-1);
+    if (!(s->s3->flags & SSL3_FLAGS_ASYNCH &&
+          ((2 == s->s3->pkeystate) || (11 == s->s3->pkeystate)))) /* not a retry */
+        s->state = SSL_ST_ERR;
+    return -1;
 }
 
 int ssl3_send_certificate_request(SSL *s)
@@ -3660,6 +3662,7 @@ int ssl3_get_client_key_exchange(SSL *s)
     return (1);
  f_err:
     ssl3_send_alert(s, SSL3_AL_FATAL, al);
+
 #if !defined(OPENSSL_NO_DH) || !defined(OPENSSL_NO_RSA) || !defined(OPENSSL_NO_ECDH) || defined(OPENSSL_NO_SRP)
  err:
 #endif
@@ -3670,8 +3673,13 @@ int ssl3_get_client_key_exchange(SSL *s)
         EC_KEY_free(srvr_ecdh);
     BN_CTX_free(bn_ctx);
 #endif
-    s->state = SSL_ST_ERR;
-    return (-1);
+    if (!(s->s3->flags & SSL3_FLAGS_ASYNCH &&
+          (((2 == s->s3->pkeystate) &&
+            (1 == s->s3->tmp.reuse_message)) ||
+           ((PRF_RETRY_GENERATE_MASTER_SECRET_STATE == s->s3->pkeystate) &&
+            (0 == s->s3->tmp.reuse_message))))) /* not a retry */
+        s->state = SSL_ST_ERR;
+    return -1;
 }
 
 /*

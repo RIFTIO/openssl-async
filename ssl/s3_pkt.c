@@ -960,11 +960,11 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
             (s->enc_write_ctx
              && (EVP_CIPHER_CTX_flags(s->enc_write_ctx) &
                  EVP_CIPH_FLAG_ASYNCH))) {
+            CRYPTO_w_lock(CRYPTO_LOCK_SSL);
             if (ssl3_lock(s, S3_SSL3_LOCK) != 0) {
                 SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);
                 goto err;
             }
-            CRYPTO_w_lock(CRYPTO_LOCK_SSL);
             i = ssl3_asynch_send_skt_queued_data(s);
             if (ssl3_unlock(s, S3_SSL3_LOCK) != 0) {
                 SSLerr(SSL_F_DO_SSL3_WRITE_INNER, ERR_R_INTERNAL_ERROR);

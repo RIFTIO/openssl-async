@@ -115,7 +115,18 @@ int asn1_do_lock(ASN1_VALUE **pval, int op, const ASN1_ITEM *it)
         *lck = 1;
         return 1;
     }
-    ret = CRYPTO_add(lck, op, aux->ref_lock);
+
+    if (CRYPTO_LOCK_X509 == aux->ref_lock) {
+        if (-1 == op)
+            ret = crypto_atomic_dec(*lck);
+        else if (1 == op)
+            ret = crypto_atomic_inc(*lck);
+        else
+            return 0;
+    }
+    else
+        ret = CRYPTO_add(lck, op, aux->ref_lock);
+
 #ifdef REF_PRINT
     fprintf(stderr, "%s: Reference Count: %d\n", it->sname, *lck);
 #endif

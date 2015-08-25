@@ -2536,7 +2536,11 @@ int SSL_get_error(const SSL *s, int i)
 
     if (i > 0)
         return (SSL_ERROR_NONE);
-
+    
+    /* Reset the retry flag */
+    if (s->s3) {
+        s->s3->async_retry_flag = 0;
+    }
     /*
      * Make things return SSL_ERROR_SYSCALL when doing SSL_do_handshake etc,
      * where we do encode the error
@@ -2546,6 +2550,7 @@ int SSL_get_error(const SSL *s, int i)
             ((ERR_R_RETRY == ERR_GET_REASON(l)))) {
             /* In asyc mode, retry error should be ignored*/
             l = ERR_get_error();
+            s->s3->async_retry_flag = 1;
         }
         else {
             if (ERR_GET_LIB(l) == ERR_LIB_SYS)
@@ -2555,12 +2560,6 @@ int SSL_get_error(const SSL *s, int i)
         }
     }
 
-    /* Reset the retry flag */
-    if (s->s3) {
-        s->s3->async_retry_flag = 0;
-        if (ERR_R_RETRY == ERR_GET_REASON(l))
-            s->s3->async_retry_flag = 1;
-    }
 
     if ((i < 0) && SSL_want_read(s)) {
         bio = SSL_get_rbio(s);
@@ -2673,6 +2672,8 @@ int SSL_get_error(const SSL *s, int i)
             return (SSL_ERROR_WAIT_ASYNCH_READ);
         else if (s->s3->outstanding_read_records)
             return (SSL_ERROR_WANT_READ);
+        else if (ERR_R_RETRY == ERR_GET_REASON(l))
+            return (SSL_ERROR_WAIT_ASYNCH);
     }
 
     if (i == 0) {

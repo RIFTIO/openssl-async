@@ -2147,8 +2147,11 @@ int ssl3_get_key_exchange(SSL *s)
 #endif
     if (md_ctx.digest)
         EVP_MD_CTX_cleanup(&md_ctx);
-    s->state = SSL_ST_ERR;
-    return (-1);
+    if (!(s->s3->flags & SSL3_FLAGS_ASYNCH &&
+          ((2 == s->s3->pkeystate) &&
+           (1 == s->s3->tmp.reuse_message)))) /* not a retry */
+        s->state = SSL_ST_ERR;
+    return -1;
 }
 
 int ssl3_get_certificate_request(SSL *s)
@@ -3688,8 +3691,10 @@ int ssl3_send_client_key_exchange(SSL *s)
         EC_KEY_free(clnt_ecdh);
     EVP_PKEY_free(srvr_pub_pkey);
 #endif
-    s->state = SSL_ST_ERR;
-    return (-1);
+    if (!(s->s3->flags & SSL3_FLAGS_ASYNCH &&
+          (2 == s->s3->pkeystate))) /* not a retry */
+        s->state = SSL_ST_ERR;
+    return -1;
 }
 
 static int ssl3_send_client_verify_dsa_post(unsigned char *res, size_t reslen,
@@ -3984,8 +3989,10 @@ int ssl3_send_client_verify(SSL *s)
  err:
     EVP_MD_CTX_cleanup(&mctx);
     EVP_PKEY_CTX_free(pctx);
-    s->state = SSL_ST_ERR;
-    return (-1);
+    if (!(s->s3->flags & SSL3_FLAGS_ASYNCH &&
+          (2 == s->s3->pkeystate))) /* not a retry */
+        s->state = SSL_ST_ERR;
+    return -1;
 }
 
 int ssl3_send_client_certificate(SSL *s)

@@ -273,7 +273,7 @@ SSL_SESSION *ssl_session_dup(SSL_SESSION *src, int ticket)
         CRYPTO_add(&src->sess_cert->references, 1, CRYPTO_LOCK_SSL_SESS_CERT);
 
     if (src->peer != NULL)
-        CRYPTO_add(&src->peer->references, 1, CRYPTO_LOCK_X509);
+        crypto_atomic_inc(src->peer->references);
 
 #ifndef OPENSSL_NO_PSK
     if (src->psk_identity_hint) {
