@@ -57,9 +57,11 @@
 #include <openssl/engine.h>
 #include <openssl/sha.h>
 #include <openssl/rsa.h>
+#include <openssl/aes.h>
 #include <openssl/evp.h>
 #include <openssl/async.h>
 #include <openssl/bn.h>
+#include <openssl/ssl.h>
 
 #define DASYNC_LIB_NAME "DASYNC"
 #include "e_dasync_err.c"
@@ -138,6 +140,61 @@ static RSA_METHOD dasync_rsa_method = {
     NULL                        /* rsa_keygen */
 };
 
+/* AES128 HMAC SHA256 */
+static int dasync_aes_cbc_hmac_sha256_init_key(EVP_CIPHER_CTX *ctx,
+        const unsigned char *inkey, const unsigned char *iv, int enc);
+static int dasync_aes_cbc_hmac_sha256_cipher(EVP_CIPHER_CTX *ctx,
+        unsigned char *out, const unsigned char *in, size_t len);
+static int dasync_aes_cbc_hmac_sha256_ctrl(EVP_CIPHER_CTX *ctx, int type,
+        int arg, void *ptr);
+
+# if !defined(EVP_CIPH_FLAG_DEFAULT_ASN1)
+#  define EVP_CIPH_FLAG_DEFAULT_ASN1 0
+# endif
+
+# if !defined(EVP_CIPH_FLAG_TLS1_1_MULTIBLOCK)
+#  define EVP_CIPH_FLAG_TLS1_1_MULTIBLOCK 0
+# endif
+
+/* TODO: As defined in e_aes_cbc_hmac_sha256.c */
+typedef struct {
+    AES_KEY ks;
+    SHA256_CTX head, tail, md;
+    size_t payload_length;      /* AAD length in decrypt case */
+    union {
+        unsigned int tls_ver;
+        unsigned char tls_aad[16]; /* 13 used */
+    } aux;
+} EVP_AES_HMAC_SHA256;
+
+
+static EVP_CIPHER dasync_aes_128_cbc_hmac_sha256_cipher = {
+#  ifdef NID_aes_128_cbc_hmac_sha256
+    NID_aes_128_cbc_hmac_sha256,
+#  else
+    NID_undef,
+#  endif
+    16, 16, 16,
+    EVP_CIPH_CBC_MODE | EVP_CIPH_FLAG_DEFAULT_ASN1 |
+        EVP_CIPH_FLAG_AEAD_CIPHER | EVP_CIPH_FLAG_TLS1_1_MULTIBLOCK,
+    dasync_aes_cbc_hmac_sha256_init_key,
+    dasync_aes_cbc_hmac_sha256_cipher,
+    NULL,
+    sizeof(EVP_AES_HMAC_SHA256),
+    EVP_CIPH_FLAG_DEFAULT_ASN1 ? NULL : EVP_CIPHER_set_asn1_iv,
+    EVP_CIPH_FLAG_DEFAULT_ASN1 ? NULL : EVP_CIPHER_get_asn1_iv,
+    dasync_aes_cbc_hmac_sha256_ctrl,
+    NULL
+};
+
+static int dasync_ciphers(ENGINE *e, const EVP_CIPHER **cipher,
+                                   const int **nids, int nid);
+
+#  ifdef NID_aes_128_cbc_hmac_sha256
+static int dasync_cipher_nids[] = { NID_aes_128_cbc_hmac_sha256, 0 };
+#  else
+static int dasync_cipher_nids[] = { 0 };
+#endif
 
 static int bind_dasync(ENGINE *e)
 {
@@ -148,6 +205,7 @@ static int bind_dasync(ENGINE *e)
         || !ENGINE_set_name(e, engine_dasync_name)
         || !ENGINE_set_RSA(e, &dasync_rsa_method)
         || !ENGINE_set_digests(e, dasync_digests)
+        || !ENGINE_set_ciphers(e, dasync_ciphers)
         || !ENGINE_set_destroy_function(e, dasync_destroy)
         || !ENGINE_set_init_function(e, dasync_init)
         || !ENGINE_set_finish_function(e, dasync_finish)) {
@@ -232,6 +290,31 @@ static int dasync_digests(ENGINE *e, const EVP_MD **digest,
     default:
         ok = 0;
         *digest = NULL;
+        break;
+    }
+    return ok;
+}
+
+static int dasync_ciphers(ENGINE *e, const EVP_CIPHER **cipher,
+                                   const int **nids, int nid)
+{
+    int ok = 1;
+    if (!cipher) {
+        /* We are returning a list of supported nids */
+        *nids = dasync_cipher_nids;
+        return (sizeof(dasync_cipher_nids) -
+                1) / sizeof(dasync_cipher_nids[0]);
+    }
+    /* We are being asked for a specific cipher */
+    switch (nid) {
+# ifdef NID_aes_128_cbc_hmac_sha256
+    case NID_aes_128_cbc_hmac_sha256:
+        *cipher = &dasync_aes_128_cbc_hmac_sha256_cipher;
+        break;
+# endif
+    default:
+        ok = 0;
+        *cipher = NULL;
         break;
     }
     return ok;
@@ -329,4 +412,86 @@ static int dasync_rsa_init(RSA *rsa)
 static int dasync_rsa_finish(RSA *rsa)
 {
     return RSA_PKCS1_SSLeay()->finish(rsa);
+}
+
+
+static int dasync_aes_cbc_hmac_sha256_init_key(EVP_CIPHER_CTX *ctx,
+                                               const unsigned char *inkey,
+                                               const unsigned char *iv, int enc)
+{
+    return EVP_aes_128_cbc_hmac_sha256()->init(ctx, inkey, iv, enc);
+}
+
+static int dasync_aes_cbc_hmac_sha256_cipher(EVP_CIPHER_CTX *ctx,
+                                             unsigned char *out,
+                                             const unsigned char *in,
+                                             size_t len)
+{
+    return EVP_aes_128_cbc_hmac_sha256()->do_cipher(ctx, out, in, len);
+}
+
+static int dasync_aes_cbc_hmac_sha256_ctrl(EVP_CIPHER_CTX *ctx, int type,
+                                           int arg, void *ptr)
+{
+    int ret, num_records = 0, packlen = 0;
+    EVP_CTRL_TLS1_1_MULTIBLOCK_PARAM *mb_param = NULL, tmp_param;
+    unsigned char *tmpbuf = NULL;
+
+    /* For the purposes of this dummy engine we are going to demonstrate
+     * receiving multiple records in one go. This gives us the opportunity
+     * to submit multiple encryptions to our engine all at the same time.
+     *
+     * The number of records we are dealing with is in num_records.
+     *
+     * In this example code we are going to send back the first encrypted
+     * record; then pause; and then finish the remaining records. In a
+     * real engine the records could all be sent for encryption simultaneously
+     * and come back in any order.
+     *
+     * Note: An engine using this multiblock capability is responsible for
+     * adding the record headers for each of the encrypted records.
+     */
+    if (type == EVP_CTRL_TLS1_1_MULTIBLOCK_ENCRYPT) {
+        packlen = EVP_CIPHER_CTX_ctrl(ctx,
+                            EVP_CTRL_TLS1_1_MULTIBLOCK_MAX_BUFSIZE,
+                            SSL3_RT_MAX_PLAIN_LENGTH, NULL);
+        mb_param = (EVP_CTRL_TLS1_1_MULTIBLOCK_PARAM *)ptr;
+        num_records = mb_param->interleave;
+        packlen *= num_records;
+
+        tmpbuf = OPENSSL_malloc(packlen);
+        if (tmpbuf == NULL)
+            return 0;
+        memcpy(&tmp_param, mb_param, sizeof(EVP_CTRL_TLS1_1_MULTIBLOCK_PARAM));
+        tmp_param.out = tmpbuf;
+        ret = EVP_aes_128_cbc_hmac_sha256()->ctrl(ctx, type, arg, &tmp_param);
+
+        if (ret > 0) {
+            unsigned int length;
+            unsigned char *p;
+
+            p = tmpbuf;
+
+            /* Parse the record header for the first record */
+            /* Skip over content-type and version */
+            p += 3;
+            /* Get the Record payload length */
+            length = ((int)p[0]) << 8 | ((int)p[1]);
+            /* Add the record header length */
+            length += SSL3_RT_HEADER_LENGTH;
+            /* Copy the first record */
+            memcpy(mb_param->out, tmpbuf, length);
+
+            /* Pause */
+            dummy_pause_job();
+
+            /* Copy the remaining records */
+            memcpy(mb_param->out + length, tmpbuf + length, ret - length);
+        }
+        OPENSSL_free(tmpbuf);
+    } else {
+        ret = EVP_aes_128_cbc_hmac_sha256()->ctrl(ctx, type, arg, ptr);
+    }
+
+    return ret;
 }
