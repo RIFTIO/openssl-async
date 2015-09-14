@@ -352,6 +352,7 @@ SSL *SSL_new(SSL_CTX *ctx)
     s->quiet_shutdown = ctx->quiet_shutdown;
     s->conn_status = 1;
     s->max_send_fragment = ctx->max_send_fragment;
+    s->last_record_flag = 0;
 
     ssl_atomic_inc(ctx->references);
     s->ctx = ctx;

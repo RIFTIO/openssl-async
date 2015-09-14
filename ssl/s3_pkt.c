@@ -886,10 +886,18 @@ int ssl3_write_bytes(SSL *s, int type, const void *buf_, int len)
 
     n = (len - tot);
     for (;;) {
-        if (n > s->max_send_fragment)
+        if (n > s->max_send_fragment) {
             nw = s->max_send_fragment;
-        else
+        }
+        else {
             nw = n;
+#ifndef DISABLE_ASYNCH_BULK_PERF
+            if ((SSL_get_mode(s) & SSL_MODE_RECORD_PUSH)  &&
+                s->last_record_flag == 0) {
+                s->last_record_flag = SSL_LAST_SEGMENT_INIT; 
+            }
+#endif
+        }
 
         i = do_ssl3_write(s, type, &(buf[tot]), nw, 0);
         if (i <= 0) {
@@ -980,6 +988,21 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
                     return -1;
                 }
                 return i;
+            }
+            s->s3->crypto_retry = 0; 
+            if ((s->last_record_flag == SSL_LAST_SEGMENT_INIT &&
+                 s->s3->outstanding_write_records > 0) ||
+                (s->last_record_flag == SSL_LAST_SEGMENT_INFLIGHT &&
+                 s->s3->outstanding_write_records > 0) ) {
+                s->s3->crypto_retry = 1; 
+                return -1;
+            }
+            else if (s->last_record_flag == SSL_LAST_SEGMENT_INFLIGHT &&
+                     s->s3->outstanding_write_records == 0) {
+                SSL_clear_mode(s, SSL_MODE_RECORD_PUSH);
+                s->s3->crypto_retry = 0; 
+                s->last_record_flag = 0;
+                return len;
             }
         } else
 #endif
@@ -1350,6 +1373,13 @@ post_mac:
     }
     if (trans) {
         /* Asynch case */
+#ifndef DISABLE_ASYNCH_BULK_PERF
+        if (s->last_record_flag == SSL_LAST_SEGMENT_INIT) {
+            s->last_record_flag = SSL_LAST_SEGMENT_INFLIGHT;
+            s->s3->crypto_retry = 1;
+            return -1; 
+        }
+#endif
         return len;
     }
 post_enc:

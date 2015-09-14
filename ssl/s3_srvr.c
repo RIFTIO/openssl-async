@@ -797,7 +797,8 @@ int ssl3_accept(SSL *s)
             s->session->cipher = s->s3->tmp.new_cipher;
             if (s->method->ssl3_enc->setup_key_block(s) <= 0) {
                 ret = -1;
-                s->state = SSL_ST_ERR;
+                if(s->s3->pkeystate == 0)
+                    s->state = SSL_ST_ERR;
                 goto end;
             }
 
@@ -814,7 +815,8 @@ int ssl3_accept(SSL *s)
                                                           SSL3_CHANGE_CIPHER_SERVER_WRITE))
             {
                 ret = -1;
-                s->state = SSL_ST_ERR;
+                if(s->s3->pkeystate == 0)
+                    s->state = SSL_ST_ERR;
                 goto end;
             }
 
@@ -822,6 +824,9 @@ int ssl3_accept(SSL *s)
 
         case SSL3_ST_SW_FINISHED_A:
         case SSL3_ST_SW_FINISHED_B:
+#ifndef DISABLE_ASYNCH_BULK_PERF
+            SSL_set_mode(s,SSL_MODE_RECORD_PUSH);
+#endif
             ret = ssl3_send_finished(s,
                                      SSL3_ST_SW_FINISHED_A,
                                      SSL3_ST_SW_FINISHED_B,
@@ -2419,8 +2424,9 @@ int ssl3_send_server_key_exchange(SSL *s)
     BN_CTX_free(bn_ctx);
 #endif
     EVP_MD_CTX_cleanup(&md_ctx);
-    if (!(s->s3->flags & SSL3_FLAGS_ASYNCH &&
-          ((2 == s->s3->pkeystate) || (11 == s->s3->pkeystate)))) /* not a retry */
+    /*Set if Synch or Asynch Failure(No Retry|No inflight)*/
+    if (!(s->s3->flags & SSL3_FLAGS_ASYNCH) 
+        || (0 == s->s3->pkeystate))
         s->state = SSL_ST_ERR;
     return -1;
 }
@@ -3673,11 +3679,9 @@ int ssl3_get_client_key_exchange(SSL *s)
         EC_KEY_free(srvr_ecdh);
     BN_CTX_free(bn_ctx);
 #endif
-    if (!(s->s3->flags & SSL3_FLAGS_ASYNCH &&
-          (((2 == s->s3->pkeystate) &&
-            (1 == s->s3->tmp.reuse_message)) ||
-           ((PRF_RETRY_GENERATE_MASTER_SECRET_STATE == s->s3->pkeystate) &&
-            (0 == s->s3->tmp.reuse_message))))) /* not a retry */
+    /*Set if Synch or Asynch Failure(No Retry|No inflight)*/
+    if (!(s->s3->flags & SSL3_FLAGS_ASYNCH) 
+        || (0 == s->s3->pkeystate))
         s->state = SSL_ST_ERR;
     return -1;
 }

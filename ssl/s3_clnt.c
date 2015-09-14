@@ -507,8 +507,9 @@ int ssl3_connect(SSL *s)
             if (s->method->ssl3_enc->setup_key_block(s) <= 0) {
                 if (s->s3->pkeystate != 0)
                     s->state = state;
+                else
+                    s->state = SSL_ST_ERR;
                 ret = -1;
-                s->state = SSL_ST_ERR;
                 goto end;
             }
 
@@ -516,7 +517,8 @@ int ssl3_connect(SSL *s)
                                                           SSL3_CHANGE_CIPHER_CLIENT_WRITE))
             {
                 ret = -1;
-                s->state = SSL_ST_ERR;
+                if (s->s3->pkeystate == 0)
+                    s->state = SSL_ST_ERR;
                 goto end;
             }
 
@@ -2147,9 +2149,9 @@ int ssl3_get_key_exchange(SSL *s)
 #endif
     if (md_ctx.digest)
         EVP_MD_CTX_cleanup(&md_ctx);
-    if (!(s->s3->flags & SSL3_FLAGS_ASYNCH &&
-          ((2 == s->s3->pkeystate) &&
-           (1 == s->s3->tmp.reuse_message)))) /* not a retry */
+    /*Set if Synch or Asynch Failure(No Retry|No inflight)*/
+    if (!(s->s3->flags & SSL3_FLAGS_ASYNCH)
+        || (0 == s->s3->pkeystate))
         s->state = SSL_ST_ERR;
     return -1;
 }
@@ -3691,8 +3693,9 @@ int ssl3_send_client_key_exchange(SSL *s)
         EC_KEY_free(clnt_ecdh);
     EVP_PKEY_free(srvr_pub_pkey);
 #endif
-    if (!(s->s3->flags & SSL3_FLAGS_ASYNCH &&
-          (2 == s->s3->pkeystate))) /* not a retry */
+    /*Set if Synch or Asynch Failure(No Retry|No inflight)*/
+    if (!(s->s3->flags & SSL3_FLAGS_ASYNCH) 
+        || (0 == s->s3->pkeystate))
         s->state = SSL_ST_ERR;
     return -1;
 }

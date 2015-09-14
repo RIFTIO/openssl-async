@@ -442,9 +442,23 @@ long ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
         case -1:
             return -1;
         case PRF_RETRY_FINAL_FINISH_STATE:
+            if ((s->init_num < 4)
+                && (s->state == st1)) { 
+                goto read_bytes;
+            }
+            else if ((s->s3->tmp.message_size - s->init_num) > 0) {
+                goto read_bytes_1;
+            }
             s->s3->pkeystate = 0;
             goto pre_prf_mac;
         case PRF_FINAL_FINISH_STATE:
+            if ((s->init_num < 4)
+                && (s->state == st1)) { 
+                goto read_bytes;
+            }
+            else if ((s->s3->tmp.message_size - s->init_num) > 0) {
+                goto read_bytes_1;
+            }
             s->s3->pkeystate = 0;
             s->s3->tmp.peer_finish_md_len = s->s3->get_client_key_exchange.n;
             goto post_prf_mac;
@@ -467,6 +481,7 @@ long ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
         return s->init_num;
     }
 
+read_bytes:
     p = (unsigned char *)s->init_buf->data;
 
     if (s->state == st1) {      /* s->init_num < 4 */
@@ -548,6 +563,7 @@ long ssl3_get_message(SSL *s, int st1, int stn, int mt, long max, int *ok)
         s->init_num = 0;
     }
 
+read_bytes_1:
     /* next state (stn) */
     p = s->init_msg;
     n = s->s3->tmp.message_size - s->init_num;

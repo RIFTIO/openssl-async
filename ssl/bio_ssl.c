@@ -227,8 +227,9 @@ static int ssl_read(BIO *b, char *out, int outl)
 
     case SSL_ERROR_WAIT_ASYNCH_READ:
         if (sb->ssl->s3 && sb->ssl->s3->flags & SSL3_FLAGS_ASYNCH) {
-	    if (sb->ssl->s3->async_retry_flag)
-		BIO_set_retry_read(b);	
+            if (sb->ssl->s3->async_retry_flag
+                || sb->ssl->s3->crypto_retry)
+                BIO_set_retry_read(b);
         }
         break;
         /*
@@ -237,8 +238,9 @@ static int ssl_read(BIO *b, char *out, int outl)
          */
     case SSL_ERROR_WAIT_ASYNCH_WRITE:
         if (sb->ssl->s3 && sb->ssl->s3->flags & SSL3_FLAGS_ASYNCH) {
-	   if (sb->ssl->s3->async_retry_flag)
-	       BIO_set_retry_write(b);
+            if (sb->ssl->s3->async_retry_flag
+                || sb->ssl->s3->crypto_retry)
+                BIO_set_retry_write(b);
         }
         break;
 
@@ -316,14 +318,16 @@ static int ssl_write(BIO *b, const char *out, int outl)
          */
     case SSL_ERROR_WAIT_ASYNCH_READ:
         if (bs->ssl->s3 && bs->ssl->s3->flags & SSL3_FLAGS_ASYNCH) {
-    	   if (bs->ssl->s3->async_retry_flag)
-	       BIO_set_retry_read(b);
+            if (bs->ssl->s3->async_retry_flag
+                || bs->ssl->s3->crypto_retry)
+                BIO_set_retry_read(b);
         }
         break;
     case SSL_ERROR_WAIT_ASYNCH_WRITE:
         if (bs->ssl->s3 && bs->ssl->s3->flags & SSL3_FLAGS_ASYNCH) {
-     	   if (bs->ssl->s3->async_retry_flag)
-	       BIO_set_retry_write(b);
+            if (bs->ssl->s3->async_retry_flag
+                || bs->ssl->s3->crypto_retry)
+                BIO_set_retry_write(b);
         }
         break;
     case SSL_ERROR_SYSCALL:

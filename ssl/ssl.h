@@ -690,6 +690,7 @@ struct ssl_session_st {
  * (SSL3 and TLS only)
  */
 # define SSL_MODE_ASYNCHRONOUS 0x00000100L
+# define SSL_MODE_RECORD_PUSH  0x00000200L
 
 /*
  * Note: SSL[_CTX]_set_{options,mode} use |= op on the previous value, they
@@ -1270,6 +1271,9 @@ const char *SSL_get_psk_identity(const SSL *s);
 # define SSL_MAC_FLAG_READ_MAC_STREAM 1
 # define SSL_MAC_FLAG_WRITE_MAC_STREAM 2
 
+# define SSL_LAST_SEGMENT_INIT 1
+# define SSL_LAST_SEGMENT_INFLIGHT 2
+
 # ifndef OPENSSL_NO_SSL_INTERN
 
 struct ssl_st {
@@ -1542,6 +1546,8 @@ struct ssl_st {
                                        const void *buf, size_t len, SSL *ssl,
                                        void *arg);
     void *asynch_completion_callback_arg;
+
+    int last_record_flag;
 };
 
 # endif
