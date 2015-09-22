@@ -377,6 +377,8 @@ struct evp_cipher_st {
 # define         EVP_CIPH_FLAG_CUSTOM_CIPHER     0x100000
 # define         EVP_CIPH_FLAG_AEAD_CIPHER       0x200000
 # define         EVP_CIPH_FLAG_TLS1_1_MULTIBLOCK 0x400000
+/* Cipher can handle pipeline operations */
+# define         EVP_CIPH_FLAG_PIPELINE          0X800000
 
 /*
  * Cipher context flag to indicate we can handle wrap mode: if allowed in
@@ -426,6 +428,13 @@ struct evp_cipher_st {
 # define         EVP_CTRL_TLS1_1_MULTIBLOCK_ENCRYPT      0x1a
 # define         EVP_CTRL_TLS1_1_MULTIBLOCK_DECRYPT      0x1b
 # define         EVP_CTRL_TLS1_1_MULTIBLOCK_MAX_BUFSIZE  0x1c
+
+/* Set the output buffers to use for a pipelined operation */
+# define         EVP_CTRL_SET_PIPELINE_OUTPUT_BUFS       0x1d
+/* Set the input buffers to use for a pipelined operation */
+# define         EVP_CTRL_SET_PIPELINE_INPUT_BUFS        0x1e
+/* Set the input buffer lengths to use for a pipelined operation */
+# define         EVP_CTRL_SET_PIPELINE_INPUT_LENS        0x2f
 
 /* RFC 5246 defines additional data to be 13 bytes in length */
 # define         EVP_AEAD_TLS1_AAD_LEN           13
