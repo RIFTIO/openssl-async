@@ -1041,7 +1041,7 @@ int do_dtls1_write(SSL *s, int type, const unsigned char *buf,
     SSL3_BUFFER *wb;
     SSL_SESSION *sess;
 
-    wb = &s->rlayer.wbuf;
+    wb = &s->rlayer.wbuf[0];
 
     /*
      * first check if there is a SSL3_BUFFER still being written out.  This
@@ -1130,7 +1130,7 @@ int do_dtls1_write(SSL *s, int type, const unsigned char *buf,
 
     /* first we compress */
     if (s->compress != NULL) {
-        if (!ssl3_do_compress(s)) {
+        if (!ssl3_do_compress(s, wr)) {
             SSLerr(SSL_F_DO_DTLS1_WRITE, SSL_R_COMPRESSION_FAILURE);
             goto err;
         }
@@ -1147,7 +1147,7 @@ int do_dtls1_write(SSL *s, int type, const unsigned char *buf,
      */
 
     if (mac_size != 0) {
-        if (s->method->ssl3_enc->mac(s,
+        if (s->method->ssl3_enc->mac(s, wr,
                 &(p[SSL3_RECORD_get_length(wr) + eivlen]), 1) < 0)
             goto err;
         SSL3_RECORD_add_length(wr, mac_size);
@@ -1160,7 +1160,7 @@ int do_dtls1_write(SSL *s, int type, const unsigned char *buf,
     if (eivlen)
         SSL3_RECORD_add_length(wr, eivlen);
 
-    if (s->method->ssl3_enc->enc(s, 1) < 1)
+    if (s->method->ssl3_enc->enc(s, wr, 1, 1) < 1)
         goto err;
 
     /* record length after mac and block padding */
