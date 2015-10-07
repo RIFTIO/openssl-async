@@ -983,6 +983,9 @@ static int ssl_start_async_job(SSL *s, struct ssl_async_args *args,
     case ASYNC_PAUSE:
         s->rwstate = SSL_ASYNC_PAUSED;
         return -1;
+    case ASYNC_NO_JOBS:
+        s->rwstate = SSL_ASYNC_NO_JOBS;
+        return -1;
     case ASYNC_FINISH:
         s->job = NULL;
         return ret;
@@ -2510,6 +2513,9 @@ int SSL_get_error(const SSL *s, int i)
     }
     if ((i < 0) && SSL_want_async(s)) {
         return SSL_ERROR_WANT_ASYNC;
+    }
+    if ((i < 0) && SSL_want_async_job(s)) {
+        return SSL_ERROR_WANT_ASYNC_JOB;
     }
 
     if (i == 0) {

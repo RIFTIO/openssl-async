@@ -83,7 +83,11 @@ in draft-ietf-tls-downgrade-scsv-00.
 
 Enable asynchronous processing. TLS I/O operations may indicate a retry with
 SSL_ERROR_WANT_ASYNC with this mode set if an asynchronous capable engine is
-used to perform cryptographic operations. See L<SSL_get_error(3)>.
+used to perform cryptographic operations. See L<SSL_get_error(3)>. If you use
+this mode then you should first have initialised async operations on each thread
+that it is used using L<ASYNC_init_pool(3)>, and deinitialise before the thread
+closes using L<ASYNC_free_pool(3)>. Note that when using this mode any retries
+must occur on the same thread as the initial call.
 
 =back
 

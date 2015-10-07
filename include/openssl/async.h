@@ -88,6 +88,7 @@ void ASYNC_wake(ASYNC_JOB *job);
 void ASYNC_clear_wake(ASYNC_JOB *job);
 void ASYNC_block_pause(void);
 void ASYNC_unblock_pause(void);
+int ASYNC_get_pool_wait_fd(void);
 
 /* BEGIN ERROR CODES */
 /*
@@ -108,9 +109,11 @@ void ERR_load_ASYNC_strings(void);
 
 /* Reason codes. */
 # define ASYNC_R_CANNOT_CREATE_WAIT_PIPE                  100
+# define ASYNC_R_FAILED_TO_CREATE_POOL_FDS                104
 # define ASYNC_R_FAILED_TO_SET_POOL                       101
 # define ASYNC_R_FAILED_TO_SWAP_CONTEXT                   102
 # define ASYNC_R_INVALID_POOL_SIZE                        103
+# define ASYNC_R_POOL_ALREADY_INITED                      105
 
 #ifdef  __cplusplus
 }

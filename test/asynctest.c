@@ -124,20 +124,49 @@ static int blockpause(void *args)
     return 1;
 }
 
+static int hasdata(OSSL_ASYNC_FD fd)
+{
+#ifdef ASYNC_POSIX
+    fd_set checkfds;
+    struct timeval tv;
+    FD_ZERO(&checkfds);
+    openssl_fdset(fd, &checkfds);
+    memset(&tv, 0, sizeof tv);
+    if (select(fd + 1, (void *)&checkfds, NULL, NULL, &tv) < 0)
+        return -1;
+    if (FD_ISSET(fd, &checkfds))
+        return 1;
+    return 0;
+#else
+    DWORD avail = 0;
+
+    if (PeekNamedPipe(fd, NULL, 0, NULL, &avail, NULL) && avail > 0)
+        return 1;
+
+    return 0;
+#endif
+}
+
+
 static int test_ASYNC_init_pool()
 {
     ASYNC_JOB *job1 = NULL, *job2 = NULL, *job3 = NULL;
-    int funcret1, funcret2, funcret3;
+    int funcret1, funcret2, funcret3, fd;
 
     if (       !ASYNC_init_pool(2, 0)
             || ASYNC_start_job(&job1, &funcret1, only_pause, NULL, 0)
                 != ASYNC_PAUSE
+            || (fd = ASYNC_get_pool_wait_fd()) < 0
+            || hasdata(fd) != 1
             || ASYNC_start_job(&job2, &funcret2, only_pause, NULL, 0)
                 != ASYNC_PAUSE
+            || hasdata(fd) != 0
             || ASYNC_start_job(&job3, &funcret3, only_pause, NULL, 0)
                 != ASYNC_NO_JOBS
+            || hasdata(fd) != 0
             || ASYNC_start_job(&job1, &funcret1, only_pause, NULL, 0)
                 != ASYNC_FINISH
+            || hasdata(fd) != 1
             || ASYNC_start_job(&job3, &funcret3, only_pause, NULL, 0)
                 != ASYNC_PAUSE
             || ASYNC_start_job(&job2, &funcret2, only_pause, NULL, 0)
@@ -199,29 +228,6 @@ static int test_ASYNC_get_current_job()
 
     ASYNC_free_pool();
     return 1;
-}
-
-static int hasdata(OSSL_ASYNC_FD fd)
-{
-#ifdef ASYNC_POSIX
-    fd_set checkfds;
-    struct timeval tv;
-    FD_ZERO(&checkfds);
-    openssl_fdset(fd, &checkfds);
-    memset(&tv, 0, sizeof tv);
-    if (select(fd + 1, (void *)&checkfds, NULL, NULL, &tv) < 0)
-        return -1;
-    if (FD_ISSET(fd, &checkfds))
-        return 1;
-    return 0;
-#else
-    DWORD avail = 0;
-
-    if (PeekNamedPipe(fd, NULL, 0, NULL, &avail, NULL) && avail > 0)
-        return 1;
-
-    return 0;
-#endif
 }
 
 static int test_ASYNC_get_wait_fd()

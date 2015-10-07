@@ -69,6 +69,8 @@
 #define ASYNC_JOB_PAUSED    2
 #define ASYNC_JOB_STOPPING  3
 
+static void async_free_pool_internal(async_pool *pool);
+
 static async_ctx *async_ctx_new(void)
 {
     async_ctx *nctx = NULL;
@@ -138,13 +140,15 @@ static void async_job_free(ASYNC_JOB *job)
     if (job != NULL) {
         OPENSSL_free(job->funcargs);
         async_fibre_free(&job->fibrectx);
+        close(job->wait_fd);
+        close(job->wake_fd);
         OPENSSL_free(job);
     }
 }
 
 static ASYNC_JOB *async_get_pool_job(void) {
     ASYNC_JOB *job;
-    STACK_OF(ASYNC_JOB) *pool;
+    async_pool *pool;
 
     pool = async_get_pool();
     if (pool == NULL) {
@@ -157,26 +161,43 @@ static ASYNC_JOB *async_get_pool_job(void) {
         pool = async_get_pool();
     }
 
-    job = sk_ASYNC_JOB_pop(pool);
+    job = sk_ASYNC_JOB_pop(pool->jobs);
     if (job == NULL) {
         /* Pool is empty */
-        if (!async_pool_can_grow())
+        if ((pool->max_size != 0) && (pool->curr_size >= pool->max_size))
             return NULL;
 
         job = async_job_new();
         if (job) {
             async_fibre_makecontext(&job->fibrectx);
-            async_increment_pool_size();
+            pool->curr_size++;
+        }
+    }
+    if (pool->curr_size == pool->max_size) {
+        /* The pool is now empty. Signal it */
+        if (pool->wake_set) {
+            char dummy = 0;
+
+            async_read1(pool->wait_fd, &dummy);
+            pool->wake_set = 0;
         }
     }
     return job;
 }
 
 static void async_release_job(ASYNC_JOB *job) {
+    async_pool *pool;
+
+    pool = async_get_pool();
     OPENSSL_free(job->funcargs);
     job->funcargs = NULL;
-    /* Ignore error return */
-    async_release_job_to_pool(job);
+    sk_ASYNC_JOB_push(pool->jobs, job);
+    if (!pool->wake_set) {
+        char dummy;
+
+        async_write1(pool->wake_fd, &dummy);
+        pool->wake_set = 1;
+    }
 }
 
 void async_start_func(void)
@@ -309,31 +330,57 @@ int ASYNC_pause_job(void)
     return 1;
 }
 
-static void async_empty_pool(STACK_OF(ASYNC_JOB) *pool)
+static void async_empty_pool(async_pool *pool)
 {
     ASYNC_JOB *job;
 
+    if (!pool || !pool->jobs)
+        return;
+
     do {
-        job = sk_ASYNC_JOB_pop(pool);
+        job = sk_ASYNC_JOB_pop(pool->jobs);
         async_job_free(job);
     } while (job);
 }
 
 int ASYNC_init_pool(size_t max_size, size_t init_size)
 {
-    STACK_OF(ASYNC_JOB) *pool;
+    async_pool *pool;
     size_t curr_size = 0;
+    int poolfds[2];
+    char dummy;
 
-    if (init_size > max_size) {
+    if (init_size > max_size || max_size == 0) {
         ASYNCerr(ASYNC_F_ASYNC_INIT_POOL, ASYNC_R_INVALID_POOL_SIZE);
         return 0;
     }
 
-    pool = sk_ASYNC_JOB_new_null();
+    if(async_get_pool() != NULL) {
+        ASYNCerr(ASYNC_F_ASYNC_INIT_POOL, ASYNC_R_POOL_ALREADY_INITED);
+        return 0;
+    }
+
+    pool = OPENSSL_zalloc(sizeof *pool);
     if (pool == NULL) {
         ASYNCerr(ASYNC_F_ASYNC_INIT_POOL, ERR_R_MALLOC_FAILURE);
         return 0;
     }
+
+    pool->jobs = sk_ASYNC_JOB_new_null();
+    if (pool->jobs == NULL) {
+        ASYNCerr(ASYNC_F_ASYNC_INIT_POOL, ERR_R_MALLOC_FAILURE);
+        OPENSSL_free(pool);
+        return 0;
+    }
+
+    if (!async_pipe(poolfds)) {
+        ASYNCerr(ASYNC_F_ASYNC_INIT_POOL, ASYNC_R_FAILED_TO_CREATE_POOL_FDS);
+        goto err;
+    }
+    pool->wait_fd = poolfds[0];
+    pool->wake_fd = poolfds[1];
+    pool->max_size = max_size;
+
     /* Pre-create jobs as required */
     while (init_size) {
         ASYNC_JOB *job;
@@ -341,7 +388,7 @@ int ASYNC_init_pool(size_t max_size, size_t init_size)
         if (job) {
             async_fibre_makecontext(&job->fibrectx);
             job->funcargs = NULL;
-            sk_ASYNC_JOB_push(pool, job);
+            sk_ASYNC_JOB_push(pool->jobs, job);
             curr_size++;
             init_size--;
         } else {
@@ -352,28 +399,42 @@ int ASYNC_init_pool(size_t max_size, size_t init_size)
             init_size = 0;
         }
     }
+    pool->curr_size = curr_size;
 
-    if (!async_set_pool(pool, curr_size, max_size)) {
+
+    async_write1(pool->wake_fd, &dummy);
+    pool->wake_set = 1;
+
+    if (!async_set_pool(pool)) {
         ASYNCerr(ASYNC_F_ASYNC_INIT_POOL, ASYNC_R_FAILED_TO_SET_POOL);
-        async_empty_pool(pool);
-        sk_ASYNC_JOB_free(pool);
-        return 0;
+        goto err;
     }
 
     return 1;
+err:
+    async_free_pool_internal(pool);
+    return 0;
 }
 
-void ASYNC_free_pool(void)
+static void async_free_pool_internal(async_pool *pool)
 {
-    STACK_OF(ASYNC_JOB) *pool;
-
-    pool = async_get_pool();
     if (pool == NULL)
         return;
 
     async_empty_pool(pool);
-    async_release_pool();
+    sk_ASYNC_JOB_free(pool->jobs);
+    if (pool->wait_fd != 0)
+        close(pool->wait_fd);
+    if (pool->wake_fd != 0)
+        close(pool->wake_fd);
+    OPENSSL_free(pool);
+    async_set_pool(NULL);
     async_ctx_free();
+}
+
+void ASYNC_free_pool(void)
+{
+    async_free_pool_internal(async_get_pool());
 }
 
 ASYNC_JOB *ASYNC_get_current_job(void)
@@ -390,6 +451,16 @@ ASYNC_JOB *ASYNC_get_current_job(void)
 OSSL_ASYNC_FD ASYNC_get_wait_fd(ASYNC_JOB *job)
 {
     return job->wait_fd;
+}
+
+int ASYNC_get_pool_wait_fd(void)
+{
+    async_pool *pool;
+
+    if ((pool = async_get_pool()) == NULL)
+        return -1;
+
+    return pool->wait_fd;
 }
 
 void ASYNC_wake(ASYNC_JOB *job)

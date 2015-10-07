@@ -19,6 +19,7 @@ management functions
  int ASYNC_pause_job(void);
 
  int ASYNC_get_wait_fd(ASYNC_JOB *job);
+ int ASYNC_get_pool_wait_fd(void);
  ASYNC_JOB *ASYNC_get_current_job(void);
  void ASYNC_wake(ASYNC_JOB *job);
  void ASYNC_clear_wake(ASYNC_JOB *job);
@@ -114,6 +115,12 @@ Applications can wait for the file descriptor to be ready for "read" using a
 system function call such as select or poll (being ready for "read" indicates
 that the job should be resumed). Applications can signal that a job is ready to
 resume using ASYNC_wake() or clear an existing signal using ASYNC_clear_wake().
+
+The ASYNC_JOB pool also has a "wait" file descriptor associated with it, to be
+used in the case where the error ASYNC_NO_JOBS is returned from
+ASYNC_start_job(). The file descriptor can be obtained by calling
+ASYNC_get_pool_wait_fd(). This will be shown as ready for "read" to indicate
+that jobs are available in the pool.
 
 An example of typical usage might be an async capable engine. User code would
 initiate cryptographic operations. The engine would initiate those operations

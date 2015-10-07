@@ -99,6 +99,17 @@ L<SSL_get_async_wait_fd(3)>. The TLS/SSL I/O function should be called again
 later. The function B<must> be called from the same thread that the original
 call was made from.
 
+=item SSL_ERROR_WANT_ASYNC_JOB
+
+The operation did not complete because there are no available jobs in the async
+job pool. This will only occur if the mode has been set to SSL_MODE_ASYNC
+using L<SSL_CTX_set_mode(3)> or L<SSL_set_mode(3)>. If you see this error
+frequently then you may wish to consider amending the size of the pool
+configured via the call to ASYNC_init_pool. An application can determine whether
+there are jobs now available in the pool using select() or poll() on the async
+job pool wait file descriptor (available via a call to
+L<ASYNC_get_pool_wait_fd(3)>).
+
 =item SSL_ERROR_SYSCALL
 
 Some I/O error occurred.  The OpenSSL error queue may contain more

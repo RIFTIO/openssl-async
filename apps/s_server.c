@@ -2345,6 +2345,11 @@ static int sv_body(char *hostname, int s, int stype, unsigned char *context)
                 case SSL_ERROR_WANT_X509_LOOKUP:
                     BIO_printf(bio_s_out, "Write BLOCK\n");
                     break;
+                case SSL_ERROR_WANT_ASYNC_JOB:
+                    /*
+                     * We shouldn't ever get this because the pool should always
+                     * be big enough. Fall through.
+                     */
                 case SSL_ERROR_SYSCALL:
                 case SSL_ERROR_SSL:
                     BIO_printf(bio_s_out, "ERROR\n");
@@ -2418,6 +2423,11 @@ static int sv_body(char *hostname, int s, int stype, unsigned char *context)
                 case SSL_ERROR_WANT_READ:
                     BIO_printf(bio_s_out, "Read BLOCK\n");
                     break;
+                case SSL_ERROR_WANT_ASYNC_JOB:
+                    /*
+                     * We shouldn't ever get this because the pool should always
+                     * be big enough. Fall through.
+                     */
                 case SSL_ERROR_SYSCALL:
                 case SSL_ERROR_SSL:
                     BIO_printf(bio_s_out, "ERROR\n");
