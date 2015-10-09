@@ -86,6 +86,8 @@
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/objects.h>
+#include <openssl/async.h>
+#include <sys/epoll.h>
 #if !defined(OPENSSL_SYS_MSDOS)
 # include OPENSSL_UNISTD
 #endif
@@ -351,7 +353,7 @@ static int found(const char *name, const OPT_PAIR * pairs, int *result)
 typedef enum OPTION_choice {
     OPT_ERR = -1, OPT_EOF = 0, OPT_HELP,
     OPT_ELAPSED, OPT_EVP, OPT_DECRYPT, OPT_ENGINE, OPT_MULTI,
-    OPT_MR, OPT_MB, OPT_MISALIGN
+    OPT_MR, OPT_MB, OPT_MISALIGN, OPT_ASYNC, OPT_BATCH
 } OPTION_CHOICE;
 
 OPTIONS speed_options[] = {
@@ -369,6 +371,8 @@ OPTIONS speed_options[] = {
 #ifndef NO_FORK
     {"multi", OPT_MULTI, 'p', "Run benchmarks in parallel"},
 #endif
+    {"async", OPT_ASYNC, '-', "Use asynchronous processing in the engine"},
+    {"batch", OPT_BATCH, 'p', "Submit n requests back to back to the engine (only applicable in asynch mode)"},
 #ifndef OPENSSL_NO_ENGINE
     {"engine", OPT_ENGINE, 's', "Use engine, possibly a hardware device"},
 #endif
@@ -562,6 +566,53 @@ static OPT_PAIR ecdh_choices[] = {
 };
 #endif
 
+#ifndef SIGALRM
+# define COND(d) (count < (d))
+# define COUNT(d) (d)
+#else
+# define COND(c) (run && loop_count<0x7fffffff)
+# define COUNT(d) (count)
+# ifndef _WIN32
+//    signal(SIGALRM, sig_done);
+# endif
+#endif                         /* SIGALRM */
+
+unsigned char *buf = NULL, *buf2 = NULL;
+int j;
+
+#ifndef OPENSSL_NO_RSA
+    unsigned rsa_num;
+    RSA *rsa_key[RSA_NUM];
+#endif
+
+int RSA_sign_loop() {
+    int ret, loop_count;
+    for (run=1,loop_count=0; COND(rsa_c[j][0]); ++loop_count) {
+        ret = RSA_sign(NID_md5_sha1, buf, 36, buf2, &rsa_num, rsa_key[j]);
+        if (ret == 0) {
+            BIO_printf(bio_err, "RSA sign failure\n");
+            ERR_print_errors(bio_err);
+            loop_count = -1;
+            break;
+        }
+    }
+    return loop_count;
+}
+
+int RSA_verify_loop() {
+    int ret, loop_count;
+    for (run=1,loop_count=0; COND(rsa_c[j][1]); ++loop_count) {
+        ret = RSA_verify(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
+        if (ret == 0) {
+            BIO_printf(bio_err, "RSA verify failure\n");
+            ERR_print_errors(bio_err);
+            loop_count = -1;
+            break;
+        }
+    }
+    return loop_count;
+}
+
 int speed_main(int argc, char **argv)
 {
     char *prog;
@@ -571,14 +622,15 @@ int speed_main(int argc, char **argv)
     OPTION_CHOICE o;
     int decrypt = 0, multiblock = 0, doit[ALGOR_NUM], pr_header = 0;
     int dsa_doit[DSA_NUM], rsa_doit[RSA_NUM];
-    int ret = 1, i, j, k, misalign = MAX_MISALIGNMENT + 1;
+    int ret = 1, i, k, misalign = MAX_MISALIGNMENT + 1;
     long c[ALGOR_NUM][SIZE_NUM], count = 0, save_count = 0;
     unsigned char *buf_malloc = NULL, *buf2_malloc = NULL;
-    unsigned char *buf = NULL, *buf2 = NULL;
     unsigned char md[EVP_MAX_MD_SIZE];
 #ifndef NO_FORK
     int multi = 0;
 #endif
+    int async = 0;
+    int batch = 1;
     /* What follows are the buffers and key material. */
 #if !defined(OPENSSL_NO_RSA) || !defined(OPENSSL_NO_DSA)
     long rsa_count;
@@ -682,8 +734,6 @@ int speed_main(int argc, char **argv)
     AES_KEY aes_ks1, aes_ks2, aes_ks3;
 #endif
 #ifndef OPENSSL_NO_RSA
-    unsigned rsa_num;
-    RSA *rsa_key[RSA_NUM];
     long rsa_c[RSA_NUM][2];
     static unsigned int rsa_bits[RSA_NUM] = {
         512, 1024, 2048, 3072, 4096, 7680, 15360
@@ -827,6 +877,12 @@ int speed_main(int argc, char **argv)
 #ifndef NO_FORK
             multi = atoi(opt_arg());
 #endif
+            break;
+        case OPT_ASYNC:
+            async = 1;
+            break;
+        case OPT_BATCH:
+            batch = atoi(opt_arg());
             break;
         case OPT_MISALIGN:
             if (!opt_int(opt_arg(), &misalign))
@@ -1703,6 +1759,32 @@ int speed_main(int argc, char **argv)
 
     RAND_bytes(buf, 36);
 #ifndef OPENSSL_NO_RSA
+    int job_num = 0;
+    int job_count = 0;
+    int completed_jobs = 0;
+    int is_starting_jobs = 1;
+    struct epoll_event *events;
+    ASYNC_JOB *job = NULL;
+    int job_fd = 0;
+
+    int efd;
+
+    //ASYNC_JOB **jobs;
+    //jobs = (ASYNC_JOB **) OPENSSL_malloc((batch) * (sizeof(ASYNC_JOB *)));
+    //if (NULL == jobs) {
+    //    BIO_printf(bio_err, "[%s] --- Failed to allocate jobs\n", __func__);
+    //    ERR_print_errors(bio_err);
+    //    exit(1);
+    //}
+    //memset(jobs, 0, batch * sizeof(ASYNC_JOB *));
+
+    events = (struct epoll_event*) OPENSSL_malloc((batch) * (sizeof(struct epoll_event)));
+    if (NULL == events) {
+        BIO_printf(bio_err, "[%s] --- Failed to allocate events\n", __func__);
+        ERR_print_errors(bio_err);
+        exit(1);
+    }
+
     for (j = 0; j < RSA_NUM; j++) {
         int st;
         if (!rsa_doit[j])
@@ -1718,14 +1800,84 @@ int speed_main(int argc, char **argv)
                                rsa_c[j][0], rsa_bits[j], RSA_SECONDS);
             /* RSA_blinding_on(rsa_key[j],NULL); */
             Time_F(START);
-            for (count = 0, run = 1; COND(rsa_c[j][0]); count++) {
-                st = RSA_sign(NID_md5_sha1, buf, 36, buf2,
-                              &rsa_num, rsa_key[j]);
-                if (st == 0) {
-                    BIO_printf(bio_err, "RSA sign failure\n");
-                    ERR_print_errors(bio_err);
-                    count = 1;
-                    break;
+            if (!async) {
+                count = RSA_sign_loop();
+            }
+            else {
+                int efd;
+                efd = epoll_create1(0);
+                if (efd == -1) {
+                    exit(1);
+                }
+
+                for (job_num=0; job_num < batch; ++job_num) {
+                    job = NULL;
+                    switch (ASYNC_start_job(&job, &job_count, RSA_sign_loop, NULL, 0)) {
+                        case ASYNC_PAUSE:
+                            job_fd = ASYNC_get_wait_fd(job);
+                            fprintf(stderr, "Waiting for the job to be woken up. job = %p fd = %d\n", job,  job_fd);
+
+                            struct epoll_event event;
+                            event.data.fd = job_fd;
+                            event.data.ptr = job;
+                            event.events = EPOLLIN | EPOLLET;
+                            if (epoll_ctl(efd, EPOLL_CTL_ADD, job_fd, &event) == -1) {
+                                fprintf(stderr, "Failed to add event\n");
+                                exit(1);
+                            }
+                            break;
+                        case ASYNC_FINISH:
+                            if (count == -1 || job_count == -1) {
+                                /* Handling failures in RSA_sign */
+                                count = -1;
+                            } else {
+                                count += job_count;
+                            }
+                            ++completed_jobs;
+                            break;
+                        case ASYNC_NO_JOBS:
+                        case ASYNC_ERR:
+                            BIO_printf(bio_err, "RSA sign job failure\n");
+                            ERR_print_errors(bio_err);
+                            count = -1;
+                            break;
+                    }
+                }
+
+                while (completed_jobs < batch) {
+                    fprintf(stderr, "Pausig for event...");
+                    int num_events = epoll_wait(efd, events, batch, -1);
+                    fprintf(stderr, "%d\n", num_events);
+
+                    for (i = 0; i < num_events; i++) {
+                        job = events[i].data.ptr;
+                        job_fd = events[i].data.fd;
+                        fprintf(stderr, "Awaken job: %p - fd = %d\n", job, job_fd);
+                        switch (ASYNC_start_job(&job, &job_count, RSA_sign_loop, NULL, 0)) {
+                            case ASYNC_PAUSE:
+                                break;
+                            case ASYNC_FINISH:
+                                if (count == -1 || job_count == -1) {
+                                    /* Handling failures in RSA_sign */
+                                    count = -1;
+                                } else {
+                                    count += job_count;
+                                }
+                                ++completed_jobs;
+                                // TODO: is the following required? The call is failing now
+                                // if (epoll_ctl(efd, EPOLL_CTL_DEL, job_fd, NULL) == -1) {
+                                //     fprintf(stderr, "Failed to delete event from fd\n");
+                                //     exit(1);
+                                // }
+                                break;
+                            case ASYNC_NO_JOBS:
+                            case ASYNC_ERR:
+                                BIO_printf(bio_err, "RSA sign job failure\n");
+                                ERR_print_errors(bio_err);
+                                count = -1;
+                                break;
+                        }
+                    }
                 }
             }
             d = Time_F(STOP);
