@@ -968,7 +968,7 @@ long SSL_get_default_timeout(const SSL *s)
     return (s->method->get_timeout());
 }
 
-static int start_async_job(SSL *s, struct ssl_async_args *args,
+static int ssl_start_async_job(SSL *s, struct ssl_async_args *args,
                           int (*func)(void *)) {
     int ret;
     switch(ASYNC_start_job(&s->job, &ret, func, args,
@@ -1029,7 +1029,7 @@ int SSL_read(SSL *s, void *buf, int num)
         args.type = 1;
         args.f.func1 = s->method->ssl_read;
 
-        return start_async_job(s, &args, ssl_io_intern);
+        return ssl_start_async_job(s, &args, ssl_io_intern);
     } else {
         return s->method->ssl_read(s, buf, num);
     }
@@ -1054,7 +1054,7 @@ int SSL_peek(SSL *s, void *buf, int num)
         args.type = 1;
         args.f.func1 = s->method->ssl_peek;
 
-        return start_async_job(s, &args, ssl_io_intern);
+        return ssl_start_async_job(s, &args, ssl_io_intern);
     } else {
         return s->method->ssl_peek(s, buf, num);
     }
@@ -1082,7 +1082,7 @@ int SSL_write(SSL *s, const void *buf, int num)
         args.type = 2;
         args.f.func2 = s->method->ssl_write;
 
-        return start_async_job(s, &args, ssl_io_intern);
+        return ssl_start_async_job(s, &args, ssl_io_intern);
     } else {
         return s->method->ssl_write(s, buf, num);
     }
@@ -2517,7 +2517,7 @@ int SSL_do_handshake(SSL *s)
 
             args.s = s;
 
-            ret = start_async_job(s, &args, ssl_do_handshake_intern);
+            ret = ssl_start_async_job(s, &args, ssl_do_handshake_intern);
         } else {
             ret = s->handshake_func(s);
         }
