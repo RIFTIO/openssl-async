@@ -265,6 +265,9 @@ void *CRYPTO_get_thread_local(int idx)
 {
     void **data;
 
+    if (idx < 0 || idx >= CRYPTO_THREAD_LOCAL_TOTAL_VALS)
+        return NULL;
+
     if(!(data = (void **)TlsGetValue(tlsidx)))
         return NULL;
 
@@ -274,6 +277,9 @@ void *CRYPTO_get_thread_local(int idx)
 int CRYPTO_set_thread_local(int idx, void *locdata)
 {
     void **data;
+
+    if (idx < 0 || idx >= CRYPTO_THREAD_LOCAL_TOTAL_VALS)
+        return NULL;
 
     if(!(data = (void **)TlsGetValue(tlsidx)))
         return 0;
