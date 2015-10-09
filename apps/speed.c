@@ -1767,17 +1767,6 @@ int speed_main(int argc, char **argv)
     ASYNC_JOB *job = NULL;
     int job_fd = 0;
 
-    int efd;
-
-    //ASYNC_JOB **jobs;
-    //jobs = (ASYNC_JOB **) OPENSSL_malloc((batch) * (sizeof(ASYNC_JOB *)));
-    //if (NULL == jobs) {
-    //    BIO_printf(bio_err, "[%s] --- Failed to allocate jobs\n", __func__);
-    //    ERR_print_errors(bio_err);
-    //    exit(1);
-    //}
-    //memset(jobs, 0, batch * sizeof(ASYNC_JOB *));
-
     events = (struct epoll_event*) OPENSSL_malloc((batch) * (sizeof(struct epoll_event)));
     if (NULL == events) {
         BIO_printf(bio_err, "[%s] --- Failed to allocate events\n", __func__);
@@ -1804,9 +1793,11 @@ int speed_main(int argc, char **argv)
                 count = RSA_sign_loop();
             }
             else {
-                int efd;
-                efd = epoll_create1(0);
+                int efd = epoll_create1(0);
                 if (efd == -1) {
+                    BIO_printf(bio_err,
+                            "Failed to create epoll file descriptor.\n");
+                    ERR_print_errors(bio_err);
                     exit(1);
                 }
 
@@ -1822,7 +1813,9 @@ int speed_main(int argc, char **argv)
                             event.data.ptr = job;
                             event.events = EPOLLIN | EPOLLET;
                             if (epoll_ctl(efd, EPOLL_CTL_ADD, job_fd, &event) == -1) {
-                                fprintf(stderr, "Failed to add event\n");
+                                BIO_printf(bio_err,
+                                        "Failed to add event to epoll fd\n");
+                                ERR_print_errors(bio_err);
                                 exit(1);
                             }
                             break;
