@@ -669,7 +669,7 @@ int run_benchmark(int async, int batch, int (*loop_function)(void *)) {
                 break;
             case ASYNC_NO_JOBS:
             case ASYNC_ERR:
-                BIO_printf(bio_err, "RSA sign job failure\n");
+                BIO_printf(bio_err, "Failure in the job\n");
                 ERR_print_errors(bio_err);
                 count = -1;
                 break;
@@ -701,7 +701,7 @@ int run_benchmark(int async, int batch, int (*loop_function)(void *)) {
                     break;
                 case ASYNC_NO_JOBS:
                 case ASYNC_ERR:
-                    BIO_printf(bio_err, "RSA sign job failure\n");
+                    BIO_printf(bio_err, "Failure in the job\n");
                     ERR_print_errors(bio_err);
                     count = -1;
                     break;
@@ -709,6 +709,7 @@ int run_benchmark(int async, int batch, int (*loop_function)(void *)) {
         }
     }
 
+    OPENSSL_free(events);
     return count;
 }
 
