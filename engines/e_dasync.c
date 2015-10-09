@@ -121,6 +121,13 @@ static int dasync_rsa_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa,
 static int dasync_rsa_init(RSA *rsa);
 static int dasync_rsa_finish(RSA *rsa);
 
+static int dasync_rsa_sign(int type, const unsigned char *m, unsigned int m_len,
+                        unsigned char *sigret, unsigned int *siglen,
+                        const RSA *rsa);
+static int dasync_rsa_verify(int dtype, const unsigned char *m,
+                          unsigned int m_len, const unsigned char *sigbuf,
+                          unsigned int siglen, const RSA *rsa);
+
 static RSA_METHOD dasync_rsa_method = {
     "Dummy Async RSA method",
     dasync_pub_enc,             /* pub_enc */
@@ -133,8 +140,8 @@ static RSA_METHOD dasync_rsa_method = {
     dasync_rsa_finish,          /* finish */
     0,                          /* flags */
     NULL,                       /* app_data */
-    0,                          /* rsa_sign */
-    0,                          /* rsa_verify */
+    dasync_rsa_sign,            /* rsa_sign */
+    dasync_rsa_verify,          /* rsa_verify */
     NULL                        /* rsa_keygen */
 };
 
@@ -316,7 +323,6 @@ static int dasync_rsa_priv_dec(int flen, const unsigned char *from,
 
 static int dasync_rsa_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa, BN_CTX *ctx)
 {
-    dummy_pause_job();
     return RSA_PKCS1_SSLeay()->rsa_mod_exp(r0, I, rsa, ctx);
 }
 
@@ -327,4 +333,18 @@ static int dasync_rsa_init(RSA *rsa)
 static int dasync_rsa_finish(RSA *rsa)
 {
     return RSA_PKCS1_SSLeay()->finish(rsa);
+}
+
+static int dasync_rsa_sign(int type, const unsigned char *m,
+    unsigned int m_len, unsigned char *sigret, unsigned int *siglen, const RSA *rsa)
+{
+    dummy_pause_job();
+    return RSA_PKCS1_SSLeay()->rsa_sign(type, m, m_len, sigret, siglen, rsa);
+}
+
+static int dasync_rsa_verify(int dtype, const unsigned char *m,
+    unsigned int m_len, const unsigned char *sigbuf, unsigned int siglen, const RSA *rsa)
+{
+    dummy_pause_job();
+    return RSA_PKCS1_SSLeay()->rsa_verify(dtype, m, m_len, sigbuf, siglen, rsa);
 }
