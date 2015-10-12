@@ -570,7 +570,7 @@ static OPT_PAIR ecdh_choices[] = {
 # define COND(d) (count < (d))
 # define COUNT(d) (d)
 #else
-# define COND(c) (run && loop_count<0x7fffffff)
+# define COND(c) (run && count<0x7fffffff)
 # define COUNT(d) (count)
 # ifndef _WIN32
 //    signal(SIGALRM, sig_done);
@@ -580,39 +580,118 @@ static OPT_PAIR ecdh_choices[] = {
 unsigned char *buf = NULL, *buf2 = NULL;
 int j;
 
-#ifndef OPENSSL_NO_RSA
-    unsigned rsa_num;
-    RSA *rsa_key[RSA_NUM];
+
+#ifndef OPENSSL_NO_MD2
+unsigned char md2[MD2_DIGEST_LENGTH];
+int EVP_Digest_MD2_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_MD2][j]); count++)
+        EVP_Digest(buf, (unsigned long)lengths[j], &(md2[0]), NULL,
+                EVP_md2(), NULL);
+    return count;
+}
 #endif
 
+#ifndef OPENSSL_NO_MDC2
+unsigned char mdc2[MDC2_DIGEST_LENGTH];
+int EVP_Digest_MDC2_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_MDC2][j]); count++)
+        EVP_Digest(buf, (unsigned long)lengths[j], &(mdc2[0]), NULL,
+                EVP_mdc2(), NULL);
+    return count;
+}
+#endif
+
+#ifndef OPENSSL_NO_MD4
+unsigned char md4[MD4_DIGEST_LENGTH];
+int EVP_Digest_MD4_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_MD4][j]); count++)
+        EVP_Digest(&(buf[0]), (unsigned long)lengths[j], &(md4[0]),
+                NULL, EVP_md4(), NULL);
+    return count;
+}
+#endif
+
+#ifndef OPENSSL_NO_MD5
+unsigned char md5[MD5_DIGEST_LENGTH];
+int MD5_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_MD5][j]); count++)
+        MD5(buf, lengths[j], md5);
+    return count;
+}
+
+unsigned char hmac[MD5_DIGEST_LENGTH];
+HMAC_CTX hctx;
+int HMAC_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_HMAC][j]); count++) {
+        HMAC_Init_ex(&hctx, NULL, 0, NULL, NULL);
+        HMAC_Update(&hctx, buf, lengths[j]);
+        HMAC_Final(&hctx, &(hmac[0]), NULL);
+    }
+    return count;
+}
+#endif
+
+unsigned char sha[SHA_DIGEST_LENGTH];
+int SHA1_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_SHA1][j]); count++)
+        SHA1(buf, lengths[j], sha);
+    return count;
+}
+
+unsigned char sha256[SHA256_DIGEST_LENGTH];
+int SHA256_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_SHA256][j]); count++)
+        SHA256(buf, lengths[j], sha256);
+    return count;
+}
+
+unsigned char sha512[SHA512_DIGEST_LENGTH];
+int SHA512_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_SHA512][j]); count++)
+        SHA512(buf, lengths[j], sha512);
+    return count;
+}
+
+#ifndef OPENSSL_NO_RSA
+unsigned rsa_num;
+RSA *rsa_key[RSA_NUM];
+
 int RSA_sign_loop(void *args) {
-    int ret, loop_count;
-    for (run=1,loop_count=0; COND(rsa_c[j][0]); ++loop_count) {
+    int ret, count;
+    for (count = 0, run = 1; COND(rsa_c[j][0]); count++) {
         ret = RSA_sign(NID_md5_sha1, buf, 36, buf2, &rsa_num, rsa_key[j]);
         if (ret == 0) {
             BIO_printf(bio_err, "RSA sign failure\n");
             ERR_print_errors(bio_err);
-            loop_count = -1;
+            count = -1;
             break;
         }
     }
-    return loop_count;
+    return count;
 }
 
 int RSA_verify_loop(void *args) {
-    int ret, loop_count;
-    for (run=1,loop_count=0; COND(rsa_c[j][1]); ++loop_count) {
+    int ret, count;
+    for (count = 0, run = 1; COND(rsa_c[j][1]); count++) {
         ret = RSA_verify(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
         if (ret == 0) {
             BIO_printf(bio_err, "RSA verify failure\n");
             ERR_print_errors(bio_err);
-            loop_count = -1;
+            count = -1;
             break;
         }
     }
-    return loop_count;
+    return count;
 }
-
+#endif
 
 int run_benchmark(int async, int batch, ASYNC_JOB **inprogress_jobs, int (*loop_function)(void *)) {
     int count = 0;
@@ -727,22 +806,6 @@ int speed_main(int argc, char **argv)
 #if !defined(OPENSSL_NO_RSA) || !defined(OPENSSL_NO_DSA)
     long rsa_count;
 #endif
-#ifndef OPENSSL_NO_MD2
-    unsigned char md2[MD2_DIGEST_LENGTH];
-#endif
-#ifndef OPENSSL_NO_MDC2
-    unsigned char mdc2[MDC2_DIGEST_LENGTH];
-#endif
-#ifndef OPENSSL_NO_MD4
-    unsigned char md4[MD4_DIGEST_LENGTH];
-#endif
-#ifndef OPENSSL_NO_MD5
-    unsigned char md5[MD5_DIGEST_LENGTH];
-    unsigned char hmac[MD5_DIGEST_LENGTH];
-#endif
-    unsigned char sha[SHA_DIGEST_LENGTH];
-    unsigned char sha256[SHA256_DIGEST_LENGTH];
-    unsigned char sha512[SHA512_DIGEST_LENGTH];
 #ifndef OPENSSL_NO_WHIRLPOOL
     unsigned char whirlpool[WHIRLPOOL_DIGEST_LENGTH];
 #endif
@@ -1396,9 +1459,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_MD2], c[D_MD2][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_MD2][j]); count++)
-                EVP_Digest(buf, (unsigned long)lengths[j], &(md2[0]), NULL,
-                           EVP_md2(), NULL);
+            count = run_benchmark(async, batch, inprogress_jobs, EVP_Digest_MD2_loop);
             d = Time_F(STOP);
             print_result(D_MD2, j, count, d);
         }
@@ -1409,9 +1470,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_MDC2], c[D_MDC2][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_MDC2][j]); count++)
-                EVP_Digest(buf, (unsigned long)lengths[j], &(mdc2[0]), NULL,
-                           EVP_mdc2(), NULL);
+            count = run_benchmark(async, batch, inprogress_jobs, EVP_Digest_MDC2_loop);
             d = Time_F(STOP);
             print_result(D_MDC2, j, count, d);
         }
@@ -1423,9 +1482,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_MD4], c[D_MD4][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_MD4][j]); count++)
-                EVP_Digest(&(buf[0]), (unsigned long)lengths[j], &(md4[0]),
-                           NULL, EVP_md4(), NULL);
+            count = run_benchmark(async, batch, inprogress_jobs, EVP_Digest_MD4_loop);
             d = Time_F(STOP);
             print_result(D_MD4, j, count, d);
         }
@@ -1437,18 +1494,15 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_MD5], c[D_MD5][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_MD5][j]); count++)
-                MD5(buf, lengths[j], md5);
+            count = run_benchmark(async, batch, inprogress_jobs, MD5_loop);
             d = Time_F(STOP);
             print_result(D_MD5, j, count, d);
         }
     }
 #endif
 
-#if !defined(OPENSSL_NO_MD5)
+#ifndef OPENSSL_NO_MD5
     if (doit[D_HMAC]) {
-        HMAC_CTX hctx;
-
         HMAC_CTX_init(&hctx);
         HMAC_Init_ex(&hctx, (unsigned char *)"This is a key...",
                      16, EVP_md5(), NULL);
@@ -1456,11 +1510,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_HMAC], c[D_HMAC][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_HMAC][j]); count++) {
-                HMAC_Init_ex(&hctx, NULL, 0, NULL, NULL);
-                HMAC_Update(&hctx, buf, lengths[j]);
-                HMAC_Final(&hctx, &(hmac[0]), NULL);
-            }
+            count = run_benchmark(async, batch, inprogress_jobs, HMAC_loop);
             d = Time_F(STOP);
             print_result(D_HMAC, j, count, d);
         }
@@ -1471,8 +1521,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_SHA1], c[D_SHA1][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_SHA1][j]); count++)
-                SHA1(buf, lengths[j], sha);
+            count = run_benchmark(async, batch, inprogress_jobs, SHA1_loop);
             d = Time_F(STOP);
             print_result(D_SHA1, j, count, d);
         }
@@ -1481,8 +1530,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_SHA256], c[D_SHA256][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_SHA256][j]); count++)
-                SHA256(buf, lengths[j], sha256);
+            count = run_benchmark(async, batch, inprogress_jobs, SHA256_loop);
             d = Time_F(STOP);
             print_result(D_SHA256, j, count, d);
         }
@@ -1491,8 +1539,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_SHA512], c[D_SHA512][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_SHA512][j]); count++)
-                SHA512(buf, lengths[j], sha512);
+            count = run_benchmark(async, batch, inprogress_jobs, SHA512_loop);
             d = Time_F(STOP);
             print_result(D_SHA512, j, count, d);
         }
