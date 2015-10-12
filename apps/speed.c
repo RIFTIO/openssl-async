@@ -577,6 +577,7 @@ static OPT_PAIR ecdh_choices[] = {
 # endif
 #endif                         /* SIGALRM */
 
+ASYNC_JOB **inprogress_jobs = NULL;
 unsigned char *buf = NULL, *buf2 = NULL;
 int j;
 
@@ -621,22 +622,14 @@ int run_benchmark(int async, int batch, int (*loop_function)(void *)) {
     int completed_jobs = 0;
     ASYNC_JOB *job = NULL;
     int job_fd = 0;
-    ASYNC_JOB **inprogress_jobs = NULL;
     int max_fd = 0;
+    fd_set waitfdset;
 
     if (!async) {
         return loop_function(NULL);
     }
 
-    inprogress_jobs = (struct ASYNC_JOB**) OPENSSL_malloc(batch * sizeof(ASYNC_JOB*));
-    if (NULL == inprogress_jobs) {
-        BIO_printf(bio_err, "[%s] --- Failed to allocate inprogress_jobs\n", __func__);
-        ERR_print_errors(bio_err);
-        exit(1);
-    }
     memset(inprogress_jobs, 0, batch * sizeof(ASYNC_JOB*));
-
-    fd_set waitfdset;
     FD_ZERO(&waitfdset);
 
     for (job_num=0; job_num < batch; ++job_num) {
@@ -709,7 +702,6 @@ int run_benchmark(int async, int batch, int (*loop_function)(void *)) {
         }
     }
 
-    OPENSSL_free(inprogress_jobs);
     return count;
 }
 
@@ -983,6 +975,7 @@ int speed_main(int argc, char **argv)
             break;
         case OPT_BATCH:
             batch = atoi(opt_arg());
+            inprogress_jobs = app_malloc(batch * sizeof(ASYNC_JOB*), "in progress jobs");
             break;
         case OPT_MISALIGN:
             if (!opt_int(opt_arg(), &misalign))
@@ -2322,6 +2315,7 @@ int speed_main(int argc, char **argv)
     ERR_print_errors(bio_err);
     OPENSSL_free(buf_malloc);
     OPENSSL_free(buf2_malloc);
+    OPENSSL_free(inprogress_jobs);
 #ifndef OPENSSL_NO_RSA
     for (i = 0; i < RSA_NUM; i++)
         RSA_free(rsa_key[i]);
