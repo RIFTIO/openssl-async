@@ -87,7 +87,7 @@
 #include <openssl/evp.h>
 #include <openssl/objects.h>
 #include <openssl/async.h>
-#include <sys/epoll.h>
+#include <sys/select.h>
 #if !defined(OPENSSL_SYS_MSDOS)
 # include OPENSSL_UNISTD
 #endif
@@ -619,52 +619,43 @@ int run_benchmark(int async, int batch, int (*loop_function)(void *)) {
     int job_num = 0;
     int job_count = 0;
     int completed_jobs = 0;
-    struct epoll_event *events;
     ASYNC_JOB *job = NULL;
     int job_fd = 0;
+    ASYNC_JOB **inprogress_jobs = NULL;
+    int max_fd = 0;
 
     if (!async) {
         return loop_function(NULL);
     }
 
-    events = (struct epoll_event*) OPENSSL_malloc((batch) * (sizeof(struct epoll_event)));
-    if (NULL == events) {
-        BIO_printf(bio_err, "[%s] --- Failed to allocate events\n", __func__);
+    inprogress_jobs = (struct ASYNC_JOB**) OPENSSL_malloc(batch * sizeof(ASYNC_JOB*));
+    if (NULL == inprogress_jobs) {
+        BIO_printf(bio_err, "[%s] --- Failed to allocate inprogress_jobs\n", __func__);
         ERR_print_errors(bio_err);
         exit(1);
     }
+    memset(inprogress_jobs, 0, batch * sizeof(ASYNC_JOB*));
 
-    int efd = epoll_create1(0);
-    if (efd == -1) {
-        BIO_printf(bio_err,
-                "Failed to create epoll file descriptor.\n");
-        ERR_print_errors(bio_err);
-        exit(1);
-    }
+    fd_set waitfdset;
+    FD_ZERO(&waitfdset);
 
     for (job_num=0; job_num < batch; ++job_num) {
         job = NULL;
         switch (ASYNC_start_job(&job, &job_count, loop_function, NULL, 0)) {
             case ASYNC_PAUSE:
+                inprogress_jobs[job_num] = job;
                 job_fd = ASYNC_get_wait_fd(job);
-                struct epoll_event event;
-                event.data.fd = job_fd;
-                event.data.ptr = job;
-                event.events = EPOLLIN | EPOLLET;
-                if (epoll_ctl(efd, EPOLL_CTL_ADD, job_fd, &event) == -1) {
-                    BIO_printf(bio_err,
-                            "Failed to add event to epoll fd\n");
-                    ERR_print_errors(bio_err);
-                    exit(1);
-                }
+                FD_SET(job_fd, &waitfdset);
+                if (job_fd > max_fd)
+                    max_fd = job_fd;
                 break;
             case ASYNC_FINISH:
                 if (count == -1 || job_count == -1) {
-                    /* Handling failures in RSA_sign */
                     count = -1;
                 } else {
                     count += job_count;
                 }
+                inprogress_jobs[job_num] = NULL;
                 ++completed_jobs;
                 break;
             case ASYNC_NO_JOBS:
@@ -677,27 +668,36 @@ int run_benchmark(int async, int batch, int (*loop_function)(void *)) {
     }
 
     while (completed_jobs < batch) {
+        if (-1 == select(max_fd + 1, &waitfdset, NULL, NULL, NULL)) {
+                BIO_printf(bio_err, "Failure in the select\n");
+                ERR_print_errors(bio_err);
+                count = -1;
+                break;
+        }
+
         int i;
-        int num_events = epoll_wait(efd, events, batch, -1);
-        for (i = 0; i < num_events; i++) {
-            job = events[i].data.ptr;
-            job_fd = events[i].data.fd;
+        for (i=0; i < batch; ++i) {
+            if (NULL == inprogress_jobs[i])
+                continue;
+
+            job = inprogress_jobs[i];
+            job_fd = ASYNC_get_wait_fd(job);
+
+            if (!FD_ISSET(job_fd, &waitfdset))
+                continue;
+
             switch (ASYNC_start_job(&job, &job_count, RSA_sign_loop, NULL, 0)) {
                 case ASYNC_PAUSE:
                     break;
                 case ASYNC_FINISH:
                     if (count == -1 || job_count == -1) {
-                        /* Handling failures in RSA_sign */
                         count = -1;
                     } else {
                         count += job_count;
                     }
                     ++completed_jobs;
-                    // TODO: is the following required? The call is failing now
-                    // if (epoll_ctl(efd, EPOLL_CTL_DEL, job_fd, NULL) == -1) {
-                    //     fprintf(stderr, "Failed to delete event from fd\n");
-                    //     exit(1);
-                    // }
+                    inprogress_jobs[i] = NULL;
+                    FD_CLR(job_fd, &waitfdset);
                     break;
                 case ASYNC_NO_JOBS:
                 case ASYNC_ERR:
@@ -709,7 +709,7 @@ int run_benchmark(int async, int batch, int (*loop_function)(void *)) {
         }
     }
 
-    OPENSSL_free(events);
+    OPENSSL_free(inprogress_jobs);
     return count;
 }
 
