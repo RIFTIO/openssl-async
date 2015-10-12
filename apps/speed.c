@@ -577,7 +577,6 @@ static OPT_PAIR ecdh_choices[] = {
 # endif
 #endif                         /* SIGALRM */
 
-ASYNC_JOB **inprogress_jobs = NULL;
 unsigned char *buf = NULL, *buf2 = NULL;
 int j;
 
@@ -615,7 +614,7 @@ int RSA_verify_loop(void *args) {
 }
 
 
-int run_benchmark(int async, int batch, int (*loop_function)(void *)) {
+int run_benchmark(int async, int batch, ASYNC_JOB **inprogress_jobs, int (*loop_function)(void *)) {
     int count = 0;
     int job_num = 0;
     int job_count = 0;
@@ -717,6 +716,7 @@ int speed_main(int argc, char **argv)
     int ret = 1, i, k, misalign = MAX_MISALIGNMENT + 1;
     long c[ALGOR_NUM][SIZE_NUM], count = 0, save_count = 0;
     unsigned char *buf_malloc = NULL, *buf2_malloc = NULL;
+    ASYNC_JOB **inprogress_jobs = NULL;
     unsigned char md[EVP_MAX_MD_SIZE];
 #ifndef NO_FORK
     int multi = 0;
@@ -1867,7 +1867,7 @@ int speed_main(int argc, char **argv)
                                rsa_c[j][0], rsa_bits[j], RSA_SECONDS);
             /* RSA_blinding_on(rsa_key[j],NULL); */
             Time_F(START);
-            count = run_benchmark(async, batch, RSA_sign_loop);
+            count = run_benchmark(async, batch, inprogress_jobs, RSA_sign_loop);
             d = Time_F(STOP);
             BIO_printf(bio_err,
                        mr ? "+R1:%ld:%d:%.2f\n"
@@ -1887,7 +1887,7 @@ int speed_main(int argc, char **argv)
             pkey_print_message("public", "rsa",
                                rsa_c[j][1], rsa_bits[j], RSA_SECONDS);
             Time_F(START);
-            count = run_benchmark(async, batch, RSA_verify_loop);
+            count = run_benchmark(async, batch, inprogress_jobs, RSA_verify_loop);
             d = Time_F(STOP);
             BIO_printf(bio_err,
                        mr ? "+R2:%ld:%d:%.2f\n"
