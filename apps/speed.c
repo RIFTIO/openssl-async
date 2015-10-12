@@ -660,6 +660,97 @@ int SHA512_loop(void *args) {
     return count;
 }
 
+#ifndef OPENSSL_NO_WHIRLPOOL
+unsigned char whirlpool[WHIRLPOOL_DIGEST_LENGTH];
+int WHIRLPOOL_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_WHIRLPOOL][j]); count++)
+        WHIRLPOOL(buf, lengths[j], whirlpool);
+    return count;
+}
+#endif
+
+#ifndef OPENSSL_NO_RMD160
+unsigned char rmd160[RIPEMD160_DIGEST_LENGTH];
+int EVP_Digest_RMD160_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_RMD160][j]); count++)
+        EVP_Digest(buf, (unsigned long)lengths[j], &(rmd160[0]), NULL,
+                EVP_ripemd160(), NULL);
+    return count;
+}
+#endif
+
+#ifndef OPENSSL_NO_RC4
+RC4_KEY rc4_ks;
+int RC4_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_RC4][j]); count++)
+        RC4(&rc4_ks, (unsigned int)lengths[j], buf, buf);
+    return count;
+}
+#endif
+
+unsigned char DES_iv[8];
+#ifndef OPENSSL_NO_DES
+DES_key_schedule sch;
+DES_key_schedule sch2;
+DES_key_schedule sch3;
+int DES_ncbc_encrypt_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_CBC_DES][j]); count++)
+        DES_ncbc_encrypt(buf, buf, lengths[j], &sch,
+                &DES_iv, DES_ENCRYPT);
+    return count;
+}
+
+int DES_ede3_cbc_encrypt_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_EDE3_DES][j]); count++)
+        DES_ede3_cbc_encrypt(buf, buf, lengths[j],
+                &sch, &sch2, &sch3,
+                &DES_iv, DES_ENCRYPT);
+    return count;
+}
+#endif
+
+#ifndef OPENSSL_NO_AES
+# define MAX_BLOCK_SIZE 128
+#else
+# define MAX_BLOCK_SIZE 64
+#endif
+
+unsigned char iv[2 * MAX_BLOCK_SIZE / 8];
+#ifndef OPENSSL_NO_AES
+AES_KEY aes_ks1, aes_ks2, aes_ks3;
+int AES_cbc_128_encrypt_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_CBC_128_AES][j]); count++)
+        AES_cbc_encrypt(buf, buf,
+                (unsigned long)lengths[j], &aes_ks1,
+                iv, AES_ENCRYPT);
+    return count;
+}
+
+int AES_cbc_256_encrypt_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_CBC_256_AES][j]); count++)
+        AES_cbc_encrypt(buf, buf,
+                (unsigned long)lengths[j], &aes_ks3,
+                iv, AES_ENCRYPT);
+    return count;
+}
+
+int AES_cbc_192_encrypt_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_CBC_192_AES][j]); count++)
+        AES_cbc_encrypt(buf, buf,
+                (unsigned long)lengths[j], &aes_ks2,
+                iv, AES_ENCRYPT);
+    return count;
+}
+#endif
+
 #ifndef OPENSSL_NO_RSA
 unsigned rsa_num;
 RSA *rsa_key[RSA_NUM];
@@ -806,15 +897,6 @@ int speed_main(int argc, char **argv)
 #if !defined(OPENSSL_NO_RSA) || !defined(OPENSSL_NO_DSA)
     long rsa_count;
 #endif
-#ifndef OPENSSL_NO_WHIRLPOOL
-    unsigned char whirlpool[WHIRLPOOL_DIGEST_LENGTH];
-#endif
-#ifndef OPENSSL_NO_RMD160
-    unsigned char rmd160[RIPEMD160_DIGEST_LENGTH];
-#endif
-#ifndef OPENSSL_NO_RC4
-    RC4_KEY rc4_ks;
-#endif
 #ifndef OPENSSL_NO_RC5
     RC5_32_KEY rc5_ks;
 #endif
@@ -864,13 +946,6 @@ int speed_main(int argc, char **argv)
     };
     CAMELLIA_KEY camellia_ks1, camellia_ks2, camellia_ks3;
 #endif
-#ifndef OPENSSL_NO_AES
-# define MAX_BLOCK_SIZE 128
-#else
-# define MAX_BLOCK_SIZE 64
-#endif
-    unsigned char DES_iv[8];
-    unsigned char iv[2 * MAX_BLOCK_SIZE / 8];
 #ifndef OPENSSL_NO_DES
     static DES_cblock key = {
         0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0
@@ -881,12 +956,6 @@ int speed_main(int argc, char **argv)
     static DES_cblock key3 = {
         0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0x12, 0x34
     };
-    DES_key_schedule sch;
-    DES_key_schedule sch2;
-    DES_key_schedule sch3;
-#endif
-#ifndef OPENSSL_NO_AES
-    AES_KEY aes_ks1, aes_ks2, aes_ks3;
 #endif
 #ifndef OPENSSL_NO_RSA
     long rsa_c[RSA_NUM][2];
@@ -1550,8 +1619,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_WHIRLPOOL], c[D_WHIRLPOOL][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_WHIRLPOOL][j]); count++)
-                WHIRLPOOL(buf, lengths[j], whirlpool);
+            count = run_benchmark(async, batch, inprogress_jobs, WHIRLPOOL_loop);
             d = Time_F(STOP);
             print_result(D_WHIRLPOOL, j, count, d);
         }
@@ -1563,9 +1631,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_RMD160], c[D_RMD160][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_RMD160][j]); count++)
-                EVP_Digest(buf, (unsigned long)lengths[j], &(rmd160[0]), NULL,
-                           EVP_ripemd160(), NULL);
+            count = run_benchmark(async, batch, inprogress_jobs, EVP_Digest_RMD160_loop);
             d = Time_F(STOP);
             print_result(D_RMD160, j, count, d);
         }
@@ -1576,8 +1642,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_RC4], c[D_RC4][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_RC4][j]); count++)
-                RC4(&rc4_ks, (unsigned int)lengths[j], buf, buf);
+            count = run_benchmark(async, batch, inprogress_jobs, RC4_loop);
             d = Time_F(STOP);
             print_result(D_RC4, j, count, d);
         }
@@ -1588,9 +1653,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_CBC_DES], c[D_CBC_DES][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_CBC_DES][j]); count++)
-                DES_ncbc_encrypt(buf, buf, lengths[j], &sch,
-                                 &DES_iv, DES_ENCRYPT);
+            count = run_benchmark(async, batch, inprogress_jobs, DES_ncbc_encrypt_loop);
             d = Time_F(STOP);
             print_result(D_CBC_DES, j, count, d);
         }
@@ -1600,10 +1663,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_EDE3_DES], c[D_EDE3_DES][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_EDE3_DES][j]); count++)
-                DES_ede3_cbc_encrypt(buf, buf, lengths[j],
-                                     &sch, &sch2, &sch3,
-                                     &DES_iv, DES_ENCRYPT);
+            count = run_benchmark(async, batch, inprogress_jobs, DES_ede3_cbc_encrypt_loop);
             d = Time_F(STOP);
             print_result(D_EDE3_DES, j, count, d);
         }
@@ -1615,10 +1675,7 @@ int speed_main(int argc, char **argv)
             print_message(names[D_CBC_128_AES], c[D_CBC_128_AES][j],
                           lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_CBC_128_AES][j]); count++)
-                AES_cbc_encrypt(buf, buf,
-                                (unsigned long)lengths[j], &aes_ks1,
-                                iv, AES_ENCRYPT);
+            count = run_benchmark(async, batch, inprogress_jobs, AES_cbc_128_encrypt_loop);
             d = Time_F(STOP);
             print_result(D_CBC_128_AES, j, count, d);
         }
@@ -1628,10 +1685,7 @@ int speed_main(int argc, char **argv)
             print_message(names[D_CBC_192_AES], c[D_CBC_192_AES][j],
                           lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_CBC_192_AES][j]); count++)
-                AES_cbc_encrypt(buf, buf,
-                                (unsigned long)lengths[j], &aes_ks2,
-                                iv, AES_ENCRYPT);
+            count = run_benchmark(async, batch, inprogress_jobs, AES_cbc_192_encrypt_loop);
             d = Time_F(STOP);
             print_result(D_CBC_192_AES, j, count, d);
         }
@@ -1641,10 +1695,7 @@ int speed_main(int argc, char **argv)
             print_message(names[D_CBC_256_AES], c[D_CBC_256_AES][j],
                           lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_CBC_256_AES][j]); count++)
-                AES_cbc_encrypt(buf, buf,
-                                (unsigned long)lengths[j], &aes_ks3,
-                                iv, AES_ENCRYPT);
+            count = run_benchmark(async, batch, inprogress_jobs, AES_cbc_256_encrypt_loop);
             d = Time_F(STOP);
             print_result(D_CBC_256_AES, j, count, d);
         }
