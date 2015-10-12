@@ -323,6 +323,7 @@ static int dasync_rsa_priv_dec(int flen, const unsigned char *from,
 
 static int dasync_rsa_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa, BN_CTX *ctx)
 {
+    dummy_pause_job();
     return RSA_PKCS1_SSLeay()->rsa_mod_exp(r0, I, rsa, ctx);
 }
 
