@@ -955,7 +955,6 @@ int run_benchmark(int async_jobs, ASYNC_JOB **inprogress_jobs, int (*loop_functi
         return loop_function(NULL);
     }
 
-    memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
     FD_ZERO(&waitfdset);
 
     for (job_num=0; job_num < async_jobs && !error; ++job_num) {
@@ -1674,6 +1673,7 @@ int speed_main(int argc, char **argv)
     if (doit[D_MD2]) {
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_MD2], c[D_MD2][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, EVP_Digest_MD2_loop);
             d = Time_F(STOP);
@@ -1685,6 +1685,7 @@ int speed_main(int argc, char **argv)
     if (doit[D_MDC2]) {
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_MDC2], c[D_MDC2][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, EVP_Digest_MDC2_loop);
             d = Time_F(STOP);
@@ -1697,6 +1698,7 @@ int speed_main(int argc, char **argv)
     if (doit[D_MD4]) {
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_MD4], c[D_MD4][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, EVP_Digest_MD4_loop);
             d = Time_F(STOP);
@@ -1709,6 +1711,7 @@ int speed_main(int argc, char **argv)
     if (doit[D_MD5]) {
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_MD5], c[D_MD5][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, MD5_loop);
             d = Time_F(STOP);
@@ -1725,6 +1728,7 @@ int speed_main(int argc, char **argv)
 
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_HMAC], c[D_HMAC][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, HMAC_loop);
             d = Time_F(STOP);
@@ -1736,6 +1740,7 @@ int speed_main(int argc, char **argv)
     if (doit[D_SHA1]) {
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_SHA1], c[D_SHA1][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, SHA1_loop);
             d = Time_F(STOP);
@@ -1745,6 +1750,7 @@ int speed_main(int argc, char **argv)
     if (doit[D_SHA256]) {
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_SHA256], c[D_SHA256][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, SHA256_loop);
             d = Time_F(STOP);
@@ -1754,6 +1760,7 @@ int speed_main(int argc, char **argv)
     if (doit[D_SHA512]) {
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_SHA512], c[D_SHA512][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, SHA512_loop);
             d = Time_F(STOP);
@@ -1765,6 +1772,7 @@ int speed_main(int argc, char **argv)
     if (doit[D_WHIRLPOOL]) {
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_WHIRLPOOL], c[D_WHIRLPOOL][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, WHIRLPOOL_loop);
             d = Time_F(STOP);
@@ -1777,6 +1785,7 @@ int speed_main(int argc, char **argv)
     if (doit[D_RMD160]) {
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_RMD160], c[D_RMD160][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, EVP_Digest_RMD160_loop);
             d = Time_F(STOP);
@@ -1788,6 +1797,7 @@ int speed_main(int argc, char **argv)
     if (doit[D_RC4]) {
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_RC4], c[D_RC4][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, RC4_loop);
             d = Time_F(STOP);
@@ -1799,6 +1809,7 @@ int speed_main(int argc, char **argv)
     if (doit[D_CBC_DES]) {
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_CBC_DES], c[D_CBC_DES][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, DES_ncbc_encrypt_loop);
             d = Time_F(STOP);
@@ -1809,6 +1820,7 @@ int speed_main(int argc, char **argv)
     if (doit[D_EDE3_DES]) {
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_EDE3_DES], c[D_EDE3_DES][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, DES_ede3_cbc_encrypt_loop);
             d = Time_F(STOP);
@@ -1821,6 +1833,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_CBC_128_AES], c[D_CBC_128_AES][j],
                           lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, AES_cbc_128_encrypt_loop);
             d = Time_F(STOP);
@@ -1831,6 +1844,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_CBC_192_AES], c[D_CBC_192_AES][j],
                           lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, AES_cbc_192_encrypt_loop);
             d = Time_F(STOP);
@@ -1841,6 +1855,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_CBC_256_AES], c[D_CBC_256_AES][j],
                           lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, AES_cbc_256_encrypt_loop);
             d = Time_F(STOP);
@@ -1852,6 +1867,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_IGE_128_AES], c[D_IGE_128_AES][j],
                           lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, AES_ige_128_encrypt_loop);
             d = Time_F(STOP);
@@ -1872,6 +1888,7 @@ int speed_main(int argc, char **argv)
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_IGE_256_AES], c[D_IGE_256_AES][j],
                           lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, AES_ige_256_encrypt_loop);
             d = Time_F(STOP);
@@ -1884,6 +1901,7 @@ int speed_main(int argc, char **argv)
 
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_GHASH], c[D_GHASH][j], lengths[j]);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, CRYPTO_gcm128_aad_loop);
             d = Time_F(STOP);
@@ -2049,6 +2067,7 @@ int speed_main(int argc, char **argv)
                     EVP_EncryptInit_ex(&ctx, evp_cipher, NULL, key16, iv);
                 EVP_CIPHER_CTX_set_padding(&ctx, 0);
 
+                memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
                 Time_F(START);
                 count = run_benchmark(async_jobs, inprogress_jobs, EVP_Update_loop);
                 d = Time_F(STOP);
@@ -2058,6 +2077,7 @@ int speed_main(int argc, char **argv)
                 names[D_EVP] = OBJ_nid2ln(evp_md->type);
                 print_message(names[D_EVP], save_count, lengths[j]);
 
+                memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
                 Time_F(START);
                 count = run_benchmark(async_jobs, inprogress_jobs, EVP_Digest_loop);
                 d = Time_F(STOP);
@@ -2082,6 +2102,7 @@ int speed_main(int argc, char **argv)
             pkey_print_message("private", "rsa",
                                rsa_c[j][0], rsa_bits[j], RSA_SECONDS);
             /* RSA_blinding_on(rsa_key[j],NULL); */
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, RSA_sign_loop);
             d = Time_F(STOP);
@@ -2102,6 +2123,7 @@ int speed_main(int argc, char **argv)
         } else {
             pkey_print_message("public", "rsa",
                                rsa_c[j][1], rsa_bits[j], RSA_SECONDS);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, RSA_verify_loop);
             d = Time_F(STOP);
@@ -2141,6 +2163,7 @@ int speed_main(int argc, char **argv)
         } else {
             pkey_print_message("sign", "dsa",
                                dsa_c[j][0], dsa_bits[j], DSA_SECONDS);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, DSA_sign_loop);
             d = Time_F(STOP);
@@ -2161,6 +2184,7 @@ int speed_main(int argc, char **argv)
         } else {
             pkey_print_message("verify", "dsa",
                                dsa_c[j][1], dsa_bits[j], DSA_SECONDS);
+            memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
             Time_F(START);
             count = run_benchmark(async_jobs, inprogress_jobs, DSA_verify_loop);
             d = Time_F(STOP);
@@ -2211,6 +2235,7 @@ int speed_main(int argc, char **argv)
                                    ecdsa_c[j][0],
                                    test_curves_bits[j], ECDSA_SECONDS);
 
+                memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
                 Time_F(START);
                 count = run_benchmark(async_jobs, inprogress_jobs, ECDSA_sign_loop);
                 d = Time_F(STOP);
@@ -2234,6 +2259,7 @@ int speed_main(int argc, char **argv)
                 pkey_print_message("verify", "ecdsa",
                                    ecdsa_c[j][1],
                                    test_curves_bits[j], ECDSA_SECONDS);
+                memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
                 Time_F(START);
                 count = run_benchmark(async_jobs, inprogress_jobs, ECDSA_verify_loop);
                 d = Time_F(STOP);
@@ -2320,6 +2346,7 @@ int speed_main(int argc, char **argv)
                 pkey_print_message("", "ecdh",
                                    ecdh_c[j][0],
                                    test_curves_bits[j], ECDH_SECONDS);
+                memset(inprogress_jobs, 0, async_jobs * sizeof(ASYNC_JOB*));
                 Time_F(START);
                 count = run_benchmark(async_jobs, inprogress_jobs, ECDH_compute_key_loop);
                 d = Time_F(STOP);
