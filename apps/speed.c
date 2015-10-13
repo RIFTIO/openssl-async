@@ -732,6 +732,15 @@ int AES_cbc_128_encrypt_loop(void *args) {
     return count;
 }
 
+int AES_cbc_192_encrypt_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_CBC_192_AES][j]); count++)
+        AES_cbc_encrypt(buf, buf,
+                (unsigned long)lengths[j], &aes_ks2,
+                iv, AES_ENCRYPT);
+    return count;
+}
+
 int AES_cbc_256_encrypt_loop(void *args) {
     int count;
     for (count = 0, run = 1; COND(c[D_CBC_256_AES][j]); count++)
@@ -741,19 +750,80 @@ int AES_cbc_256_encrypt_loop(void *args) {
     return count;
 }
 
-int AES_cbc_192_encrypt_loop(void *args) {
+int AES_ige_128_encrypt_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_CBC_192_AES][j]); count++)
-        AES_cbc_encrypt(buf, buf,
+    for (count = 0, run = 1; COND(c[D_IGE_128_AES][j]); count++)
+        AES_ige_encrypt(buf, buf2,
+                (unsigned long)lengths[j], &aes_ks1,
+                iv, AES_ENCRYPT);
+    return count;
+}
+
+int AES_ige_192_encrypt_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_IGE_192_AES][j]); count++)
+        AES_ige_encrypt(buf, buf2,
                 (unsigned long)lengths[j], &aes_ks2,
                 iv, AES_ENCRYPT);
     return count;
 }
+
+int AES_ige_256_encrypt_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_IGE_256_AES][j]); count++)
+        AES_ige_encrypt(buf, buf2,
+                (unsigned long)lengths[j], &aes_ks3,
+                iv, AES_ENCRYPT);
+    return count;
+}
+
+GCM128_CONTEXT *gcm_ctx;
+int CRYPTO_gcm128_aad_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(c[D_GHASH][j]); count++)
+        CRYPTO_gcm128_aad(gcm_ctx, buf, lengths[j]);
+    return count;
+}
+
 #endif
+
+EVP_CIPHER_CTX ctx;
+int decrypt = 0;
+int outl;
+int EVP_Update_loop(void *args) {
+    int count;
+    if (decrypt)
+        for (count = 0, run = 1;
+                COND(save_count * 4 * lengths[0] / lengths[j]);
+                count++)
+            EVP_DecryptUpdate(&ctx, buf, &outl, buf, lengths[j]);
+    else
+        for (count = 0, run = 1;
+                COND(save_count * 4 * lengths[0] / lengths[j]);
+                count++)
+            EVP_EncryptUpdate(&ctx, buf, &outl, buf, lengths[j]);
+    if (decrypt)
+        EVP_DecryptFinal_ex(&ctx, buf, &outl);
+    else
+        EVP_EncryptFinal_ex(&ctx, buf, &outl);
+    return count;
+}
+
+const EVP_MD *evp_md = NULL;
+unsigned char md[EVP_MAX_MD_SIZE];
+int EVP_Digest_loop(void *args) {
+    int count;
+    for (count = 0, run = 1;
+            COND(save_count * 4 * lengths[0] / lengths[j]); count++)
+        EVP_Digest(buf, lengths[j], &(md[0]), NULL, evp_md, NULL);
+
+    return count;
+}
 
 #ifndef OPENSSL_NO_RSA
 unsigned rsa_num;
 RSA *rsa_key[RSA_NUM];
+long rsa_c[RSA_NUM][2];
 
 int RSA_sign_loop(void *args) {
     int ret, count;
@@ -783,6 +853,93 @@ int RSA_verify_loop(void *args) {
     return count;
 }
 #endif
+
+#ifndef OPENSSL_NO_DSA
+unsigned int kk;
+int st;
+DSA *dsa_key[DSA_NUM];
+long dsa_c[DSA_NUM][2];
+int DSA_sign_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(dsa_c[j][0]); count++) {
+        st = DSA_sign(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]);
+        if (st == 0) {
+            BIO_printf(bio_err, "DSA sign failure\n");
+            ERR_print_errors(bio_err);
+            count = 1;
+            break;
+        }
+    }
+    return count;
+}
+
+int DSA_verify_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(dsa_c[j][1]); count++) {
+        st = DSA_verify(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
+        if (st <= 0) {
+            BIO_printf(bio_err, "DSA verify failure\n");
+            ERR_print_errors(bio_err);
+            count = 1;
+            break;
+        }
+    }
+    return count;
+}
+#endif
+
+#ifndef OPENSSL_NO_EC
+unsigned char ecdsasig[256];
+unsigned int ecdsasiglen;
+EC_KEY *ecdsa[EC_NUM];
+long ecdsa_c[EC_NUM][2];
+int ECDSA_sign_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(ecdsa_c[j][0]); count++) {
+        st = ECDSA_sign(0, buf, 20,
+                ecdsasig, &ecdsasiglen, ecdsa[j]);
+        if (st == 0) {
+            BIO_printf(bio_err, "ECDSA sign failure\n");
+            ERR_print_errors(bio_err);
+            count = 1;
+            break;
+        }
+    }
+    return count;
+}
+
+int ECDSA_verify_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(ecdsa_c[j][1]); count++) {
+        st = ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen,
+                ecdsa[j]);
+        if (st != 1) {
+            BIO_printf(bio_err, "ECDSA verify failure\n");
+            ERR_print_errors(bio_err);
+            count = 1;
+            break;
+        }
+    }
+    return count;
+}
+
+unsigned char secret_a[MAX_ECDH_SIZE], secret_b[MAX_ECDH_SIZE];
+EC_KEY *ecdh_a[EC_NUM], *ecdh_b[EC_NUM];
+int outlen;
+void *(*kdf) (const void *in, size_t inlen, void *out,
+        size_t *xoutlen);
+
+int ECDH_compute_key_loop(void *args) {
+    int count;
+    for (count = 0, run = 1; COND(ecdh_c[j][0]); count++) {
+        ECDH_compute_key(secret_a, outlen,
+                EC_KEY_get0_public_key(ecdh_b[j]),
+                ecdh_a[j], kdf);
+    }
+    return count;
+}
+#endif
+
 
 int run_benchmark(int async, int batch, ASYNC_JOB **inprogress_jobs, int (*loop_function)(void *)) {
     int error = 0;
@@ -881,16 +1038,14 @@ int speed_main(int argc, char **argv)
 {
     char *prog;
     const EVP_CIPHER *evp_cipher = NULL;
-    const EVP_MD *evp_md = NULL;
     double d = 0.0;
     OPTION_CHOICE o;
-    int decrypt = 0, multiblock = 0, doit[ALGOR_NUM], pr_header = 0;
+    int multiblock = 0, doit[ALGOR_NUM], pr_header = 0;
     int dsa_doit[DSA_NUM], rsa_doit[RSA_NUM];
     int ret = 1, i, k, misalign = MAX_MISALIGNMENT + 1;
     long c[ALGOR_NUM][SIZE_NUM], count = 0, save_count = 0;
     unsigned char *buf_malloc = NULL, *buf2_malloc = NULL;
     ASYNC_JOB **inprogress_jobs = NULL;
-    unsigned char md[EVP_MAX_MD_SIZE];
 #ifndef NO_FORK
     int multi = 0;
 #endif
@@ -961,7 +1116,6 @@ int speed_main(int argc, char **argv)
     };
 #endif
 #ifndef OPENSSL_NO_RSA
-    long rsa_c[RSA_NUM][2];
     static unsigned int rsa_bits[RSA_NUM] = {
         512, 1024, 2048, 3072, 4096, 7680, 15360
     };
@@ -976,8 +1130,6 @@ int speed_main(int argc, char **argv)
     };
 #endif
 #ifndef OPENSSL_NO_DSA
-    DSA *dsa_key[DSA_NUM];
-    long dsa_c[DSA_NUM][2];
     static unsigned int dsa_bits[DSA_NUM] = { 512, 1024, 2048 };
 #endif
 #ifndef OPENSSL_NO_EC
@@ -1016,13 +1168,7 @@ int speed_main(int argc, char **argv)
     };
 #endif
 #ifndef OPENSSL_NO_EC
-    unsigned char ecdsasig[256];
-    unsigned int ecdsasiglen;
-    EC_KEY *ecdsa[EC_NUM];
-    long ecdsa_c[EC_NUM][2];
     int ecdsa_doit[EC_NUM];
-    EC_KEY *ecdh_a[EC_NUM], *ecdh_b[EC_NUM];
-    unsigned char secret_a[MAX_ECDH_SIZE], secret_b[MAX_ECDH_SIZE];
     int secret_size_a, secret_size_b;
     int ecdh_checks = 0;
     int secret_idx = 0;
@@ -1709,10 +1855,7 @@ int speed_main(int argc, char **argv)
             print_message(names[D_IGE_128_AES], c[D_IGE_128_AES][j],
                           lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_IGE_128_AES][j]); count++)
-                AES_ige_encrypt(buf, buf2,
-                                (unsigned long)lengths[j], &aes_ks1,
-                                iv, AES_ENCRYPT);
+            count = run_benchmark(async, batch, inprogress_jobs, AES_ige_128_encrypt_loop);
             d = Time_F(STOP);
             print_result(D_IGE_128_AES, j, count, d);
         }
@@ -1722,10 +1865,7 @@ int speed_main(int argc, char **argv)
             print_message(names[D_IGE_192_AES], c[D_IGE_192_AES][j],
                           lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_IGE_192_AES][j]); count++)
-                AES_ige_encrypt(buf, buf2,
-                                (unsigned long)lengths[j], &aes_ks2,
-                                iv, AES_ENCRYPT);
+            count = run_benchmark(async, batch, inprogress_jobs, AES_ige_192_encrypt_loop);
             d = Time_F(STOP);
             print_result(D_IGE_192_AES, j, count, d);
         }
@@ -1735,28 +1875,23 @@ int speed_main(int argc, char **argv)
             print_message(names[D_IGE_256_AES], c[D_IGE_256_AES][j],
                           lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_IGE_256_AES][j]); count++)
-                AES_ige_encrypt(buf, buf2,
-                                (unsigned long)lengths[j], &aes_ks3,
-                                iv, AES_ENCRYPT);
+            count = run_benchmark(async, batch, inprogress_jobs, AES_ige_256_encrypt_loop);
             d = Time_F(STOP);
             print_result(D_IGE_256_AES, j, count, d);
         }
     }
     if (doit[D_GHASH]) {
-        GCM128_CONTEXT *ctx =
-            CRYPTO_gcm128_new(&aes_ks1, (block128_f) AES_encrypt);
-        CRYPTO_gcm128_setiv(ctx, (unsigned char *)"0123456789ab", 12);
+        gcm_ctx = CRYPTO_gcm128_new(&aes_ks1, (block128_f) AES_encrypt);
+        CRYPTO_gcm128_setiv(gcm_ctx, (unsigned char *)"0123456789ab", 12);
 
         for (j = 0; j < SIZE_NUM; j++) {
             print_message(names[D_GHASH], c[D_GHASH][j], lengths[j]);
             Time_F(START);
-            for (count = 0, run = 1; COND(c[D_GHASH][j]); count++)
-                CRYPTO_gcm128_aad(ctx, buf, lengths[j]);
+            count = run_benchmark(async, batch, inprogress_jobs, CRYPTO_gcm128_aad_loop);
             d = Time_F(STOP);
             print_result(D_GHASH, j, count, d);
         }
-        CRYPTO_gcm128_release(ctx);
+        CRYPTO_gcm128_release(gcm_ctx);
     }
 #endif
 #ifndef OPENSSL_NO_CAMELLIA
@@ -1901,8 +2036,6 @@ int speed_main(int argc, char **argv)
 #endif
         for (j = 0; j < SIZE_NUM; j++) {
             if (evp_cipher) {
-                EVP_CIPHER_CTX ctx;
-                int outl;
 
                 names[D_EVP] = OBJ_nid2ln(evp_cipher->nid);
                 /*
@@ -1919,20 +2052,7 @@ int speed_main(int argc, char **argv)
                 EVP_CIPHER_CTX_set_padding(&ctx, 0);
 
                 Time_F(START);
-                if (decrypt)
-                    for (count = 0, run = 1;
-                         COND(save_count * 4 * lengths[0] / lengths[j]);
-                         count++)
-                        EVP_DecryptUpdate(&ctx, buf, &outl, buf, lengths[j]);
-                else
-                    for (count = 0, run = 1;
-                         COND(save_count * 4 * lengths[0] / lengths[j]);
-                         count++)
-                        EVP_EncryptUpdate(&ctx, buf, &outl, buf, lengths[j]);
-                if (decrypt)
-                    EVP_DecryptFinal_ex(&ctx, buf, &outl);
-                else
-                    EVP_EncryptFinal_ex(&ctx, buf, &outl);
+                count = run_benchmark(async, batch, inprogress_jobs, EVP_Update_loop);
                 d = Time_F(STOP);
                 EVP_CIPHER_CTX_cleanup(&ctx);
             }
@@ -1941,10 +2061,7 @@ int speed_main(int argc, char **argv)
                 print_message(names[D_EVP], save_count, lengths[j]);
 
                 Time_F(START);
-                for (count = 0, run = 1;
-                     COND(save_count * 4 * lengths[0] / lengths[j]); count++)
-                    EVP_Digest(buf, lengths[j], &(md[0]), NULL, evp_md, NULL);
-
+                count = run_benchmark(async, batch, inprogress_jobs, EVP_Digest_loop);
                 d = Time_F(STOP);
             }
             print_result(D_EVP, j, count, d);
@@ -2012,9 +2129,6 @@ int speed_main(int argc, char **argv)
         rnd_fake = 1;
     }
     for (j = 0; j < DSA_NUM; j++) {
-        unsigned int kk;
-        int st;
-
         if (!dsa_doit[j])
             continue;
 
@@ -2030,15 +2144,7 @@ int speed_main(int argc, char **argv)
             pkey_print_message("sign", "dsa",
                                dsa_c[j][0], dsa_bits[j], DSA_SECONDS);
             Time_F(START);
-            for (count = 0, run = 1; COND(dsa_c[j][0]); count++) {
-                st = DSA_sign(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]);
-                if (st == 0) {
-                    BIO_printf(bio_err, "DSA sign failure\n");
-                    ERR_print_errors(bio_err);
-                    count = 1;
-                    break;
-                }
-            }
+            count = run_benchmark(async, batch, inprogress_jobs, DSA_sign_loop);
             d = Time_F(STOP);
             BIO_printf(bio_err,
                        mr ? "+R3:%ld:%d:%.2f\n"
@@ -2058,15 +2164,7 @@ int speed_main(int argc, char **argv)
             pkey_print_message("verify", "dsa",
                                dsa_c[j][1], dsa_bits[j], DSA_SECONDS);
             Time_F(START);
-            for (count = 0, run = 1; COND(dsa_c[j][1]); count++) {
-                st = DSA_verify(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
-                if (st <= 0) {
-                    BIO_printf(bio_err, "DSA verify failure\n");
-                    ERR_print_errors(bio_err);
-                    count = 1;
-                    break;
-                }
-            }
+            count = run_benchmark(async, batch, inprogress_jobs, DSA_verify_loop);
             d = Time_F(STOP);
             BIO_printf(bio_err,
                        mr ? "+R4:%ld:%d:%.2f\n"
@@ -2116,16 +2214,7 @@ int speed_main(int argc, char **argv)
                                    test_curves_bits[j], ECDSA_SECONDS);
 
                 Time_F(START);
-                for (count = 0, run = 1; COND(ecdsa_c[j][0]); count++) {
-                    st = ECDSA_sign(0, buf, 20,
-                                    ecdsasig, &ecdsasiglen, ecdsa[j]);
-                    if (st == 0) {
-                        BIO_printf(bio_err, "ECDSA sign failure\n");
-                        ERR_print_errors(bio_err);
-                        count = 1;
-                        break;
-                    }
-                }
+                count = run_benchmark(async, batch, inprogress_jobs, ECDSA_sign_loop);
                 d = Time_F(STOP);
 
                 BIO_printf(bio_err,
@@ -2148,16 +2237,7 @@ int speed_main(int argc, char **argv)
                                    ecdsa_c[j][1],
                                    test_curves_bits[j], ECDSA_SECONDS);
                 Time_F(START);
-                for (count = 0, run = 1; COND(ecdsa_c[j][1]); count++) {
-                    st = ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen,
-                                      ecdsa[j]);
-                    if (st != 1) {
-                        BIO_printf(bio_err, "ECDSA verify failure\n");
-                        ERR_print_errors(bio_err);
-                        count = 1;
-                        break;
-                    }
-                }
+                count = run_benchmark(async, batch, inprogress_jobs, ECDSA_verify_loop);
                 d = Time_F(STOP);
                 BIO_printf(bio_err,
                            mr ? "+R6:%ld:%d:%.2f\n"
@@ -2204,9 +2284,7 @@ int speed_main(int argc, char **argv)
                  * hash of result; otherwise, use result (see section 4.8 of
                  * draft-ietf-tls-ecc-03.txt).
                  */
-                int field_size, outlen;
-                void *(*kdf) (const void *in, size_t inlen, void *out,
-                              size_t *xoutlen);
+                int field_size;
                 field_size =
                     EC_GROUP_get_degree(EC_KEY_get0_group(ecdh_a[j]));
                 if (field_size <= 24 * 8) {
@@ -2245,11 +2323,7 @@ int speed_main(int argc, char **argv)
                                    ecdh_c[j][0],
                                    test_curves_bits[j], ECDH_SECONDS);
                 Time_F(START);
-                for (count = 0, run = 1; COND(ecdh_c[j][0]); count++) {
-                    ECDH_compute_key(secret_a, outlen,
-                                     EC_KEY_get0_public_key(ecdh_b[j]),
-                                     ecdh_a[j], kdf);
-                }
+                count = run_benchmark(async, batch, inprogress_jobs, ECDH_compute_key_loop);
                 d = Time_F(STOP);
                 BIO_printf(bio_err,
                            mr ? "+R7:%ld:%d:%.2f\n" :
