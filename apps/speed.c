@@ -789,7 +789,7 @@ int run_benchmark(int async, int batch, ASYNC_JOB **inprogress_jobs, int (*loop_
     int count = 0;
     int job_num = 0;
     int job_count = 0;
-    int completed_jobs = 0;
+    int num_inprogress = 0;
     ASYNC_JOB *job = NULL;
     int job_fd = 0;
     int max_fd = 0;
@@ -806,6 +806,7 @@ int run_benchmark(int async, int batch, ASYNC_JOB **inprogress_jobs, int (*loop_
         job = NULL;
         switch (ASYNC_start_job(&job, &job_count, loop_function, NULL, 0)) {
             case ASYNC_PAUSE:
+                ++num_inprogress;
                 inprogress_jobs[job_num] = job;
                 job_fd = ASYNC_get_wait_fd(job);
                 FD_SET(job_fd, &waitfdset);
@@ -818,24 +819,21 @@ int run_benchmark(int async, int batch, ASYNC_JOB **inprogress_jobs, int (*loop_
                 } else {
                     count += job_count;
                 }
-                inprogress_jobs[job_num] = NULL;
-                ++completed_jobs;
                 break;
             case ASYNC_NO_JOBS:
             case ASYNC_ERR:
                 BIO_printf(bio_err, "Failure in the job\n");
                 ERR_print_errors(bio_err);
-                ++completed_jobs;
-                count = -1;
+                error = 1;
                 break;
         }
     }
 
-    while (completed_jobs < batch) {
+    while (num_inprogress > 0) {
         if (-1 == select(max_fd + 1, &waitfdset, NULL, NULL, NULL)) {
                 BIO_printf(bio_err, "Failure in the select\n");
                 ERR_print_errors(bio_err);
-                count = -1;
+                error = 1;
                 break;
         }
 
@@ -859,15 +857,18 @@ int run_benchmark(int async, int batch, ASYNC_JOB **inprogress_jobs, int (*loop_
                     } else {
                         count += job_count;
                     }
-                    ++completed_jobs;
+                    --num_inprogress;
                     inprogress_jobs[i] = NULL;
                     FD_CLR(job_fd, &waitfdset);
                     break;
                 case ASYNC_NO_JOBS:
                 case ASYNC_ERR:
+                    --num_inprogress;
+                    inprogress_jobs[i] = NULL;
+                    FD_CLR(job_fd, &waitfdset);
                     BIO_printf(bio_err, "Failure in the job\n");
                     ERR_print_errors(bio_err);
-                    count = -1;
+                    error = 1;
                     break;
             }
         }
@@ -2412,7 +2413,7 @@ int speed_main(int argc, char **argv)
     ERR_print_errors(bio_err);
     OPENSSL_free(buf_malloc);
     OPENSSL_free(buf2_malloc);
-    if (NULL !== inprogress_jobs)
+    if (NULL != inprogress_jobs)
         OPENSSL_free(inprogress_jobs);
 #ifndef OPENSSL_NO_RSA
     for (i = 0; i < RSA_NUM; i++)
