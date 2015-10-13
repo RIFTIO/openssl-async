@@ -210,7 +210,7 @@ static int do_multi(int multi);
 #endif
 
 #define ALGOR_NUM       30
-#define SIZE_NUM        5
+#define SIZE_NUM        6
 #define PRIME_NUM       3
 #define RSA_NUM         7
 #define DSA_NUM         3
@@ -231,7 +231,7 @@ static const char *names[ALGOR_NUM] = {
 
 static double results[ALGOR_NUM][SIZE_NUM];
 static int lengths[SIZE_NUM] = {
-    16, 64, 256, 1024, 8 * 1024
+    16, 64, 256, 1024, 8 * 1024, 16 * 1024
 };
 
 #ifndef OPENSSL_NO_RSA
@@ -785,6 +785,7 @@ int RSA_verify_loop(void *args) {
 #endif
 
 int run_benchmark(int async, int batch, ASYNC_JOB **inprogress_jobs, int (*loop_function)(void *)) {
+    int error = 0;
     int count = 0;
     int job_num = 0;
     int job_count = 0;
@@ -801,7 +802,7 @@ int run_benchmark(int async, int batch, ASYNC_JOB **inprogress_jobs, int (*loop_
     memset(inprogress_jobs, 0, batch * sizeof(ASYNC_JOB*));
     FD_ZERO(&waitfdset);
 
-    for (job_num=0; job_num < batch; ++job_num) {
+    for (job_num=0; job_num < batch && !error; ++job_num) {
         job = NULL;
         switch (ASYNC_start_job(&job, &job_count, loop_function, NULL, 0)) {
             case ASYNC_PAUSE:
@@ -812,8 +813,8 @@ int run_benchmark(int async, int batch, ASYNC_JOB **inprogress_jobs, int (*loop_
                     max_fd = job_fd;
                 break;
             case ASYNC_FINISH:
-                if (count == -1 || job_count == -1) {
-                    count = -1;
+                if (job_count == -1) {
+                    error = 1;
                 } else {
                     count += job_count;
                 }
@@ -824,6 +825,7 @@ int run_benchmark(int async, int batch, ASYNC_JOB **inprogress_jobs, int (*loop_
             case ASYNC_ERR:
                 BIO_printf(bio_err, "Failure in the job\n");
                 ERR_print_errors(bio_err);
+                ++completed_jobs;
                 count = -1;
                 break;
         }
@@ -848,12 +850,12 @@ int run_benchmark(int async, int batch, ASYNC_JOB **inprogress_jobs, int (*loop_
             if (!FD_ISSET(job_fd, &waitfdset))
                 continue;
 
-            switch (ASYNC_start_job(&job, &job_count, RSA_sign_loop, NULL, 0)) {
+            switch (ASYNC_start_job(&job, &job_count, loop_function, NULL, 0)) {
                 case ASYNC_PAUSE:
                     break;
                 case ASYNC_FINISH:
-                    if (count == -1 || job_count == -1) {
-                        count = -1;
+                    if (job_count == -1) {
+                        error = 1;
                     } else {
                         count += job_count;
                     }
@@ -871,7 +873,7 @@ int run_benchmark(int async, int batch, ASYNC_JOB **inprogress_jobs, int (*loop_
         }
     }
 
-    return count;
+    return error ? -1 : count;
 }
 
 int speed_main(int argc, char **argv)
@@ -2410,7 +2412,8 @@ int speed_main(int argc, char **argv)
     ERR_print_errors(bio_err);
     OPENSSL_free(buf_malloc);
     OPENSSL_free(buf2_malloc);
-    OPENSSL_free(inprogress_jobs);
+    if (NULL !== inprogress_jobs)
+        OPENSSL_free(inprogress_jobs);
 #ifndef OPENSSL_NO_RSA
     for (i = 0; i < RSA_NUM; i++)
         RSA_free(rsa_key[i]);
