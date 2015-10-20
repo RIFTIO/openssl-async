@@ -842,7 +842,7 @@ int RSA_verify_loop(void *args) {
     int ret, count;
     for (count = 0, run = 1; COND(rsa_c[j][1]); count++) {
         ret = RSA_verify(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
-        if (ret == 0) {
+        if (ret <= 0) {
             BIO_printf(bio_err, "RSA verify failure\n");
             ERR_print_errors(bio_err);
             count = -1;
@@ -855,14 +855,13 @@ int RSA_verify_loop(void *args) {
 
 #ifndef OPENSSL_NO_DSA
 unsigned int kk;
-int st;
 DSA *dsa_key[DSA_NUM];
 long dsa_c[DSA_NUM][2];
 int DSA_sign_loop(void *args) {
-    int count;
+    int ret, count;
     for (count = 0, run = 1; COND(dsa_c[j][0]); count++) {
-        st = DSA_sign(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]);
-        if (st == 0) {
+        ret = DSA_sign(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]);
+        if (ret == 0) {
             BIO_printf(bio_err, "DSA sign failure\n");
             ERR_print_errors(bio_err);
             count = 1;
@@ -873,10 +872,10 @@ int DSA_sign_loop(void *args) {
 }
 
 int DSA_verify_loop(void *args) {
-    int count;
+    int ret, count;
     for (count = 0, run = 1; COND(dsa_c[j][1]); count++) {
-        st = DSA_verify(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
-        if (st <= 0) {
+        ret = DSA_verify(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
+        if (ret <= 0) {
             BIO_printf(bio_err, "DSA verify failure\n");
             ERR_print_errors(bio_err);
             count = 1;
@@ -893,11 +892,11 @@ unsigned int ecdsasiglen;
 EC_KEY *ecdsa[EC_NUM];
 long ecdsa_c[EC_NUM][2];
 int ECDSA_sign_loop(void *args) {
-    int count;
+    int ret, count;
     for (count = 0, run = 1; COND(ecdsa_c[j][0]); count++) {
-        st = ECDSA_sign(0, buf, 20,
+        ret = ECDSA_sign(0, buf, 20,
                 ecdsasig, &ecdsasiglen, ecdsa[j]);
-        if (st == 0) {
+        if (ret == 0) {
             BIO_printf(bio_err, "ECDSA sign failure\n");
             ERR_print_errors(bio_err);
             count = 1;
@@ -908,11 +907,11 @@ int ECDSA_sign_loop(void *args) {
 }
 
 int ECDSA_verify_loop(void *args) {
-    int count;
+    int ret, count;
     for (count = 0, run = 1; COND(ecdsa_c[j][1]); count++) {
-        st = ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen,
+        ret = ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen,
                 ecdsa[j]);
-        if (st != 1) {
+        if (ret != 1) {
             BIO_printf(bio_err, "ECDSA verify failure\n");
             ERR_print_errors(bio_err);
             count = 1;
@@ -985,7 +984,12 @@ int run_benchmark(int async_jobs, ASYNC_JOB **inprogress_jobs, int (*loop_functi
     }
 
     while (num_inprogress > 0) {
-        if (-1 == select(max_fd + 1, &waitfdset, NULL, NULL, NULL)) {
+        int select_result = select(max_fd + 1, &waitfdset, NULL, NULL, NULL);
+
+        if (select_result == -1 && errno == EINTR)
+            continue;
+
+        if (select_result == -1) {
                 BIO_printf(bio_err, "Failure in the select\n");
                 ERR_print_errors(bio_err);
                 error = 1;
@@ -2149,6 +2153,7 @@ int speed_main(int argc, char **argv)
         rnd_fake = 1;
     }
     for (j = 0; j < DSA_NUM; j++) {
+        int st;
         if (!dsa_doit[j])
             continue;
 
