@@ -687,8 +687,8 @@ heartbeat_test.o: ../include/openssl/ec.h ../include/openssl/ecdh.h
 heartbeat_test.o: ../include/openssl/ecdsa.h ../include/openssl/err.h
 heartbeat_test.o: ../include/openssl/evp.h ../include/openssl/hmac.h
 heartbeat_test.o: ../include/openssl/kssl.h ../include/openssl/lhash.h
-heartbeat_test.o: ../include/openssl/obj_mac.h ../include/openssl/objects.h
-heartbeat_test.o: ../include/openssl/opensslconf.h
+heartbeat_test.o: ../include/openssl/lock.h ../include/openssl/obj_mac.h
+heartbeat_test.o: ../include/openssl/objects.h ../include/openssl/opensslconf.h
 heartbeat_test.o: ../include/openssl/opensslv.h ../include/openssl/ossl_typ.h
 heartbeat_test.o: ../include/openssl/pem.h ../include/openssl/pem2.h
 heartbeat_test.o: ../include/openssl/pkcs7.h ../include/openssl/pqueue.h
@@ -751,6 +751,14 @@ mdc2test.o: ../include/openssl/opensslconf.h ../include/openssl/opensslv.h
 mdc2test.o: ../include/openssl/ossl_typ.h ../include/openssl/safestack.h
 mdc2test.o: ../include/openssl/stack.h ../include/openssl/symhacks.h
 mdc2test.o: ../include/openssl/ui.h ../include/openssl/ui_compat.h mdc2test.c
+prftest.o: ../e_os.h ../include/openssl/asn1.h ../include/openssl/bio.h
+prftest.o: ../include/openssl/buffer.h ../include/openssl/crypto.h
+prftest.o: ../include/openssl/e_os2.h ../include/openssl/evp.h
+prftest.o: ../include/openssl/obj_mac.h ../include/openssl/objects.h
+prftest.o: ../include/openssl/opensslconf.h ../include/openssl/opensslv.h
+prftest.o: ../include/openssl/ossl_typ.h ../include/openssl/prf.h
+prftest.o: ../include/openssl/safestack.h ../include/openssl/stack.h
+prftest.o: ../include/openssl/symhacks.h ../include/openssl/tls1.h prftest.c
 randtest.o: ../e_os.h ../include/openssl/e_os2.h
 randtest.o: ../include/openssl/opensslconf.h ../include/openssl/ossl_typ.h
 randtest.o: ../include/openssl/rand.h randtest.c
@@ -810,19 +818,19 @@ ssltest.o: ../include/openssl/ecdh.h ../include/openssl/ecdsa.h
 ssltest.o: ../include/openssl/engine.h ../include/openssl/err.h
 ssltest.o: ../include/openssl/evp.h ../include/openssl/hmac.h
 ssltest.o: ../include/openssl/kssl.h ../include/openssl/lhash.h
-ssltest.o: ../include/openssl/obj_mac.h ../include/openssl/objects.h
-ssltest.o: ../include/openssl/opensslconf.h ../include/openssl/opensslv.h
-ssltest.o: ../include/openssl/ossl_typ.h ../include/openssl/pem.h
-ssltest.o: ../include/openssl/pem2.h ../include/openssl/pkcs7.h
-ssltest.o: ../include/openssl/pqueue.h ../include/openssl/rand.h
-ssltest.o: ../include/openssl/rsa.h ../include/openssl/safestack.h
-ssltest.o: ../include/openssl/sha.h ../include/openssl/srp.h
-ssltest.o: ../include/openssl/srtp.h ../include/openssl/ssl.h
-ssltest.o: ../include/openssl/ssl2.h ../include/openssl/ssl23.h
-ssltest.o: ../include/openssl/ssl3.h ../include/openssl/stack.h
-ssltest.o: ../include/openssl/symhacks.h ../include/openssl/tls1.h
-ssltest.o: ../include/openssl/x509.h ../include/openssl/x509_vfy.h
-ssltest.o: ../include/openssl/x509v3.h ssltest.c
+ssltest.o: ../include/openssl/lock.h ../include/openssl/obj_mac.h
+ssltest.o: ../include/openssl/objects.h ../include/openssl/opensslconf.h
+ssltest.o: ../include/openssl/opensslv.h ../include/openssl/ossl_typ.h
+ssltest.o: ../include/openssl/pem.h ../include/openssl/pem2.h
+ssltest.o: ../include/openssl/pkcs7.h ../include/openssl/pqueue.h
+ssltest.o: ../include/openssl/rand.h ../include/openssl/rsa.h
+ssltest.o: ../include/openssl/safestack.h ../include/openssl/sha.h
+ssltest.o: ../include/openssl/srp.h ../include/openssl/srtp.h
+ssltest.o: ../include/openssl/ssl.h ../include/openssl/ssl2.h
+ssltest.o: ../include/openssl/ssl23.h ../include/openssl/ssl3.h
+ssltest.o: ../include/openssl/stack.h ../include/openssl/symhacks.h
+ssltest.o: ../include/openssl/tls1.h ../include/openssl/x509.h
+ssltest.o: ../include/openssl/x509_vfy.h ../include/openssl/x509v3.h ssltest.c
 verify_extra_test.o: ../include/openssl/asn1.h ../include/openssl/bio.h
 verify_extra_test.o: ../include/openssl/buffer.h ../include/openssl/crypto.h
 verify_extra_test.o: ../include/openssl/e_os2.h ../include/openssl/ec.h

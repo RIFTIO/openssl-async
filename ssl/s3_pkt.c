@@ -981,12 +981,8 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
             }
             /* If all data not successfully sent return now */
             if (i < 0) {
-                if (ssl3_get_conn_status(s) < 1) {
-                    if (s->s3->outstanding_write_crypto < 1)
-                        SSLerr(SSL_F_DO_SSL3_WRITE_INNER,
-                               SSL_R_CONNECTION_LOST);
+                if (ssl3_get_conn_status(s) < 1)
                     return -1;
-                }
                 return i;
             }
             s->s3->crypto_retry = 0; 
@@ -1012,11 +1008,8 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
             }
         }
 
-        if (ssl3_get_conn_status(s) < 1) {
-            if (s->s3->outstanding_write_crypto < 1)
-                SSLerr(SSL_F_DO_SSL3_WRITE_INNER, SSL_R_CONNECTION_LOST);
+        if (ssl3_get_conn_status(s) < 1)
             return -1;
-        }
     }
 
     /* If we have an alert to send, lets send it */
@@ -1479,8 +1472,6 @@ post_enc:
                 i = wb->left;
                 ssl_atomic_dec(s->s3->outstanding_write_records);
                 BIO_set_flags(s->wbio, f);
-                if (s->s3->outstanding_write_crypto < 1)
-                    SSLerr(SSL_F_DO_SSL3_WRITE_INNER, SSL_R_CONNECTION_LOST);
             }
         }
         CRYPTO_w_unlock(CRYPTO_LOCK_SSL);

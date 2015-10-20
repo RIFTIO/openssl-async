@@ -4213,19 +4213,11 @@ int ssl3_shutdown(SSL *s)
             ssl3_lock(s, S3_SSL3_LOCK);
             CRYPTO_w_lock(CRYPTO_LOCK_SSL);
             ret = ssl3_asynch_send_skt_queued_data(s);
-            ssl3_unlock(s, S3_SSL3_LOCK);
             CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
+            ssl3_unlock(s, S3_SSL3_LOCK);
             /* If all data not successfully sent return now */
-            if (ret < 0) {
-                /*
-                 * Don't raise error until all the inflight request are
-                 * processed
-                 */
-                if (ssl3_get_conn_status(s) < 1 && !SSL_crypto_pending(s)) {
-                    SSLerr(SSL_F_SSL3_SHUTDOWN, SSL_R_CONNECTION_LOST);
-                }
+            if (ret < 0)
                 return -1;
-            }
         }
 #endif
         if (SSL_crypto_pending(s)) {
@@ -4288,19 +4280,11 @@ int ssl3_shutdown(SSL *s)
                 ssl3_lock(s, S3_SSL3_LOCK);
                 CRYPTO_w_lock(CRYPTO_LOCK_SSL);
                 ret = ssl3_asynch_send_skt_queued_data(s);
-                ssl3_unlock(s, S3_SSL3_LOCK);
                 CRYPTO_w_unlock(CRYPTO_LOCK_SSL);
+                ssl3_unlock(s, S3_SSL3_LOCK);
                 /* If all data not successfully sent return now */
-                if (ret < 0) {
-                    /*
-                     * Don't raise error until all the inflight request are
-                     * processed
-                     */
-                    if (ssl3_get_conn_status(s) < 1 && !SSL_crypto_pending(s)) {
-                        SSLerr(SSL_F_SSL3_SHUTDOWN, SSL_R_CONNECTION_LOST);
-                    }
+                if (ret < 0)
                     return ret;
-                }
             }
 #endif
             if (SSL_crypto_pending(s)) {
