@@ -2507,7 +2507,7 @@ int speed_main(int argc, char **argv)
     OPENSSL_free(buf_malloc);
     OPENSSL_free(buf2_malloc);
     for (i = 0; i < (!async_jobs ? 1 : async_jobs); i++) {
-        if (NULL != array_loopargs[i])
+        if (NULL != array_loopargs &&  NULL != array_loopargs[i])
             OPENSSL_free(array_loopargs[i]);
     }
     if (NULL != array_loopargs)
