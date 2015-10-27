@@ -589,7 +589,7 @@ typedef struct loopargs_st {
 unsigned char md2[MD2_DIGEST_LENGTH];
 int EVP_Digest_MD2_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_MD2][j]); count++)
+    for (count = 0; COND(c[D_MD2][j]); count++)
         EVP_Digest(buf, (unsigned long)lengths[j], &(md2[0]), NULL,
                 EVP_md2(), NULL);
     return count;
@@ -600,7 +600,7 @@ int EVP_Digest_MD2_loop(void *args) {
 unsigned char mdc2[MDC2_DIGEST_LENGTH];
 int EVP_Digest_MDC2_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_MDC2][j]); count++)
+    for (count = 0; COND(c[D_MDC2][j]); count++)
         EVP_Digest(buf, (unsigned long)lengths[j], &(mdc2[0]), NULL,
                 EVP_mdc2(), NULL);
     return count;
@@ -611,7 +611,7 @@ int EVP_Digest_MDC2_loop(void *args) {
 unsigned char md4[MD4_DIGEST_LENGTH];
 int EVP_Digest_MD4_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_MD4][j]); count++)
+    for (count = 0; COND(c[D_MD4][j]); count++)
         EVP_Digest(&(buf[0]), (unsigned long)lengths[j], &(md4[0]),
                 NULL, EVP_md4(), NULL);
     return count;
@@ -622,7 +622,7 @@ int EVP_Digest_MD4_loop(void *args) {
 unsigned char md5[MD5_DIGEST_LENGTH];
 int MD5_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_MD5][j]); count++)
+    for (count = 0; COND(c[D_MD5][j]); count++)
         MD5(buf, lengths[j], md5);
     return count;
 }
@@ -631,7 +631,7 @@ unsigned char hmac[MD5_DIGEST_LENGTH];
 HMAC_CTX hctx;
 int HMAC_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_HMAC][j]); count++) {
+    for (count = 0; COND(c[D_HMAC][j]); count++) {
         HMAC_Init_ex(&hctx, NULL, 0, NULL, NULL);
         HMAC_Update(&hctx, buf, lengths[j]);
         HMAC_Final(&hctx, &(hmac[0]), NULL);
@@ -643,7 +643,7 @@ int HMAC_loop(void *args) {
 unsigned char sha[SHA_DIGEST_LENGTH];
 int SHA1_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_SHA1][j]); count++)
+    for (count = 0; COND(c[D_SHA1][j]); count++)
         SHA1(buf, lengths[j], sha);
     return count;
 }
@@ -651,7 +651,7 @@ int SHA1_loop(void *args) {
 unsigned char sha256[SHA256_DIGEST_LENGTH];
 int SHA256_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_SHA256][j]); count++)
+    for (count = 0; COND(c[D_SHA256][j]); count++)
         SHA256(buf, lengths[j], sha256);
     return count;
 }
@@ -659,7 +659,7 @@ int SHA256_loop(void *args) {
 unsigned char sha512[SHA512_DIGEST_LENGTH];
 int SHA512_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_SHA512][j]); count++)
+    for (count = 0; COND(c[D_SHA512][j]); count++)
         SHA512(buf, lengths[j], sha512);
     return count;
 }
@@ -668,7 +668,7 @@ int SHA512_loop(void *args) {
 unsigned char whirlpool[WHIRLPOOL_DIGEST_LENGTH];
 int WHIRLPOOL_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_WHIRLPOOL][j]); count++)
+    for (count = 0; COND(c[D_WHIRLPOOL][j]); count++)
         WHIRLPOOL(buf, lengths[j], whirlpool);
     return count;
 }
@@ -678,7 +678,7 @@ int WHIRLPOOL_loop(void *args) {
 unsigned char rmd160[RIPEMD160_DIGEST_LENGTH];
 int EVP_Digest_RMD160_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_RMD160][j]); count++)
+    for (count = 0; COND(c[D_RMD160][j]); count++)
         EVP_Digest(buf, (unsigned long)lengths[j], &(rmd160[0]), NULL,
                 EVP_ripemd160(), NULL);
     return count;
@@ -689,7 +689,7 @@ int EVP_Digest_RMD160_loop(void *args) {
 RC4_KEY rc4_ks;
 int RC4_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_RC4][j]); count++)
+    for (count = 0; COND(c[D_RC4][j]); count++)
         RC4(&rc4_ks, (unsigned int)lengths[j], buf, buf);
     return count;
 }
@@ -702,7 +702,7 @@ DES_key_schedule sch2;
 DES_key_schedule sch3;
 int DES_ncbc_encrypt_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_CBC_DES][j]); count++)
+    for (count = 0; COND(c[D_CBC_DES][j]); count++)
         DES_ncbc_encrypt(buf, buf, lengths[j], &sch,
                 &DES_iv, DES_ENCRYPT);
     return count;
@@ -710,7 +710,7 @@ int DES_ncbc_encrypt_loop(void *args) {
 
 int DES_ede3_cbc_encrypt_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_EDE3_DES][j]); count++)
+    for (count = 0; COND(c[D_EDE3_DES][j]); count++)
         DES_ede3_cbc_encrypt(buf, buf, lengths[j],
                 &sch, &sch2, &sch3,
                 &DES_iv, DES_ENCRYPT);
@@ -729,7 +729,7 @@ unsigned char iv[2 * MAX_BLOCK_SIZE / 8];
 AES_KEY aes_ks1, aes_ks2, aes_ks3;
 int AES_cbc_128_encrypt_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_CBC_128_AES][j]); count++)
+    for (count = 0; COND(c[D_CBC_128_AES][j]); count++)
         AES_cbc_encrypt(buf, buf,
                 (unsigned long)lengths[j], &aes_ks1,
                 iv, AES_ENCRYPT);
@@ -738,7 +738,7 @@ int AES_cbc_128_encrypt_loop(void *args) {
 
 int AES_cbc_192_encrypt_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_CBC_192_AES][j]); count++)
+    for (count = 0; COND(c[D_CBC_192_AES][j]); count++)
         AES_cbc_encrypt(buf, buf,
                 (unsigned long)lengths[j], &aes_ks2,
                 iv, AES_ENCRYPT);
@@ -747,7 +747,7 @@ int AES_cbc_192_encrypt_loop(void *args) {
 
 int AES_cbc_256_encrypt_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_CBC_256_AES][j]); count++)
+    for (count = 0; COND(c[D_CBC_256_AES][j]); count++)
         AES_cbc_encrypt(buf, buf,
                 (unsigned long)lengths[j], &aes_ks3,
                 iv, AES_ENCRYPT);
@@ -756,7 +756,7 @@ int AES_cbc_256_encrypt_loop(void *args) {
 
 int AES_ige_128_encrypt_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_IGE_128_AES][j]); count++)
+    for (count = 0; COND(c[D_IGE_128_AES][j]); count++)
         AES_ige_encrypt(buf, buf2,
                 (unsigned long)lengths[j], &aes_ks1,
                 iv, AES_ENCRYPT);
@@ -765,7 +765,7 @@ int AES_ige_128_encrypt_loop(void *args) {
 
 int AES_ige_192_encrypt_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_IGE_192_AES][j]); count++)
+    for (count = 0; COND(c[D_IGE_192_AES][j]); count++)
         AES_ige_encrypt(buf, buf2,
                 (unsigned long)lengths[j], &aes_ks2,
                 iv, AES_ENCRYPT);
@@ -774,7 +774,7 @@ int AES_ige_192_encrypt_loop(void *args) {
 
 int AES_ige_256_encrypt_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_IGE_256_AES][j]); count++)
+    for (count = 0; COND(c[D_IGE_256_AES][j]); count++)
         AES_ige_encrypt(buf, buf2,
                 (unsigned long)lengths[j], &aes_ks3,
                 iv, AES_ENCRYPT);
@@ -784,7 +784,7 @@ int AES_ige_256_encrypt_loop(void *args) {
 GCM128_CONTEXT *gcm_ctx;
 int CRYPTO_gcm128_aad_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(c[D_GHASH][j]); count++)
+    for (count = 0; COND(c[D_GHASH][j]); count++)
         CRYPTO_gcm128_aad(gcm_ctx, buf, lengths[j]);
     return count;
 }
@@ -797,12 +797,12 @@ int EVP_Update_loop(void *args) {
     loopargs *tempargs = (loopargs *)args;
     int count;
     if (decrypt)
-        for (count = 0, run = 1;
+        for (count = 0;
                 COND(save_count * 4 * lengths[0] / lengths[j]);
                 count++)
             EVP_DecryptUpdate(&(tempargs->ctx), buf, &outl, buf, lengths[j]);
     else
-        for (count = 0, run = 1;
+        for (count = 0;
                 COND(save_count * 4 * lengths[0] / lengths[j]);
                 count++)
             EVP_EncryptUpdate(&(tempargs->ctx), buf, &outl, buf, lengths[j]);
@@ -817,7 +817,7 @@ const EVP_MD *evp_md = NULL;
 unsigned char md[EVP_MAX_MD_SIZE];
 int EVP_Digest_loop(void *args) {
     int count;
-    for (count = 0, run = 1;
+    for (count = 0;
             COND(save_count * 4 * lengths[0] / lengths[j]); count++)
         EVP_Digest(buf, lengths[j], &(md[0]), NULL, evp_md, NULL);
 
@@ -831,7 +831,7 @@ long rsa_c[RSA_NUM][2];
 
 int RSA_sign_loop(void *args) {
     int ret, count;
-    for (count = 0, run = 1; COND(rsa_c[j][0]); count++) {
+    for (count = 0; COND(rsa_c[j][0]); count++) {
         ret = RSA_sign(NID_md5_sha1, buf, 36, buf2, &rsa_num, rsa_key[j]);
         if (ret == 0) {
             BIO_printf(bio_err, "RSA sign failure\n");
@@ -845,7 +845,7 @@ int RSA_sign_loop(void *args) {
 
 int RSA_verify_loop(void *args) {
     int ret, count;
-    for (count = 0, run = 1; COND(rsa_c[j][1]); count++) {
+    for (count = 0; COND(rsa_c[j][1]); count++) {
         ret = RSA_verify(NID_md5_sha1, buf, 36, buf2, rsa_num, rsa_key[j]);
         if (ret <= 0) {
             BIO_printf(bio_err, "RSA verify failure\n");
@@ -864,7 +864,7 @@ DSA *dsa_key[DSA_NUM];
 long dsa_c[DSA_NUM][2];
 int DSA_sign_loop(void *args) {
     int ret, count;
-    for (count = 0, run = 1; COND(dsa_c[j][0]); count++) {
+    for (count = 0; COND(dsa_c[j][0]); count++) {
         ret = DSA_sign(EVP_PKEY_DSA, buf, 20, buf2, &kk, dsa_key[j]);
         if (ret == 0) {
             BIO_printf(bio_err, "DSA sign failure\n");
@@ -878,7 +878,7 @@ int DSA_sign_loop(void *args) {
 
 int DSA_verify_loop(void *args) {
     int ret, count;
-    for (count = 0, run = 1; COND(dsa_c[j][1]); count++) {
+    for (count = 0; COND(dsa_c[j][1]); count++) {
         ret = DSA_verify(EVP_PKEY_DSA, buf, 20, buf2, kk, dsa_key[j]);
         if (ret <= 0) {
             BIO_printf(bio_err, "DSA verify failure\n");
@@ -898,7 +898,7 @@ EC_KEY *ecdsa[EC_NUM];
 long ecdsa_c[EC_NUM][2];
 int ECDSA_sign_loop(void *args) {
     int ret, count;
-    for (count = 0, run = 1; COND(ecdsa_c[j][0]); count++) {
+    for (count = 0; COND(ecdsa_c[j][0]); count++) {
         ret = ECDSA_sign(0, buf, 20,
                 ecdsasig, &ecdsasiglen, ecdsa[j]);
         if (ret == 0) {
@@ -913,7 +913,7 @@ int ECDSA_sign_loop(void *args) {
 
 int ECDSA_verify_loop(void *args) {
     int ret, count;
-    for (count = 0, run = 1; COND(ecdsa_c[j][1]); count++) {
+    for (count = 0; COND(ecdsa_c[j][1]); count++) {
         ret = ECDSA_verify(0, buf, 20, ecdsasig, ecdsasiglen,
                 ecdsa[j]);
         if (ret != 1) {
@@ -934,7 +934,7 @@ void *(*kdf) (const void *in, size_t inlen, void *out,
 
 int ECDH_compute_key_loop(void *args) {
     int count;
-    for (count = 0, run = 1; COND(ecdh_c[j][0]); count++) {
+    for (count = 0; COND(ecdh_c[j][0]); count++) {
         ECDH_compute_key(secret_a, outlen,
                 EC_KEY_get0_public_key(ecdh_b[j]),
                 ecdh_a[j], kdf);
@@ -956,6 +956,8 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
     struct timeval select_timeout;
     int select_result = 0;
     int i = 0;
+
+    run = 1;
 
     if (0 == async_jobs) {
         return loop_function((void *)array_loopargs[0]);
@@ -2234,7 +2236,6 @@ int speed_main(int argc, char **argv)
                 pkey_print_message("sign", "ecdsa",
                                    ecdsa_c[j][0],
                                    test_curves_bits[j], ECDSA_SECONDS);
-
                 Time_F(START);
                 count = run_benchmark(async_jobs, array_loopargs, ECDSA_sign_loop);
                 d = Time_F(STOP);
