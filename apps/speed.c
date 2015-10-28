@@ -579,6 +579,7 @@ static OPT_PAIR ecdh_choices[] = {
 
 unsigned char *buf = NULL, *buf2 = NULL;
 int j;
+char *engine_id = NULL;
 
 typedef struct loopargs_st {
     ASYNC_JOB *inprogress_job;
@@ -990,7 +991,7 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
         select_timeout.tv_sec=0;
         select_timeout.tv_usec=0;
         for (job_num=0; job_num < async_jobs; job_num++) {
-            if (array_loopargs[job_num]->inprogress_job) { 
+            if (array_loopargs[job_num]->inprogress_job) {
                 job_fd = ASYNC_get_wait_fd(array_loopargs[job_num]->inprogress_job);
                 FD_SET(job_fd, &waitfdset);
                 if (job_fd > max_fd)
@@ -998,7 +999,7 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
             }
         }
         select_result = select(max_fd + 1, &waitfdset, NULL, NULL, &select_timeout);
- 
+
         if (select_result == -1 && errno == EINTR)
             continue;
 
@@ -1258,7 +1259,12 @@ int speed_main(int argc, char **argv)
             decrypt = 1;
             break;
         case OPT_ENGINE:
-            (void)setup_engine(opt_arg(), 0);
+            /*
+             * In a forked execution, an engine might need to be
+             * initialised by each child process, not by the parent.
+             * So store the name here and run setup_engine() later on.
+             */
+            engine_id = opt_arg();
             break;
         case OPT_MULTI:
 #ifndef NO_FORK
@@ -1384,6 +1390,9 @@ int speed_main(int argc, char **argv)
     if (multi && do_multi(multi))
         goto show_res;
 #endif
+
+    /* Initialize the engine after the fork */
+    (void)setup_engine(engine_id, 0);
 
     /* No parameters; turn on everything. */
     if ((argc == 0) && !doit[D_EVP]) {
