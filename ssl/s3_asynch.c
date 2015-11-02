@@ -144,15 +144,6 @@ static int ssl3_process_transmissions(SSL *s, int status)
             if (status > 0)
 #endif
             {
-                /*
-                 * Only free transmission buffers if callback was successful
-                 * (i.e. data successfully sent to socket)
-                 */
-
-                if ((trans->s->asynch_completion_callback) &&
-                    (trans->flags & SSL3_TRANS_FLAGS_SEND) && (trans->orig)) {
-                    OPENSSL_free(trans->orig);
-                }
                 ssl3_release_buffer(trans->s, &trans->buf,
                                     ! !(trans->flags &
                                         SSL3_TRANS_FLAGS_SEND));
@@ -317,6 +308,18 @@ SSL3_TRANSMISSION *ssl3_get_transmission(SSL *s)
     return ssl3_get_transmission_before(s, NULL);
 }
 
+static inline 
+void ssl3_clean_transmission_node(struct transmission_queue_node *tqn)
+{
+    tqn->trans.callback_list_top = 0;
+    if (tqn->trans.orig) {
+      OPENSSL_free(tqn->trans.orig);
+      tqn->trans.orig = NULL;
+    }
+    tqn->trans.origlen = 0;
+    tqn->next = NULL;
+}
+
 void ssl3_release_transmission(SSL3_TRANSMISSION * trans)
 {
     /*
@@ -339,8 +342,9 @@ void ssl3_release_transmission(SSL3_TRANSMISSION * trans)
         p->head = tqn->next;
     else
         tqn->prev->next = tqn->next;
-    trans->callback_list_top = 0;
-    tqn->next = NULL;
+
+    ssl3_clean_transmission_node(tqn);
+
     tqn->prev = p->free_tail;
     if (p->free_tail != NULL)
         p->free_tail->next = tqn;
@@ -374,8 +378,9 @@ void ssl3_release_transmission_skt(SSL3_TRANSMISSION * trans)
         p->skt_head = tqn->next;
     else
         tqn->prev->next = tqn->next;
+    
+    ssl3_clean_transmission_node(tqn);
 
-    tqn->next = NULL;
     tqn->prev = p->free_tail;
     if (p->free_tail != NULL)
         p->free_tail->next = tqn;
