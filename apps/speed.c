@@ -201,6 +201,42 @@ static volatile int run = 0;
 static int mr = 0;
 static int usertime = 1;
 
+typedef struct loopargs_st {
+    ASYNC_JOB *inprogress_job;
+    EVP_CIPHER_CTX ctx;
+} loopargs;
+
+int EVP_Digest_MD2_loop(void *args);
+int EVP_Digest_MDC2_loop(void *args);
+int EVP_Digest_MD4_loop(void *args);
+int MD5_loop(void *args);
+int HMAC_loop(void *args);
+int SHA1_loop(void *args);
+int SHA256_loop(void *args);
+int SHA512_loop(void *args);
+int WHIRLPOOL_loop(void *args);
+int EVP_Digest_RMD160_loop(void *args);
+int RC4_loop(void *args);
+int DES_ncbc_encrypt_loop(void *args);
+int DES_ede3_cbc_encrypt_loop(void *args);
+int AES_cbc_128_encrypt_loop(void *args);
+int AES_cbc_192_encrypt_loop(void *args);
+int AES_ige_128_encrypt_loop(void *args);
+int AES_cbc_256_encrypt_loop(void *args);
+int AES_ige_192_encrypt_loop(void *args);
+int AES_ige_256_encrypt_loop(void *args);
+int CRYPTO_gcm128_aad_loop(void *args);
+int EVP_Update_loop(void *args);
+int EVP_Digest_loop(void *args);
+int RSA_sign_loop(void *args);
+int RSA_verify_loop(void *args);
+int DSA_sign_loop(void *args);
+int DSA_verify_loop(void *args);
+int ECDSA_sign_loop(void *args);
+int ECDSA_verify_loop(void *args);
+int ECDH_compute_key_loop(void *args);
+int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function)(void *));
+
 static double Time_F(int s);
 static void print_message(const char *s, long num, int length);
 static void pkey_print_message(const char *str, const char *str2,
@@ -581,14 +617,9 @@ static unsigned char *buf = NULL, *buf2 = NULL;
 static int j;
 static char *engine_id = NULL;
 
-typedef struct loopargs_st {
-    ASYNC_JOB *inprogress_job;
-    EVP_CIPHER_CTX ctx;
-} loopargs;
 
 #ifndef OPENSSL_NO_MD2
 static unsigned char md2[MD2_DIGEST_LENGTH];
-int EVP_Digest_MD2_loop(void *args);
 int EVP_Digest_MD2_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_MD2][j]); count++)
@@ -600,7 +631,6 @@ int EVP_Digest_MD2_loop(void *args) {
 
 #ifndef OPENSSL_NO_MDC2
 static unsigned char mdc2[MDC2_DIGEST_LENGTH];
-int EVP_Digest_MDC2_loop(void *args);
 int EVP_Digest_MDC2_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_MDC2][j]); count++)
@@ -612,7 +642,6 @@ int EVP_Digest_MDC2_loop(void *args) {
 
 #ifndef OPENSSL_NO_MD4
 static unsigned char md4[MD4_DIGEST_LENGTH];
-int EVP_Digest_MD4_loop(void *args);
 int EVP_Digest_MD4_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_MD4][j]); count++)
@@ -624,7 +653,6 @@ int EVP_Digest_MD4_loop(void *args) {
 
 #ifndef OPENSSL_NO_MD5
 static unsigned char md5[MD5_DIGEST_LENGTH];
-int MD5_loop(void *args);
 int MD5_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_MD5][j]); count++)
@@ -634,7 +662,6 @@ int MD5_loop(void *args) {
 
 static unsigned char hmac[MD5_DIGEST_LENGTH];
 static HMAC_CTX hctx;
-int HMAC_loop(void *args);
 int HMAC_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_HMAC][j]); count++) {
@@ -647,7 +674,6 @@ int HMAC_loop(void *args) {
 #endif
 
 static unsigned char sha[SHA_DIGEST_LENGTH];
-int SHA1_loop(void *args);
 int SHA1_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_SHA1][j]); count++)
@@ -656,7 +682,6 @@ int SHA1_loop(void *args) {
 }
 
 static unsigned char sha256[SHA256_DIGEST_LENGTH];
-int SHA256_loop(void *args);
 int SHA256_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_SHA256][j]); count++)
@@ -665,7 +690,6 @@ int SHA256_loop(void *args) {
 }
 
 static unsigned char sha512[SHA512_DIGEST_LENGTH];
-int SHA512_loop(void *args);
 int SHA512_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_SHA512][j]); count++)
@@ -675,7 +699,6 @@ int SHA512_loop(void *args) {
 
 #ifndef OPENSSL_NO_WHIRLPOOL
 static unsigned char whirlpool[WHIRLPOOL_DIGEST_LENGTH];
-int WHIRLPOOL_loop(void *args);
 int WHIRLPOOL_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_WHIRLPOOL][j]); count++)
@@ -686,7 +709,6 @@ int WHIRLPOOL_loop(void *args) {
 
 #ifndef OPENSSL_NO_RMD160
 static unsigned char rmd160[RIPEMD160_DIGEST_LENGTH];
-int EVP_Digest_RMD160_loop(void *args);
 int EVP_Digest_RMD160_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_RMD160][j]); count++)
@@ -698,7 +720,6 @@ int EVP_Digest_RMD160_loop(void *args) {
 
 #ifndef OPENSSL_NO_RC4
 static RC4_KEY rc4_ks;
-int RC4_loop(void *args);
 int RC4_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_RC4][j]); count++)
@@ -712,7 +733,6 @@ static unsigned char DES_iv[8];
 static DES_key_schedule sch;
 static DES_key_schedule sch2;
 static DES_key_schedule sch3;
-int DES_ncbc_encrypt_loop(void *args);
 int DES_ncbc_encrypt_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_CBC_DES][j]); count++)
@@ -721,7 +741,6 @@ int DES_ncbc_encrypt_loop(void *args) {
     return count;
 }
 
-int DES_ede3_cbc_encrypt_loop(void *args);
 int DES_ede3_cbc_encrypt_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_EDE3_DES][j]); count++)
@@ -741,7 +760,6 @@ int DES_ede3_cbc_encrypt_loop(void *args) {
 static unsigned char iv[2 * MAX_BLOCK_SIZE / 8];
 #ifndef OPENSSL_NO_AES
 static AES_KEY aes_ks1, aes_ks2, aes_ks3;
-int AES_cbc_128_encrypt_loop(void *args);
 int AES_cbc_128_encrypt_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_CBC_128_AES][j]); count++)
@@ -751,7 +769,6 @@ int AES_cbc_128_encrypt_loop(void *args) {
     return count;
 }
 
-int AES_cbc_192_encrypt_loop(void *args);
 int AES_cbc_192_encrypt_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_CBC_192_AES][j]); count++)
@@ -761,7 +778,6 @@ int AES_cbc_192_encrypt_loop(void *args) {
     return count;
 }
 
-int AES_cbc_256_encrypt_loop(void *args);
 int AES_cbc_256_encrypt_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_CBC_256_AES][j]); count++)
@@ -771,7 +787,6 @@ int AES_cbc_256_encrypt_loop(void *args) {
     return count;
 }
 
-int AES_ige_128_encrypt_loop(void *args);
 int AES_ige_128_encrypt_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_IGE_128_AES][j]); count++)
@@ -781,7 +796,6 @@ int AES_ige_128_encrypt_loop(void *args) {
     return count;
 }
 
-int AES_ige_192_encrypt_loop(void *args);
 int AES_ige_192_encrypt_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_IGE_192_AES][j]); count++)
@@ -791,7 +805,6 @@ int AES_ige_192_encrypt_loop(void *args) {
     return count;
 }
 
-int AES_ige_256_encrypt_loop(void *args);
 int AES_ige_256_encrypt_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_IGE_256_AES][j]); count++)
@@ -802,7 +815,6 @@ int AES_ige_256_encrypt_loop(void *args) {
 }
 
 static GCM128_CONTEXT *gcm_ctx;
-int CRYPTO_gcm128_aad_loop(void *args);
 int CRYPTO_gcm128_aad_loop(void *args) {
     int count;
     for (count = 0; COND(c[D_GHASH][j]); count++)
@@ -814,7 +826,6 @@ int CRYPTO_gcm128_aad_loop(void *args) {
 
 static int decrypt = 0;
 static int outl;
-int EVP_Update_loop(void *args);
 int EVP_Update_loop(void *args) {
     loopargs *tempargs = (loopargs *)args;
     int count;
@@ -837,7 +848,6 @@ int EVP_Update_loop(void *args) {
 
 static const EVP_MD *evp_md = NULL;
 static unsigned char md[EVP_MAX_MD_SIZE];
-int EVP_Digest_loop(void *args);
 int EVP_Digest_loop(void *args) {
     int count;
     for (count = 0;
@@ -852,7 +862,6 @@ static unsigned rsa_num;
 static RSA *rsa_key[RSA_NUM];
 static long rsa_c[RSA_NUM][2];
 
-int RSA_sign_loop(void *args);
 int RSA_sign_loop(void *args) {
     int ret, count;
     for (count = 0; COND(rsa_c[j][0]); count++) {
@@ -867,7 +876,6 @@ int RSA_sign_loop(void *args) {
     return count;
 }
 
-int RSA_verify_loop(void *args);
 int RSA_verify_loop(void *args) {
     int ret, count;
     for (count = 0; COND(rsa_c[j][1]); count++) {
@@ -887,7 +895,6 @@ int RSA_verify_loop(void *args) {
 static unsigned int kk;
 static DSA *dsa_key[DSA_NUM];
 static long dsa_c[DSA_NUM][2];
-int DSA_sign_loop(void *args);
 int DSA_sign_loop(void *args) {
     int ret, count;
     for (count = 0; COND(dsa_c[j][0]); count++) {
@@ -902,7 +909,6 @@ int DSA_sign_loop(void *args) {
     return count;
 }
 
-int DSA_verify_loop(void *args);
 int DSA_verify_loop(void *args) {
     int ret, count;
     for (count = 0; COND(dsa_c[j][1]); count++) {
@@ -923,7 +929,6 @@ static unsigned char ecdsasig[256];
 static unsigned int ecdsasiglen;
 static EC_KEY *ecdsa[EC_NUM];
 static long ecdsa_c[EC_NUM][2];
-int ECDSA_sign_loop(void *args);
 int ECDSA_sign_loop(void *args) {
     int ret, count;
     for (count = 0; COND(ecdsa_c[j][0]); count++) {
@@ -939,7 +944,6 @@ int ECDSA_sign_loop(void *args) {
     return count;
 }
 
-int ECDSA_verify_loop(void *args);
 int ECDSA_verify_loop(void *args) {
     int ret, count;
     for (count = 0; COND(ecdsa_c[j][1]); count++) {
@@ -961,7 +965,6 @@ static int outlen;
 static void *(*kdf) (const void *in, size_t inlen, void *out,
         size_t *xoutlen);
 
-int ECDH_compute_key_loop(void *args);
 int ECDH_compute_key_loop(void *args) {
     int count;
     for (count = 0; COND(ecdh_c[j][0]); count++) {
@@ -974,7 +977,6 @@ int ECDH_compute_key_loop(void *args) {
 #endif
 
 
-int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function)(void *));
 int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function)(void *)) {
     int error = 0;
     int count = 0;
