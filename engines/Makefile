@@ -31,17 +31,19 @@ AFLAGS= $(ASFLAGS)
 GENERAL=Makefile engines.com install.com engine_vector.mar
 
 LIB=$(TOP)/libcrypto.a
-LIBNAMES= 4758cca gmp padlock capi dasync
+LIBNAMES= 4758cca gmp padlock capi dasync afalg
 LIBSRC=	e_4758cca.c \
 	e_gmp.c \
 	e_padlock.c \
 	e_capi.c \
-	e_dasync.c
+	e_dasync.c \
+	e_afalg.c
 LIBOBJ= e_4758cca.o \
 	e_gmp.o \
 	e_padlock.o \
 	e_capi.o \
 	e_dasync.o \
+	e_afalg.o \
 	$(ENGINES_ASM_OBJ)
 
 TESTLIBNAMES= ossltest
@@ -58,7 +60,8 @@ HEADER=	e_4758cca_err.c e_4758cca_err.h \
 	e_ubsec_err.c e_ubsec_err.h \
 	e_capi_err.c e_capi_err.h \
 	e_ossltest_err.c e_ossltest_err.h \
-	e_dasync_err.c e_dasync_err.h
+	e_dasync_err.c e_dasync_err.h \
+	e_afalg_err.c e_afalg_err.h
 
 ALL=	$(GENERAL) $(SRC) $(HEADER)
 
