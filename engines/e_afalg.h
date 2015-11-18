@@ -16,10 +16,16 @@
 #define AES_KEY_SIZE_128 16
 #define AES_IV_LEN       16
 
+#define MAGIC_INIT_NUM 0x1890671
 struct afalg_ctx_st {
-    int fd;
+    int init_done;
+    int sfd;
 };
 typedef struct afalg_ctx_st afalg_ctx;
+
+static int afalg_create_bind_sk(void);
+static int afalg_set_iv_sk(int sfd, const unsigned char *iv, 
+                           const unsigned int len);
 
 /* Engine Lifetime functions */
 static int afalg_destroy(ENGINE *e);
@@ -30,7 +36,7 @@ int afalg_ciphers(ENGINE *e, const EVP_CIPHER **cipher,
                   const int **nids, int nid);
 STATIC int afalg_cipher_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
                              const unsigned char *iv, int enc);
-static int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
+STATIC int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
                            const unsigned char *in, size_t inl);
 static int afalg_cipher_cleanup(EVP_CIPHER_CTX *ctx);
 
