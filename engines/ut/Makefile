@@ -29,17 +29,20 @@ M_FILES= \
 
 T_FILES=${OPENSSL_UT}/test_e_afalg.c
 
+O_FILE=${OPENSSL_UT}/utest
+
 FLAGS +=-D_GNU_SOURCE_ -DAFALG_NO_UNIT_TEST -I${OPENSSL_INC} ${INC_DIRS_INTERNAL}
 
 ifdef RUN_UTEST
-all: exe run
+all: run
 else
 all: exe
 endif
 
 run: exe
-	./utest
+	@echo "------- Running Unit Tests ------"
+	@${O_FILE} 2>/dev/null 
 
 exe:
-	gcc -o utest ${FLAGS} ${T_FILES} ${S_FILES} ${M_FILES}
+	@gcc -o ${O_FILE} ${FLAGS} ${T_FILES} ${S_FILES} ${M_FILES}
 

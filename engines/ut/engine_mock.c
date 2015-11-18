@@ -39,6 +39,17 @@ int ENGINE_set_ciphers(ENGINE *e, ENGINE_CIPHERS_PTR f)
 #undef OPENSSL_free
 #define OPENSSL_free free
 
+
+void *CRYPTO_malloc(int num, const char* file, int line)
+{
+    return malloc(num);
+}
+
+void CRYPTO_free(void *ptr)
+{
+    free(ptr);
+}
+
 ENGINE *ENGINE_new(void)
 {
     ENGINE *ret;
@@ -71,3 +82,22 @@ int ENGINE_add(ENGINE *e)
 {
     return 1;
 }
+
+#include <openssl/evp.h>
+
+
+int EVP_CIPHER_CTX_iv_length(const EVP_CIPHER_CTX *ctx)
+{
+    return ctx->cipher->iv_len;
+}
+
+int EVP_CIPHER_CTX_nid(const EVP_CIPHER_CTX *ctx)
+{
+    return ctx->cipher->nid;
+}
+
+int EVP_CIPHER_CTX_key_length(const EVP_CIPHER_CTX *ctx)
+{
+    return ctx->key_len;
+}
+
