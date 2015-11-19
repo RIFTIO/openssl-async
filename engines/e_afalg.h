@@ -17,10 +17,18 @@
 #define AES_IV_LEN       16
 
 #define MAGIC_INIT_NUM 0x1890671
+#define MAX_INFLIGHTS 1
+
 struct afalg_ctx_st {
     int init_done;
     int sfd;
+    int efd;
+    unsigned int received, retrys, fdnotset, ring_fulls, failed;
+    aio_context_t aio_ctx;
+    struct io_event events[MAX_INFLIGHTS];
+    struct iocb cbt[MAX_INFLIGHTS];
 };
+
 typedef struct afalg_ctx_st afalg_ctx;
 
 static int afalg_create_bind_sk(void);
