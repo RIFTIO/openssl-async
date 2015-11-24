@@ -22,11 +22,9 @@
 struct afalg_ctx_st {
     int init_done;
     int sfd;
-    int efd;
-    unsigned int received, retrys, fdnotset, ring_fulls, failed;
-    aio_context_t aio_ctx;
-    struct io_event events[MAX_INFLIGHTS];
-    struct iocb cbt[MAX_INFLIGHTS];
+# ifdef ALG_USE_AIO
+    afalg_aio *aio;
+# endif
 };
 
 typedef struct afalg_ctx_st afalg_ctx;
