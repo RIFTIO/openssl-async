@@ -32,8 +32,6 @@ struct afalg_ctx_st {
 typedef struct afalg_ctx_st afalg_ctx;
 
 static int afalg_create_bind_sk(void);
-static int afalg_set_iv_sk(int sfd, const unsigned char *iv, 
-                           const unsigned int len);
 
 /* Engine Lifetime functions */
 static int afalg_destroy(ENGINE *e);

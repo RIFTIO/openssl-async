@@ -33,6 +33,8 @@
 #endif 
 
 #define ALG_IV_LEN(len) (sizeof(struct af_alg_iv) + (len))
+#define ALG_OP_TYPE     unsigned int
+#define ALG_OP_LEN      (sizeof(ALG_OP_TYPE))
 
 /* Engine Id and Name */
 static const char *engine_afalg_id = "afalg";
@@ -123,15 +125,13 @@ static int afalg_create_bind_sk(void)
     int r = -1;
 
     sfd = socket(AF_ALG, SOCK_SEQPACKET, 0);
-    if (sfd == -1)
-    {
+    if (sfd == -1) {
         perror("Failed to open socket");
         goto err;
     }
 
     r = bind(sfd, (struct sockaddr *)&sa, sizeof(sa));
-    if ( r < 0 )
-    {
+    if ( r < 0 ) {
         perror("Failed to bind socket");
         goto err;
     }
@@ -153,8 +153,7 @@ static int afalg_set_key_sk(int sfd, const unsigned char *key,
         return 0;
 
     r = setsockopt(sfd, SOL_ALG, ALG_SET_KEY, key, keylen);
-    if ( r < 0 )
-    {
+    if ( r < 0 ) {
         perror("Failed to set socket option");
         return -1;
     }
@@ -162,74 +161,25 @@ static int afalg_set_key_sk(int sfd, const unsigned char *key,
     return 1;
 }
 
-static int afalg_set_iv_sk(int sfd, const unsigned char *iv, 
-                           const unsigned int len)
+static inline void afalg_set_op_sk(struct cmsghdr *cmsg, const unsigned int op)
 {
-    struct msghdr msg = {};
-    struct cmsghdr *cmsg;
-    char *cbuf;
+    cmsg->cmsg_level = SOL_ALG;
+    cmsg->cmsg_type = ALG_SET_OP;
+    cmsg->cmsg_len = CMSG_LEN(ALG_OP_LEN);
+    *(ALG_OP_TYPE *)CMSG_DATA(cmsg) = op;
+}
+
+static void afalg_set_iv_sk(struct cmsghdr *cmsg, const unsigned char *iv, 
+                            const unsigned int len)
+{
     struct af_alg_iv *aiv;
-    int ret = 1;
-    int sbytes;
 
-    cbuf = (char *)OPENSSL_malloc(CMSG_SPACE(ALG_IV_LEN(len)));
-    if (!cbuf) {
-        ALG_WARN("Failed to allocate memory for cmsg\n");
-        return 0;
-    }
-
-    msg.msg_control = cbuf;
-    msg.msg_controllen = CMSG_SPACE(ALG_IV_LEN(len));
-
-    cmsg = CMSG_FIRSTHDR(&msg);
     cmsg->cmsg_level = SOL_ALG;
     cmsg->cmsg_type = ALG_SET_IV;
     cmsg->cmsg_len = CMSG_LEN(ALG_IV_LEN(len));
     aiv = (struct af_alg_iv *)CMSG_DATA(cmsg);
     aiv->ivlen = len;
     memcpy(aiv->iv, iv, len);
-    sbytes = sendmsg(sfd, &msg, 0);
-    if (sbytes < 0) {
-        perror("Sendmsg to set IV failed\n");
-        ret = 0;
-    }
-    
-    OPENSSL_free(cbuf);
-    return ret;
-}
-
-static int afalg_set_op_sk(int sfd, int enc)
-{
-    struct msghdr msg = {};
-    struct cmsghdr *cmsg;
-    char *cbuf;
-    int ret = 1;
-    int sbytes;
-
-    cbuf = (char *)OPENSSL_malloc(CMSG_SPACE(sizeof(unsigned int)));
-    if (!cbuf) {
-        ALG_WARN("Failed to allocate memory for cmsg\n");
-        return 0;
-    }
-
-    msg.msg_control = cbuf;
-    msg.msg_controllen = CMSG_SPACE(sizeof(unsigned int));
-
-    cmsg = CMSG_FIRSTHDR(&msg);
-    cmsg->cmsg_level = SOL_ALG;
-    cmsg->cmsg_type = ALG_SET_OP;
-    cmsg->cmsg_len = CMSG_LEN(sizeof(unsigned int));
-    *(unsigned int *)CMSG_DATA(cmsg) = enc;
-    
-    sbytes = sendmsg(sfd, &msg, 0);
-    if (sbytes < 0) {
-        perror("Sendmsg to set IV failed\n");
-        ret = 0;
-    }
-    
-    OPENSSL_free(cbuf);
-    return ret;
-    
 }
 
 static int afalg_socket(const unsigned char *key, const int klen,
@@ -246,8 +196,7 @@ static int afalg_socket(const unsigned char *key, const int klen,
     }
 
     ret = afalg_set_key_sk(bfd, key, klen);
-    if (ret < 1)
-    {
+    if (ret < 1) {
         ALG_WARN("Failed to set key\n");
         goto err;
     }
@@ -258,17 +207,8 @@ static int afalg_socket(const unsigned char *key, const int klen,
         goto err;
     }
 
-    if (iv) { 
-        ret = afalg_set_iv_sk(sfd, iv, ivlen);
-        if (ret < 1)
-            goto err;
-    }
-
-    ret = afalg_set_op_sk(sfd, 
-                           enc ? ALG_OP_ENCRYPT : ALG_OP_DECRYPT);
     if (ret < 1)                       
         goto err;
-    
     return sfd;
 
 err:
@@ -277,6 +217,149 @@ err:
     if (sfd >= 0)
         close (sfd);
     return -1;
+}
+
+static int afalg_start_cipher_sk(int sfd, const unsigned char *in, 
+                                 size_t inl, unsigned char *iv,
+                                 unsigned int ivlen, unsigned int enc)
+{
+    struct msghdr msg = {};
+    struct cmsghdr *cmsg;
+    char *cbuf;
+    struct iovec iov;
+    ssize_t sbytes;
+    int ret = 0;
+    
+    ssize_t cbuf_sz = CMSG_SPACE(ALG_IV_LEN(ivlen)) +
+                      CMSG_SPACE(ALG_OP_LEN);
+    cbuf = (char *)OPENSSL_malloc(cbuf_sz);
+    if (!cbuf) {
+        ALG_WARN("Failed to allocate memory for cmsg\n");
+        goto err;
+    }
+    /* Clear out the buffer to avoid surprises
+     * with CMSG_ macros. 
+     * */
+    memset(cbuf, 0, cbuf_sz);
+
+    msg.msg_control = cbuf;
+    msg.msg_controllen = cbuf_sz; 
+
+    cmsg = CMSG_FIRSTHDR(&msg);
+    afalg_set_op_sk(cmsg, enc);
+    cmsg = CMSG_NXTHDR(&msg, cmsg);
+    afalg_set_iv_sk(cmsg, iv, ivlen);
+
+    iov.iov_base = (unsigned char *)in;
+    iov.iov_len = inl;
+    msg.msg_flags = MSG_MORE;
+
+    msg.msg_iovlen = 1;
+    msg.msg_iov = &iov;
+    sbytes = sendmsg(sfd, &msg, 0);
+    if (sbytes < 0) {
+        perror("Sendmsg failed for cipher operation");
+        goto err;
+    }
+    
+    if(sbytes != inl)
+        ALG_WARN("Cipher operation send bytes %zd != inlen %zd\n", sbytes, inl);
+    
+    ret = 1;
+
+ err:
+    if(cbuf)
+        free(cbuf);
+    return ret;
+}
+
+static int afalg_fin_cipher_sk(afalg_ctx *actx, unsigned char* buf, size_t len)
+{
+# ifdef ALG_USE_AIO
+    int r;
+    struct iocb *cb;
+    struct timespec timeout;
+    struct io_event events[MAX_INFLIGHTS];
+
+    timeout.tv_sec = 0;
+    timeout.tv_nsec = 0;
+
+    cb = &(actx->cbt[0 % MAX_INFLIGHTS]);
+    memset(cb, '\0', sizeof(*cb));
+    cb->aio_fildes = actx->sfd;
+    cb->aio_lio_opcode = IOCB_CMD_PREAD;
+    cb->aio_buf = (unsigned long)buf;
+    cb->aio_offset = 0;
+    cb->aio_data = 0;
+    cb->aio_nbytes = len;
+    cb->aio_flags = IOCB_FLAG_RESFD;
+    cb->aio_resfd = actx->efd;
+    r = io_read(actx->aio_ctx, 1, &cb);
+    if (r < 0) {
+        perror("io_read failed for cipher operation");
+        return 0;
+    }
+    
+    do {
+        //ASYNC_pause_job();
+        r = io_getevents(actx->aio_ctx, 1, 1, events, &timeout);
+        if (r > 0) {
+            cb = (void*) events[0].obj;
+            cb->aio_fildes = 0;
+            if (events[0].res == -EBUSY)
+                actx->ring_fulls++;
+            else if (events[0].res != 0) {
+                printf("req failed with %d\n", events[0].res);
+                actx->failed++;
+            }
+        } else if (r < 0) {
+            perror("io_getevents failed");
+            return 0;
+        } else {
+            actx->retrys++;
+        }
+    } while (cb->aio_fildes != 0) ;
+
+# else /* ALG_USE_AIO */
+    struct msghdr msg = {};
+    struct iovec iov;
+    ssize_t rbytes;
+
+    iov.iov_base = buf;
+    iov.iov_len = len;
+
+    msg.msg_iovlen = 1;
+    msg.msg_iov = &iov;
+
+    rbytes = recvmsg(sfd, &msg, 0);
+    if (rbytes < 0) {
+        perror("Sendmsg failed for cipher operation");
+        return 0;
+    }
+    
+    if(rbytes != len)
+        ALG_WARN("Cipher operation send bytes %zd != inlen %zd\n", rbytes, len);
+#endif 
+    return 1;
+    
+}
+
+static int afalg_do_cipher_sk(afalg_ctx *actx, unsigned char *out,
+                              const unsigned char *in, size_t inl,
+                              unsigned char *iv, unsigned int ivlen,
+                              unsigned int enc)
+{
+    int ret;
+    
+    ret = afalg_start_cipher_sk(atcx->sfd, (unsigned char *)in, inl, iv, ivlen, enc);
+    if (ret < 1) {
+        goto err;
+    }
+
+    ret = afalg_fin_cipher_sk(actx, out, inl);
+
+ err:
+    return ret;
 }
 
 STATIC int afalg_cipher_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
@@ -323,101 +406,15 @@ STATIC int afalg_cipher_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
 
     actx->init_done = MAGIC_INIT_NUM; 
 
-    if (iv) 
-        memcpy(ctx->iv, iv, EVP_CIPHER_CTX_iv_length(ctx));
-    else
+    if (iv) {
+        memcpy(ctx->oiv, iv, EVP_CIPHER_CTX_iv_length(ctx));
+        memcpy(ctx->iv,  iv, EVP_CIPHER_CTX_iv_length(ctx));
+    } else {
+        memset(ctx->oiv, 0, EVP_CIPHER_CTX_iv_length(ctx));
         memset(ctx->iv, 0, EVP_CIPHER_CTX_iv_length(ctx));
-
-    return 1;
-}
-
-static int afalg_start_cipher_sk(int sfd, const unsigned char *in, size_t inl)
-{
-    struct msghdr msg = {};
-    struct iovec iov;
-    int sbytes;
-
-    iov.iov_base = (unsigned char *)in;
-    iov.iov_len = inl;
-    msg.msg_flags = MSG_MORE;
-
-    msg.msg_iovlen = 1;
-    msg.msg_iov = &iov;
-    sbytes = sendmsg(sfd, &msg, 0);
-    if (sbytes < 0) {
-        perror("Sendmsg failed for cipher operation");
-        return 0;
-    }
-    
-    if(sbytes != inl)
-        ALG_WARN("Cipher operation send bytes %d != inlen %d\n", sbytes, (int) inl);
-
-    return 1;
-}
-
-static int afalg_fin_cipher_sk(afalg_ctx *actx, unsigned char* buf, size_t len)
-{
-    int r;
-    struct iocb *cb;
-    struct timespec timeout;
-    struct io_event events[MAX_INFLIGHTS];
-
-    timeout.tv_sec = 0;
-    timeout.tv_nsec = 0;
-
-    cb = &(actx->cbt[0 % MAX_INFLIGHTS]);
-    memset(cb, '\0', sizeof(*cb));
-    cb->aio_fildes = actx->sfd;
-    cb->aio_lio_opcode = IOCB_CMD_PREAD;
-    cb->aio_buf = (unsigned long)buf;
-    cb->aio_offset = 0;
-    cb->aio_data = 0;
-    cb->aio_nbytes = len;
-    cb->aio_flags = IOCB_FLAG_RESFD;
-    cb->aio_resfd = actx->efd;
-    r = io_read(actx->aio_ctx, 1, &cb);
-    if (r < 0) {
-        perror("io_read failed for cipher operation");
-        return 0;
-    }
-    
-    do {
-        //ASYNC_pause_job();
-        r = io_getevents(actx->aio_ctx, 1, 1, events, &timeout);
-        if (r > 0) {
-            cb = (void*) events[0].obj;
-            cb->aio_fildes = 0;
-            if (events[0].res == -EBUSY)
-                actx->ring_fulls++;
-            else if (events[0].res != 0) {
-                printf("req failed with %d\n", events[0].res);
-                actx->failed++;
-            }
-        } else if (r < 0) {
-            perror("io_getevents failed");
-            return 0;
-        } else {
-            actx->retrys++;
-        }
-    } while (cb->aio_fildes != 0) ;
-
-    return 1;
-    
-}
-
-static int afalg_do_cipher_sk(afalg_ctx *actx, unsigned char *out,
-                              const unsigned char *in, size_t inl)
-{
-    int ret;
-    ret = afalg_start_cipher_sk(actx->sfd, (unsigned char *)in, inl);
-    if (ret < 1) {
-        goto err;
     }
 
-    ret = afalg_fin_cipher_sk(actx, out, inl);
-
-err:
-    return ret;
+    return 1;
 }
 
 STATIC int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
@@ -437,10 +434,20 @@ STATIC int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
         return 0;
     }
 
-    ret = afalg_do_cipher_sk(actx, out, in, inl);
+    ret = afalg_do_cipher_sk(actx, out, in, inl, 
+                             ctx->iv, EVP_CIPHER_CTX_iv_length(ctx),
+                             ctx->encrypt);
     if (ret < 1) {
         ALG_WARN("Socket cipher operation failed\n");
         return 0;
+    }
+
+    if (ctx->encrypt) {
+        memcpy(ctx->iv, out+(inl-EVP_CIPHER_CTX_iv_length(ctx)),
+               EVP_CIPHER_CTX_iv_length(ctx));
+    } else {
+        memcpy(ctx->iv, in+(inl-EVP_CIPHER_CTX_iv_length(ctx)),
+               EVP_CIPHER_CTX_iv_length(ctx));
     }
 
     return 1;
