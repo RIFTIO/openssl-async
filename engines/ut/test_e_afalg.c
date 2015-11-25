@@ -100,6 +100,8 @@ static void test_afalg_cipher_init(void)
     /* Non NULL IV should be copied in CTX */
     ret = afalg_cipher_init(ctx, key, iv, 1); 
     cmp = memcmp(ctx->oiv, iv, EVP_CIPHER_CTX_iv_length(ctx));
+    assert (cmp == 0 && "afalg_cipher_init failed Original IV fill test");
+    cmp = memcmp(ctx->oiv, iv, EVP_CIPHER_CTX_iv_length(ctx));
     assert (cmp == 0 && "afalg_cipher_init failed IV fill test");
     PRINT_INFO("%s: Passed IV Fill Test\n", s);
 
