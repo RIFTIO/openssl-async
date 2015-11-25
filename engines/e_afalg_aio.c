@@ -1,6 +1,21 @@
+/* Currently under this define until a way is
+ * found to selectively compile the file in openssl/engine/Makefile
+ * */
+# ifdef ALG_USE_AIO
+
 /* AIO headers */
+#include <stdio.h>
+#include <string.h>
+# define _GNU_SOURCE
+#include <unistd.h>
+
 #include <linux/aio_abi.h>
 #include <sys/syscall.h>
+#include <errno.h>
+
+#include <openssl/crypto.h>
+
+#define MAX_INFLIGHTS 1
 
 struct afalg_aio_st {
     int efd;
@@ -17,12 +32,15 @@ static inline int io_setup(unsigned n, aio_context_t *ctx)
     return syscall(__NR_io_setup, n, ctx);
 }
 
+static inline int eventfd(int n)
+{
+    return syscall(__NR_eventfd, n);
+}
 
 static inline int io_destroy(aio_context_t ctx)
 {
     return syscall(__NR_io_destroy, ctx);
 }
-
 
 static inline int io_read(aio_context_t ctx, long n,  struct iocb **iocb)
 {
@@ -37,55 +55,70 @@ static inline int io_getevents(aio_context_t ctx, long min, long max,
 }
 
 
-static inline int eventfd(int n)
+void * afalg_init_aio(void)
 {
-    return syscall(__NR_eventfd, n);
-}
+    int r = -1;
+    afalg_aio *aio;
 
-int afalg_aio(afalg_ctx *actx)
-{
-    int r=-1;
-
-    /* Initialise for AIO */
-    actx->aio_ctx = 0;
-    r = io_setup(MAX_INFLIGHTS, &actx->aio_ctx);
-    if (r < 0) {
-        perror("io_setup error");
-        return 0;
+    aio = (afalg_aio *)OPENSSL_malloc(sizeof(afalg_aio));
+    if(!aio) {
+       fprintf(stderr, "Failed to allocate memory for afalg_aio\n");
+       goto err;
     }
 
-    actx->efd = eventfd(0);
-    actx->received = 0;
-    actx->retrys = 0;
-    actx->fdnotset = 0;
-    actx->ring_fulls = 0;
-    actx->failed = 0;
-    memset(actx->cbt, 0, sizeof(actx->cbt));
 
-    return 1;
+    /* Initialise for AIO */
+    aio->aio_ctx = 0;
+    r = io_setup(MAX_INFLIGHTS, &aio->aio_ctx);
+    if (r < 0) {
+        perror("io_setup error");
+        r = 0;
+        goto err;
+    }
+
+    aio->efd = eventfd(0);
+    aio->received = 0;
+    aio->retrys = 0;
+    aio->fdnotset = 0;
+    aio->ring_fulls = 0;
+    aio->failed = 0;
+    memset(aio->cbt, 0, sizeof(aio->cbt));
+    
+    return (void *)aio;
+
+ err:
+    if(aio)
+        free(aio);
+    return NULL;
 }
 
-static int afalg_fin_cipher_aio(afalg_ctx *actx, unsigned char* buf, size_t len)
+int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char* buf, size_t len)
 {
     int r;
     struct iocb *cb;
     struct timespec timeout;
     struct io_event events[MAX_INFLIGHTS];
+    afalg_aio *aio = (afalg_aio *)ptr;
+    
+    if(!aio) {
+        fprintf(stderr, "%s:ALG AIO CTX Null Pointer\n", __func__);
+        return 0;
+    }
 
     timeout.tv_sec = 0;
     timeout.tv_nsec = 0;
 
-    cb = &(actx->cbt[0 % MAX_INFLIGHTS]);
+    cb = &(aio->cbt[0 % MAX_INFLIGHTS]);
     memset(cb, '\0', sizeof(*cb));
-    cb->aio_fildes = actx->sfd;
+    cb->aio_fildes = sfd;
     cb->aio_lio_opcode = IOCB_CMD_PREAD;
     cb->aio_buf = (unsigned long)buf;
     cb->aio_offset = 0;
     cb->aio_data = 0;
     cb->aio_nbytes = len;
     cb->aio_flags = IOCB_FLAG_RESFD;
-    cb->aio_resfd = actx->efd;
-    r = io_read(actx->aio_ctx, 1, &cb);
+    cb->aio_resfd = aio->efd;
+    r = io_read(aio->aio_ctx, 1, &cb);
     if (r < 0) {
         perror("io_read failed for cipher operation");
         return 0;
@@ -93,28 +126,34 @@ static int afalg_fin_cipher_aio(afalg_ctx *actx, unsigned char* buf, size_t len)
     
     do {
         //ASYNC_pause_job();
-        r = io_getevents(actx->aio_ctx, 1, 1, events, &timeout);
+        r = io_getevents(aio->aio_ctx, 1, 1, events, &timeout);
         if (r > 0) {
             cb = (void*) events[0].obj;
             cb->aio_fildes = 0;
             if (events[0].res == -EBUSY)
-                actx->ring_fulls++;
+                aio->ring_fulls++;
             else if (events[0].res != 0) {
-                printf("req failed with %d\n", events[0].res);
-                actx->failed++;
+                printf("req failed with %lld\n", events[0].res);
+                aio->failed++;
             }
         } else if (r < 0) {
             perror("io_getevents failed");
             return 0;
         } else {
-            actx->retrys++;
+            aio->retrys++;
         }
     } while (cb->aio_fildes != 0) ;
+
+    return 1;
 }
 
-int afalg_cipher_cleanup_aio(afalg_aio *aio)
+void afalg_cipher_cleanup_aio(void *ptr)
 {
+    afalg_aio *aio = (afalg_aio *)ptr;
     close(aio->efd);
     //close(aio->bfd);
     io_destroy(aio->aio_ctx); 
+    free(aio);
 }
+
+#endif /* ALG_USE_AIO */

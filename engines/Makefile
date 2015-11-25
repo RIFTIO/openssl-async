@@ -44,6 +44,7 @@ LIBOBJ= e_4758cca.o \
 	e_capi.o \
 	e_dasync.o \
 	e_afalg.o \
+	e_afalg_aio.o \
 	$(ENGINES_ASM_OBJ)
 
 TESTLIBNAMES= ossltest

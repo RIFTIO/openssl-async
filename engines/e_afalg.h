@@ -17,13 +17,12 @@
 #define AES_IV_LEN       16
 
 #define MAGIC_INIT_NUM 0x1890671
-#define MAX_INFLIGHTS 1
 
 struct afalg_ctx_st {
     int init_done;
     int sfd;
 # ifdef ALG_USE_AIO
-    afalg_aio *aio;
+    void *aio;
 # endif
 };
 
