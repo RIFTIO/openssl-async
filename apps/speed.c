@@ -1412,11 +1412,19 @@ int speed_main(int argc, char **argv)
         goto end;
     }
 
+    if (async_jobs > 0) {
+        if (!ASYNC_init(1, async_jobs, async_jobs)) {
+            BIO_printf(bio_err, "Error creating the ASYNC job pool\n");
+            goto end;
+        }
+    }
+
     array_loopargs = app_malloc((!async_jobs ? 1 : async_jobs) * sizeof(loopargs*), "array of loopargs*");
     for (i = 0; i < (!async_jobs ? 1 : async_jobs); i++) {
         array_loopargs[i] = app_malloc((sizeof(loopargs)), "an individual looparg structure");
         memset(array_loopargs[i], 0, sizeof(loopargs));
     }
+
 
 #ifndef NO_FORK
     if (multi && do_multi(multi))
@@ -2570,6 +2578,8 @@ int speed_main(int argc, char **argv)
         EC_KEY_free(ecdh_b[i]);
     }
 #endif
+    if (async_jobs > 0)
+        ASYNC_cleanup(1);
     return (ret);
 }
 
