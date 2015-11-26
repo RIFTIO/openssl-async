@@ -1024,8 +1024,8 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
     }
 
     while (num_inprogress > 0) {
-#ifdef ASYNC_POSIX
         OSSL_ASYNC_FD job_fd = 0;
+#ifdef ASYNC_POSIX
         OSSL_ASYNC_FD max_fd = 0;
         int select_result = 0;
         fd_set waitfdset;
