@@ -994,7 +994,7 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
     int total_op_count = 0;
     int num_inprogress = 0;
     int error = 0;
-    int j = 0;
+    int i = 0;
 
     run = 1;
 
@@ -1002,8 +1002,8 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
         return loop_function((void *)array_loopargs[0]);
     }
 
-    for (j=0; j < async_jobs && !error; j++) {
-        switch (ASYNC_start_job(&(array_loopargs[j]->inprogress_job), &job_op_count, loop_function, (void *)array_loopargs[j], sizeof(loopargs))) {
+    for (i=0; i < async_jobs && !error; i++) {
+        switch (ASYNC_start_job(&(array_loopargs[i]->inprogress_job), &job_op_count, loop_function, (void *)array_loopargs[i], sizeof(loopargs))) {
             case ASYNC_PAUSE:
                 ++num_inprogress;
                 break;
@@ -1034,9 +1034,9 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
         select_timeout.tv_sec=0;
         select_timeout.tv_usec=0;
 
-        for (j = 0; j < async_jobs; j++) {
-            if (array_loopargs[j]->inprogress_job) {
-                job_fd = ASYNC_get_wait_fd(array_loopargs[j]->inprogress_job);
+        for (i = 0; i < async_jobs; i++) {
+            if (array_loopargs[i]->inprogress_job) {
+                job_fd = ASYNC_get_wait_fd(array_loopargs[i]->inprogress_job);
                 FD_SET(job_fd, &waitfdset);
                 if (job_fd > max_fd)
                     max_fd = job_fd;
@@ -1058,15 +1058,15 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
             continue;
 #endif
 
-        for (j = 0; j < async_jobs; j++) {
+        for (i = 0; i < async_jobs; i++) {
 #ifdef ASYNC_WIN
             DWORD avail = 0;
 #endif
 
-            if (NULL == array_loopargs[j]->inprogress_job)
+            if (NULL == array_loopargs[i]->inprogress_job)
                 continue;
 
-            job_fd = ASYNC_get_wait_fd(array_loopargs[j]->inprogress_job);
+            job_fd = ASYNC_get_wait_fd(array_loopargs[i]->inprogress_job);
 
 #ifdef ASYNC_POSIX
             if (!FD_ISSET(job_fd, &waitfdset))
@@ -1076,8 +1076,8 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
                 continue;
 #endif
 
-            switch (ASYNC_start_job(&(array_loopargs[j]->inprogress_job),
-                        &job_op_count, loop_function, (void *)array_loopargs[j],
+            switch (ASYNC_start_job(&(array_loopargs[i]->inprogress_job),
+                        &job_op_count, loop_function, (void *)array_loopargs[i],
                         sizeof(loopargs))) {
                 case ASYNC_PAUSE:
                     break;
@@ -1088,12 +1088,12 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
                         total_op_count += job_op_count;
                     }
                     --num_inprogress;
-                    array_loopargs[j]->inprogress_job = NULL;
+                    array_loopargs[i]->inprogress_job = NULL;
                     break;
                 case ASYNC_NO_JOBS:
                 case ASYNC_ERR:
                     --num_inprogress;
-                    array_loopargs[j]->inprogress_job = NULL;
+                    array_loopargs[i]->inprogress_job = NULL;
                     BIO_printf(bio_err, "Failure in the job\n");
                     ERR_print_errors(bio_err);
                     error = 1;
