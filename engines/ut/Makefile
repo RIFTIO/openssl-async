@@ -1,10 +1,10 @@
 DEBUG=1
 
-OPENSSL_DIR=/opt/ws/git_workspace/fibre
+OPENSSL_DIR=/root/clucey/afalg_proto/isg_cid-openssl_async
 OPENSSL_ENG=${OPENSSL_DIR}/engines
 OPENSSL_UT=${OPENSSL_ENG}/ut
 OPENSSL_INS=${OPENSSL_DIR}/install
-OPENSSL_INC=${OPENSSL_INS}/include
+OPENSSL_INC=${OPENSSL_DIR}/include
 
 
 ifdef DEBUG
@@ -25,6 +25,7 @@ S_FILES= \
 
 M_FILES= \
 	${OPENSSL_UT}/error_mock.c \
+	${OPENSSL_UT}/async_mock.c \
 	${OPENSSL_UT}/engine_mock.c \
 
 T_FILES=${OPENSSL_UT}/test_e_afalg.c

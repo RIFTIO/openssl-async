@@ -75,6 +75,7 @@ int ASYNC_start_job(ASYNC_JOB **job, int *ret, int (*func)(void *),
 int ASYNC_pause_job(void);
 
 int ASYNC_get_wait_fd(ASYNC_JOB *job);
+void ASYNC_set_wait_fd(ASYNC_JOB *job, int fd);
 ASYNC_JOB *ASYNC_get_current_job(void);
 void ASYNC_wake(ASYNC_JOB *job);
 void ASYNC_clear_wake(ASYNC_JOB *job);
