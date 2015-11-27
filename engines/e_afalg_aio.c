@@ -14,6 +14,7 @@
 #include <errno.h>
 
 #include <openssl/crypto.h>
+#include <openssl/async.h>
 
 #define MAX_INFLIGHTS 1
 
@@ -66,7 +67,6 @@ void * afalg_init_aio(void)
        goto err;
     }
 
-
     /* Initialise for AIO */
     aio->aio_ctx = 0;
     r = io_setup(MAX_INFLIGHTS, &aio->aio_ctx);
@@ -99,6 +99,8 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char* buf, size_t len)
     struct timespec timeout;
     struct io_event events[MAX_INFLIGHTS];
     afalg_aio *aio = (afalg_aio *)ptr;
+    ASYNC_JOB *job;
+    u_int64_t eval = 0;
     
     if(!aio) {
         fprintf(stderr, "%s:ALG AIO CTX Null Pointer\n", __func__);
@@ -118,6 +120,11 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char* buf, size_t len)
     cb->aio_nbytes = len;
     cb->aio_flags = IOCB_FLAG_RESFD;
     cb->aio_resfd = aio->efd;
+
+    if((job = ASYNC_get_current_job()) != NULL) {
+        ASYNC_set_wait_fd(job, aio->efd);
+    }
+
     r = io_read(aio->aio_ctx, 1, &cb);
     if (r < 0) {
         perror("io_read failed for cipher operation");
@@ -125,22 +132,26 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char* buf, size_t len)
     }
     
     do {
-        //ASYNC_pause_job();
-        r = io_getevents(aio->aio_ctx, 1, 1, events, &timeout);
-        if (r > 0) {
-            cb = (void*) events[0].obj;
-            cb->aio_fildes = 0;
-            if (events[0].res == -EBUSY)
-                aio->ring_fulls++;
-            else if (events[0].res != 0) {
-                printf("req failed with %lld\n", events[0].res);
-                aio->failed++;
-            }
-        } else if (r < 0) {
-            perror("io_getevents failed");
-            return 0;
-        } else {
-            aio->retrys++;
+        ASYNC_pause_job();
+/* TODO: should this read be made non-blocking? what is best in sync mode? */
+        r = read(aio->efd, &eval, sizeof(eval));
+        if (r>=0 && eval > 0) {
+            r = io_getevents(aio->aio_ctx, 1, 1, events, &timeout);
+            if (r > 0) {
+                cb = (void*) events[0].obj;
+                cb->aio_fildes = 0;
+                if (events[0].res == -EBUSY)
+                    aio->ring_fulls++;
+                else if (events[0].res != 0) {
+                    printf("req failed with %lld\n", events[0].res);
+                    aio->failed++;
+                }
+            } else if (r < 0) {
+                perror("io_getevents failed");
+                return 0;
+            } else {
+                aio->retrys++;
+            }   
         }
     } while (cb->aio_fildes != 0) ;
 

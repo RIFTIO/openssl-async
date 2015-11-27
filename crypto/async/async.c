@@ -212,6 +212,7 @@ int ASYNC_start_job(ASYNC_JOB **job, int *ret, int (*func)(void *),
         async_get_ctx()->currjob = *job;
     }
 
+
     for (;;) {
         if (async_get_ctx()->currjob != NULL) {
             if (async_get_ctx()->currjob->status == ASYNC_JOB_STOPPING) {
@@ -248,7 +249,6 @@ int ASYNC_start_job(ASYNC_JOB **job, int *ret, int (*func)(void *),
             *job = NULL;
             return ASYNC_ERR;
         }
-
         /* Start a new job */
         if ((async_get_ctx()->currjob = async_get_pool_job()) == NULL) {
             return ASYNC_NO_JOBS;
@@ -390,6 +390,11 @@ ASYNC_JOB *ASYNC_get_current_job(void)
 int ASYNC_get_wait_fd(ASYNC_JOB *job)
 {
     return job->wait_fd;
+}
+
+void ASYNC_set_wait_fd(ASYNC_JOB *job, int fd)
+{
+    job->wait_fd = fd;
 }
 
 void ASYNC_wake(ASYNC_JOB *job)
