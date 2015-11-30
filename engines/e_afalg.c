@@ -1,5 +1,5 @@
 /* Based on engines/e_dasync.c */
-
+#define _GNU_SOURCE /* for vmsplice */
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -11,6 +11,8 @@
 /* AF_ALG Socket based headers */
 #include <linux/if_alg.h>
 #include <sys/socket.h>
+#include <fcntl.h>
+#include <sys/uio.h> 
 
 #include "e_afalg.h"
 
@@ -27,6 +29,13 @@
 #ifndef SOL_ALG
 #define SOL_ALG 279
 #endif 
+
+#ifdef ALG_ZERO_COPY 
+/* For zero copy mode */
+#ifndef SPLICE_F_GIFT 
+#define SPLICE_F_GIFT    (0x08)    /* pages passed in are a gift */
+#endif
+#endif
 
 #define ALG_IV_LEN(len) (sizeof(struct af_alg_iv) + (len))
 #define ALG_OP_TYPE     unsigned int
@@ -79,7 +88,7 @@ static int afalg_create_bind_sk(void)
         perror("Failed to open socket");
         goto err;
     }
-
+    
     r = bind(sfd, (struct sockaddr *)&sa, sizeof(sa));
     if ( r < 0 ) {
         perror("Failed to bind socket");
@@ -169,7 +178,7 @@ err:
     return -1;
 }
 
-static int afalg_start_cipher_sk(int sfd, const unsigned char *in, 
+static int afalg_start_cipher_sk(afalg_ctx *actx, const unsigned char *in, 
                                  size_t inl, unsigned char *iv,
                                  unsigned int ivlen, unsigned int enc)
 {
@@ -179,7 +188,7 @@ static int afalg_start_cipher_sk(int sfd, const unsigned char *in,
     struct iovec iov;
     ssize_t sbytes;
     int ret = 0;
-    
+
     ssize_t cbuf_sz = CMSG_SPACE(ALG_IV_LEN(ivlen)) +
                       CMSG_SPACE(ALG_OP_LEN);
     cbuf = (char *)OPENSSL_malloc(cbuf_sz);
@@ -204,9 +213,35 @@ static int afalg_start_cipher_sk(int sfd, const unsigned char *in,
     iov.iov_len = inl;
     msg.msg_flags = MSG_MORE;
 
+#ifdef ALG_ZERO_COPY  
+//ZERO_COPY mode
+//OPENS: out of place processing (i.e. out != in)
+//       alignment effects
+
+    msg.msg_iovlen = 0;
+    msg.msg_iov = NULL;
+
+    sbytes = sendmsg(actx->sfd, &msg, 0);
+    if (sbytes < 0) {
+        perror("Sendmsg failed for zero copy cipher operation");
+        goto err;
+    }
+
+    ret = vmsplice(actx->zc_pipe[1], &iov, 1, SPLICE_F_GIFT);
+    if (ret < 0) {
+        printf("vmsplice returned Error: %d\n", errno);
+        goto err;
+    }
+    ret = splice(actx->zc_pipe[0], NULL, actx->sfd, NULL, inl, 0);
+    if (ret < 0) {
+        printf("splice returned Error: %d\n", errno);
+        goto err ;
+    }
+#else
     msg.msg_iovlen = 1;
     msg.msg_iov = &iov;
-    sbytes = sendmsg(sfd, &msg, 0);
+
+    sbytes = sendmsg(actx->sfd, &msg, 0);
     if (sbytes < 0) {
         perror("Sendmsg failed for cipher operation");
         goto err;
@@ -214,7 +249,8 @@ static int afalg_start_cipher_sk(int sfd, const unsigned char *in,
     
     if(sbytes != inl)
         ALG_WARN("Cipher operation send bytes %zd != inlen %zd\n", sbytes, inl);
-    
+#endif    
+
     ret = 1;
 
  err:
@@ -238,8 +274,8 @@ static int afalg_fin_cipher_sk(afalg_ctx *actx, unsigned char* buf, size_t len)
 
     rbytes = recvmsg(actx->sfd, &msg, 0);
     if (rbytes < 0) {
-        perror("Sendmsg failed for cipher operation");
-        return 0;
+            perror("Recvmsg failed for cipher operation");
+            return 0;
     }
     
     if(rbytes != len)
@@ -256,7 +292,7 @@ static int afalg_do_cipher_sk(afalg_ctx *actx, unsigned char *out,
 {
     int ret;
     
-    ret = afalg_start_cipher_sk(actx->sfd, (unsigned char *)in, inl, iv, ivlen, enc);
+    ret = afalg_start_cipher_sk(actx, (unsigned char *)in, inl, iv, ivlen, enc);
     if (ret < 1) {
         goto err;
     }
@@ -314,6 +350,10 @@ STATIC int afalg_cipher_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
     if(!actx->aio) {
         return 0;
     }
+#endif
+
+#ifdef ALG_ZERO_COPY
+    pipe(actx->zc_pipe);
 #endif
 
     actx->init_done = MAGIC_INIT_NUM; 
@@ -382,7 +422,10 @@ static int afalg_cipher_cleanup(EVP_CIPHER_CTX *ctx)
     }
 
     close(actx->sfd);
-
+#ifdef ALG_ZERO_COPY 
+    close(actx->zc_pipe[0]);
+    close(actx->zc_pipe[1]);
+#endif
 # ifdef ALG_USE_AIO
     afalg_cipher_cleanup_aio(actx->aio);
 # endif    
@@ -425,11 +468,12 @@ static int bind_afalg(ENGINE *e)
         AFALGerr(AFALG_F_BIND_AFALG, AFALG_R_INIT_FAILED);
         return 0;
     }
-
+#if 1
     if (!ENGINE_set_ciphers(e, afalg_ciphers)) {
         AFALGerr(AFALG_F_BIND_AFALG, AFALG_R_INIT_FAILED);
         return 0;
     }
+#endif
 
     return 1;
 }
