@@ -420,7 +420,9 @@ OPTIONS speed_options[] = {
 #ifndef NO_FORK
     {"multi", OPT_MULTI, 'p', "Run benchmarks in parallel"},
 #endif
+#ifndef ASYNC_NULL
     {"async_jobs", OPT_ASYNCJOBS, 'p', "Enable async mode and start N jobs"},
+#endif
 #ifndef OPENSSL_NO_ENGINE
     {"engine", OPT_ENGINE, 's', "Use engine, possibly a hardware device"},
 #endif
@@ -1327,7 +1329,9 @@ int speed_main(int argc, char **argv)
 #endif
             break;
         case OPT_ASYNCJOBS:
+#ifndef ASYNC_NULL
             async_jobs = atoi(opt_arg());
+#endif
             break;
         case OPT_MISALIGN:
             if (!opt_int(opt_arg(), &misalign))
