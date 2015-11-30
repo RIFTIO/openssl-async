@@ -1004,8 +1004,9 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
         return loop_function((void *)array_loopargs[0]);
     }
 
-    for (i=0; i < async_jobs && !error; i++) {
-        switch (ASYNC_start_job(&(array_loopargs[i]->inprogress_job), &job_op_count, loop_function, (void *)array_loopargs[i], sizeof(loopargs))) {
+    for (i = 0; i < async_jobs && !error; i++) {
+        switch (ASYNC_start_job(&(array_loopargs[i]->inprogress_job), &job_op_count,
+                                loop_function, (void *)array_loopargs[i], sizeof(loopargs))) {
             case ASYNC_PAUSE:
                 ++num_inprogress;
                 break;
@@ -1027,7 +1028,7 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
 
     while (num_inprogress > 0) {
         OSSL_ASYNC_FD job_fd = 0;
-#ifdef ASYNC_POSIX
+#if defined(ASYNC_POSIX)
         OSSL_ASYNC_FD max_fd = 0;
         int select_result = 0;
         fd_set waitfdset;
@@ -1058,22 +1059,21 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
 
         if (select_result == 0)
             continue;
+
+#elif defined(ASYNC_WIN)
+        DWORD avail = 0;
 #endif
 
         for (i = 0; i < async_jobs; i++) {
-#ifdef ASYNC_WIN
-            DWORD avail = 0;
-#endif
-
             if (NULL == array_loopargs[i]->inprogress_job)
                 continue;
 
             job_fd = ASYNC_get_wait_fd(array_loopargs[i]->inprogress_job);
 
-#ifdef ASYNC_POSIX
+#if defined(ASYNC_POSIX)
             if (!FD_ISSET(job_fd, &waitfdset))
                 continue;
-#else
+#elif defined(ASYNC_WIN)
             if (!PeekNamedPipe(job_fd, NULL, 0, NULL, &avail, NULL) && avail > 0)
                 continue;
 #endif
