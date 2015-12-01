@@ -1440,7 +1440,7 @@ int speed_main(int argc, char **argv)
     }
 
     if (async_jobs > 0) {
-        if (!ASYNC_init(1, async_jobs, async_jobs)) {
+        if (!ASYNC_init(1, 0, 0)) {
             BIO_printf(bio_err, "Error creating the ASYNC job pool\n");
             goto end;
         }
