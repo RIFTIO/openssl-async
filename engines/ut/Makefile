@@ -1,6 +1,10 @@
 DEBUG=1
 
+ifneq ($(wildcard /root/clucey/afalg_proto/isg_cid-openssl_async/),)
 OPENSSL_DIR=/root/clucey/afalg_proto/isg_cid-openssl_async
+else
+OPENSSL_DIR=/opt/ws/git_workspace/fibre
+endif
 OPENSSL_ENG=${OPENSSL_DIR}/engines
 OPENSSL_UT=${OPENSSL_ENG}/ut
 OPENSSL_INS=${OPENSSL_DIR}/install
