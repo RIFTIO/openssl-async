@@ -2597,7 +2597,7 @@ int SSL_get_error(const SSL *s, int i)
                 else if (s->s3->outstanding_read_records)
                     return (SSL_ERROR_WANT_READ);
                 else if (ERR_R_RETRY == ERR_GET_REASON(l))
-                    return (SSL_ERROR_WAIT_ASYNCH_READ);
+                    return (SSL_ERROR_WANT_ASYNCH_READ);
             } else
                 return (SSL_ERROR_SYSCALL); /* unknown */
         } else if (s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH) {
@@ -2608,7 +2608,7 @@ int SSL_get_error(const SSL *s, int i)
             else if (s->s3->outstanding_read_records)
                 return (SSL_ERROR_WANT_READ);
             else if (ERR_R_RETRY == ERR_GET_REASON(l))
-                return (SSL_ERROR_WAIT_ASYNCH_READ);
+                return (SSL_ERROR_WANT_ASYNCH_READ);
         }
     }
 
@@ -2652,9 +2652,14 @@ int SSL_get_error(const SSL *s, int i)
     if ((i < 0) && SSL_want_x509_lookup(s)) {
         return (SSL_ERROR_WANT_X509_LOOKUP);
     }
-    if ((i < 0) && s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH
-        && s->s3->pkeystate != 0) {
-        return (SSL_ERROR_WAIT_ASYNCH);
+    if ((i < 0) && s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH) {
+        if( s->s3->pkeystate == 2) {
+            /* retry happens */
+            return (SSL_ERROR_WANT_ASYNCH);
+        }
+        else if( s->s3->pkeystate != 0) {
+            return (SSL_ERROR_WAIT_ASYNCH);
+        }
     }
 
     /*

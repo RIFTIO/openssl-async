@@ -1667,6 +1667,9 @@ static int ssl3_send_server_key_exchange_md_post(unsigned char *md,
     s->s3->send_server_key_exchange.status = status;
     s->s3->pkeystate = 10;
     s->s3->send_server_key_exchange.i = size;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,md,size,s,NULL);
+    }
     return 1;
 }
 
@@ -1675,6 +1678,9 @@ static int ssl3_send_server_key_exchange_dh_post(unsigned char *res,
                                                  int status)
 {
     s->s3->pkeystate = 4;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,res,reslen,s,NULL);
+    }
     return 1;
 }
 
@@ -1683,6 +1689,9 @@ static int ssl3_send_server_key_exchange_ecdh_gen_post(unsigned char *res,
                                                        int status)
 {
     s->s3->pkeystate = 5;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,res,reslen,s,NULL);
+    }
     return 1;
 }
 
@@ -1692,6 +1701,9 @@ static int ssl3_send_server_key_exchange_pkey_post(unsigned char *res,
 {
     s->s3->send_server_key_exchange.status = status;
     s->s3->pkeystate = 3;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,res,reslen,s,NULL);
+    }
     return 1;
 }
 
@@ -1700,6 +1712,9 @@ static int ssl3_send_server_key_exchange_post(unsigned char *res,
                                               int status)
 {
     s->s3->pkeystate = 1;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,res,reslen,s,NULL);
+    }
     return 1;
 }
 
@@ -2541,6 +2556,9 @@ static int ssl3_get_client_key_exchange_post(unsigned char *res,
     s->s3->get_client_key_exchange.p = res;
     s->s3->get_client_key_exchange.n = (int)reslen;
     s->s3->pkeystate = 1;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,res,reslen,s,NULL);
+    }
     return 1;
 }
 
@@ -3694,6 +3712,9 @@ static int ssl3_get_cert_verify_post(SSL *s, int status)
 {
     s->s3->get_cert_verify.status = status;
     s->s3->pkeystate = 1;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,NULL,0,s,NULL);
+    }
     return 1;
 }
 

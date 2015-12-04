@@ -1731,6 +1731,8 @@ DECLARE_PEM_rw(SSL_SESSION, SSL_SESSION)
 # define SSL_ERROR_WAIT_ASYNCH_READ      9
 # define SSL_ERROR_WAIT_ASYNCH_WRITE     10
 # define SSL_ERROR_WAIT_ASYNCH           11
+# define SSL_ERROR_WANT_ASYNCH_READ      12
+# define SSL_ERROR_WANT_ASYNCH           13
 # define SSL_CTRL_NEED_TMP_RSA                   1
 # define SSL_CTRL_SET_TMP_RSA                    2
 # define SSL_CTRL_SET_TMP_DH                     3

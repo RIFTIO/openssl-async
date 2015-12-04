@@ -225,6 +225,7 @@ static int ssl_read(BIO *b, char *out, int outl)
         retry_reason = BIO_RR_CONNECT;
         break;
 
+    case SSL_ERROR_WANT_ASYNCH_READ:
     case SSL_ERROR_WAIT_ASYNCH_READ:
         if (sb->ssl->s3 && sb->ssl->s3->flags & SSL3_FLAGS_ASYNCH) {
             if (sb->ssl->s3->async_retry_flag
@@ -316,6 +317,7 @@ static int ssl_write(BIO *b, const char *out, int outl)
          * The following need to simply break with no reason. They do mean
          * there's something to read, just not from the underlying bio.
          */
+    case SSL_ERROR_WANT_ASYNCH_READ:
     case SSL_ERROR_WAIT_ASYNCH_READ:
         if (bs->ssl->s3 && bs->ssl->s3->flags & SSL3_FLAGS_ASYNCH) {
             if (bs->ssl->s3->async_retry_flag

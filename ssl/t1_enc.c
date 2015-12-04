@@ -183,6 +183,9 @@ int tls1_generate_key_block_post(unsigned char *res, size_t reslen,
         return 0;
     s->s3->get_client_key_exchange.status = status;
     s->s3->pkeystate = PRF_GENERATE_KEY_BLOCK_STATE;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,res,reslen,s,NULL);
+    }   
     return status;
 }
 
@@ -965,6 +968,9 @@ int tls1_final_finish_mac_post(unsigned char *res, size_t reslen,
     s->s3->get_client_key_exchange.status = status;
     s->s3->get_client_key_exchange.n = reslen;
     s->s3->pkeystate = PRF_FINAL_FINISH_STATE;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,res,reslen,s,NULL);
+    }   
     return status;
 }
 
@@ -1196,6 +1202,9 @@ int tls1_generate_master_secret_post(unsigned char *res, size_t reslen,
     s->s3->get_client_key_exchange.status = status;
     s->s3->pkeystate = PRF_GENERATE_MASTER_SECRET_STATE;
     s->session->master_key_length = reslen;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,res,reslen,s,NULL);
+    }   
     return status;
 }
 

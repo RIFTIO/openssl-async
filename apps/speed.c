@@ -232,6 +232,7 @@
 #  define NO_FORK
 # endif
 
+
 # undef BUFSIZE
 # define BUFSIZE ((long)1024*16+1)
 
@@ -398,12 +399,13 @@ static int async_verify_cb(void *vparams, int status)
     return 1;
 }
 
+
+
 static int poll_engine(ENGINE *eng, CallbackStats_t * cb_stats,
                        unsigned int no_resp)
 {
     int poll_status = 0;
     unsigned int initial_resp = cb_stats->resp;
-
     /* Poll for the responses */
     while ((poll_status == 0) && (cb_stats->resp != cb_stats->req)) {
         if (!ENGINE_ctrl_cmd(eng, "POLL", 0, &poll_status, NULL, 0)) {
@@ -1514,7 +1516,7 @@ int MAIN(int argc, char **argv)
 
     if ((NULL == engine) && (async))
         goto end;
-# endif
+# endif /* OPENSSL_NO_ENGINE */
 
     if (j == 0) {
         for (i = 0; i < ALGOR_NUM; i++) {
