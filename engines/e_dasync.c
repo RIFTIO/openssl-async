@@ -75,7 +75,6 @@ static int dasync_init(ENGINE *e);
 static int dasync_finish(ENGINE *e);
 void ENGINE_load_dasync(void);
 
-
 /* Set up digests. Just SHA1 for now */
 static int dasync_digests(ENGINE *e, const EVP_MD **digest,
                           const int **nids, int nid);
@@ -327,7 +326,7 @@ static int dasync_rsa_priv_dec(int flen, const unsigned char *from,
 static int dasync_rsa_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa, BN_CTX *ctx)
 {
     dummy_pause_job();
-    return RSA_PKCS1_SSLeay()->rsa_mod_exp(r0, I, rsa, ctx);
+    return RSA_PKCS1_OpenSSL()->rsa_mod_exp(r0, I, rsa, ctx);
 }
 
 static int dasync_rsa_init(RSA *rsa)
@@ -343,12 +342,12 @@ static int dasync_rsa_sign(int type, const unsigned char *m,
     unsigned int m_len, unsigned char *sigret, unsigned int *siglen, const RSA *rsa)
 {
     dummy_pause_job();
-    return RSA_PKCS1_SSLeay()->rsa_sign(type, m, m_len, sigret, siglen, rsa);
+    return RSA_PKCS1_OpenSSL()->rsa_sign(type, m, m_len, sigret, siglen, rsa);
 }
 
 static int dasync_rsa_verify(int dtype, const unsigned char *m,
     unsigned int m_len, const unsigned char *sigbuf, unsigned int siglen, const RSA *rsa)
 {
     dummy_pause_job();
-    return RSA_PKCS1_SSLeay()->rsa_verify(dtype, m, m_len, sigbuf, siglen, rsa);
+    return RSA_PKCS1_OpenSSL()->rsa_verify(dtype, m, m_len, sigbuf, siglen, rsa);
 }
