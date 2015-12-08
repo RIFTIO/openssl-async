@@ -157,7 +157,10 @@ int SSL_use_RSAPrivateKey(SSL *ssl, RSA *rsa)
     }
 
     RSA_up_ref(rsa);
-    EVP_PKEY_assign_RSA(pkey, rsa);
+    if (EVP_PKEY_assign_RSA(pkey, rsa) <= 0) {
+        RSA_free(rsa);
+        return 0;
+    }
 
     ret = ssl_set_pkey(ssl->cert, pkey);
     EVP_PKEY_free(pkey);
@@ -192,6 +195,15 @@ static int ssl_set_pkey(CERT *c, EVP_PKEY *pkey)
     if (c->pkeys[i].x509 != NULL) {
         EVP_PKEY *pktmp;
         pktmp = X509_get_pubkey(c->pkeys[i].x509);
+        if (pktmp == NULL) {
+            SSLerr(SSL_F_SSL_SET_PKEY, ERR_R_MALLOC_FAILURE);
+            EVP_PKEY_free(pktmp);
+            return 0;
+        }
+        /*
+         * The return code from EVP_PKEY_copy_parameters is deliberately
+         * ignored. Some EVP_PKEY types cannot do this.
+         */
         EVP_PKEY_copy_parameters(pktmp, pkey);
         EVP_PKEY_free(pktmp);
         ERR_clear_error();
@@ -386,6 +398,10 @@ static int ssl_set_cert(CERT *c, X509 *x)
     }
 
     if (c->pkeys[i].privatekey != NULL) {
+        /*
+         * The return code from EVP_PKEY_copy_parameters is deliberately
+         * ignored. Some EVP_PKEY types cannot do this.
+         */
         EVP_PKEY_copy_parameters(pkey, c->pkeys[i].privatekey);
         ERR_clear_error();
 
@@ -498,7 +514,10 @@ int SSL_CTX_use_RSAPrivateKey(SSL_CTX *ctx, RSA *rsa)
     }
 
     RSA_up_ref(rsa);
-    EVP_PKEY_assign_RSA(pkey, rsa);
+    if (EVP_PKEY_assign_RSA(pkey, rsa) <= 0) {
+        RSA_free(rsa);
+        return 0;
+    }
 
     ret = ssl_set_pkey(ctx->cert, pkey);
     EVP_PKEY_free(pkey);
@@ -644,9 +663,19 @@ static int use_certificate_chain_file(SSL_CTX *ctx, SSL *ssl, const char *file)
     BIO *in;
     int ret = 0;
     X509 *x = NULL;
+    pem_password_cb *passwd_callback;
+    void *passwd_callback_userdata;
 
     ERR_clear_error();          /* clear error stack for
                                  * SSL_CTX_use_certificate() */
+
+    if (ctx != NULL) {
+        passwd_callback = ctx->default_passwd_callback;
+        passwd_callback_userdata = ctx->default_passwd_callback_userdata;
+    } else {
+        passwd_callback = ssl->default_passwd_callback;
+        passwd_callback_userdata = ssl->default_passwd_callback_userdata;
+    }
 
     in = BIO_new(BIO_s_file());
     if (in == NULL) {
@@ -659,8 +688,8 @@ static int use_certificate_chain_file(SSL_CTX *ctx, SSL *ssl, const char *file)
         goto end;
     }
 
-    x = PEM_read_bio_X509_AUX(in, NULL, ctx->default_passwd_callback,
-                              ctx->default_passwd_callback_userdata);
+    x = PEM_read_bio_X509_AUX(in, NULL, passwd_callback,
+                              passwd_callback_userdata);
     if (x == NULL) {
         SSLerr(SSL_F_USE_CERTIFICATE_CHAIN_FILE, ERR_R_PEM_LIB);
         goto end;
@@ -693,10 +722,9 @@ static int use_certificate_chain_file(SSL_CTX *ctx, SSL *ssl, const char *file)
             goto end;
         }
 
-        while ((ca = PEM_read_bio_X509(in, NULL,
-                                       ctx->default_passwd_callback,
-                                       ctx->default_passwd_callback_userdata))
-               != NULL) {
+        while ((ca = PEM_read_bio_X509(in, NULL, passwd_callback,
+                                       passwd_callback_userdata))
+                != NULL) {
             if (ctx)
                 r = SSL_CTX_add0_chain_cert(ctx, ca);
             else

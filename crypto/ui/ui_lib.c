@@ -138,7 +138,7 @@ static UI_STRING *general_allocate_prompt(UI *ui, const char *prompt,
     } else if ((type == UIT_PROMPT || type == UIT_VERIFY
                 || type == UIT_BOOLEAN) && result_buf == NULL) {
         UIerr(UI_F_GENERAL_ALLOCATE_PROMPT, UI_R_NO_RESULT_BUFFER);
-    } else if ((ret = OPENSSL_malloc(sizeof(*ret)))) {
+    } else if ((ret = OPENSSL_malloc(sizeof(*ret))) != NULL) {
         ret->out_string = prompt;
         ret->flags = prompt_freeable ? OUT_STRING_FREEABLE : 0;
         ret->input_flags = input_flags;
@@ -536,13 +536,6 @@ int UI_ctrl(UI *ui, int cmd, long i, void *p, void (*f) (void))
     return -1;
 }
 
-int UI_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new *new_func,
-                        CRYPTO_EX_dup *dup_func, CRYPTO_EX_free *free_func)
-{
-    return CRYPTO_get_ex_new_index(CRYPTO_EX_INDEX_UI, argl, argp,
-                                   new_func, dup_func, free_func);
-}
-
 int UI_set_ex_data(UI *r, int idx, void *arg)
 {
     return (CRYPTO_set_ex_data(&r->ex_data, idx, arg));
@@ -581,7 +574,7 @@ UI_METHOD *UI_create_method(char *name)
 {
     UI_METHOD *ui_method = OPENSSL_zalloc(sizeof(*ui_method));
 
-    if (ui_method)
+    if (ui_method != NULL)
         ui_method->name = BUF_strdup(name);
     return ui_method;
 }

@@ -59,15 +59,18 @@
  */
 #undef _FORTIFY_SOURCE
 
-#include <openssl/err.h>
-#include <openssl/async.h>
-#include <string.h>
+/* This must be the first #include file */
 #include "async_locl.h"
+
+#include <openssl/err.h>
+#include <string.h>
 
 #define ASYNC_JOB_RUNNING   0
 #define ASYNC_JOB_PAUSING   1
 #define ASYNC_JOB_PAUSED    2
 #define ASYNC_JOB_STOPPING  3
+
+static void async_free_pool_internal(async_pool *pool);
 
 static async_ctx *async_ctx_new(void)
 {
@@ -109,7 +112,7 @@ static int async_ctx_free(void)
 static ASYNC_JOB *async_job_new(void)
 {
     ASYNC_JOB *job = NULL;
-    int pipefds[2];
+    OSSL_ASYNC_FD pipefds[2];
 
     job = OPENSSL_malloc(sizeof (ASYNC_JOB));
     if (job == NULL) {
@@ -138,13 +141,15 @@ static void async_job_free(ASYNC_JOB *job)
     if (job != NULL) {
         OPENSSL_free(job->funcargs);
         async_fibre_free(&job->fibrectx);
+        async_close_fd(job->wait_fd);
+        async_close_fd(job->wake_fd);
         OPENSSL_free(job);
     }
 }
 
 static ASYNC_JOB *async_get_pool_job(void) {
     ASYNC_JOB *job;
-    STACK_OF(ASYNC_JOB) *pool;
+    async_pool *pool;
 
     pool = async_get_pool();
     if (pool == NULL) {
@@ -152,31 +157,36 @@ static ASYNC_JOB *async_get_pool_job(void) {
          * Pool has not been initialised, so init with the defaults, i.e.
          * no max size and no pre-created jobs
          */
-        if (ASYNC_init_pool(0, 0) == 0)
+        if (ASYNC_init_thread(0, 0) == 0)
             return NULL;
         pool = async_get_pool();
     }
 
-    job = sk_ASYNC_JOB_pop(pool);
+    job = sk_ASYNC_JOB_pop(pool->jobs);
     if (job == NULL) {
         /* Pool is empty */
-        if (!async_pool_can_grow())
+        if ((pool->max_size != 0) && (pool->curr_size >= pool->max_size))
             return NULL;
 
         job = async_job_new();
-        if (job) {
-            async_fibre_makecontext(&job->fibrectx);
-            async_increment_pool_size();
+        if (job != NULL) {
+            if (! async_fibre_makecontext(&job->fibrectx)) {
+                async_job_free(job);
+                return NULL;
+            }
+            pool->curr_size++;
         }
     }
     return job;
 }
 
 static void async_release_job(ASYNC_JOB *job) {
+    async_pool *pool;
+
+    pool = async_get_pool();
     OPENSSL_free(job->funcargs);
     job->funcargs = NULL;
-    /* Ignore error return */
-    async_release_job_to_pool(job);
+    sk_ASYNC_JOB_push(pool->jobs, job);
 }
 
 void async_start_func(void)
@@ -211,7 +221,6 @@ int ASYNC_start_job(ASYNC_JOB **job, int *ret, int (*func)(void *),
     if (*job) {
         async_get_ctx()->currjob = *job;
     }
-
 
     for (;;) {
         if (async_get_ctx()->currjob != NULL) {
@@ -249,6 +258,7 @@ int ASYNC_start_job(ASYNC_JOB **job, int *ret, int (*func)(void *),
             *job = NULL;
             return ASYNC_ERR;
         }
+
         /* Start a new job */
         if ((async_get_ctx()->currjob = async_get_pool_job()) == NULL) {
             return ASYNC_NO_JOBS;
@@ -309,71 +319,113 @@ int ASYNC_pause_job(void)
     return 1;
 }
 
-static void async_empty_pool(STACK_OF(ASYNC_JOB) *pool)
+static void async_empty_pool(async_pool *pool)
 {
     ASYNC_JOB *job;
 
+    if (!pool || !pool->jobs)
+        return;
+
     do {
-        job = sk_ASYNC_JOB_pop(pool);
+        job = sk_ASYNC_JOB_pop(pool->jobs);
         async_job_free(job);
     } while (job);
 }
 
-int ASYNC_init_pool(size_t max_size, size_t init_size)
+int ASYNC_init(int init_thread, size_t max_size, size_t init_size)
 {
-    STACK_OF(ASYNC_JOB) *pool;
-    size_t curr_size = 0;
-
-    if (init_size > max_size) {
-        ASYNCerr(ASYNC_F_ASYNC_INIT_POOL, ASYNC_R_INVALID_POOL_SIZE);
+    if (!async_global_init())
         return 0;
-    }
 
-    pool = sk_ASYNC_JOB_new_null();
-    if (pool == NULL) {
-        ASYNCerr(ASYNC_F_ASYNC_INIT_POOL, ERR_R_MALLOC_FAILURE);
-        return 0;
-    }
-    /* Pre-create jobs as required */
-    while (init_size) {
-        ASYNC_JOB *job;
-        job = async_job_new();
-        if (job) {
-            async_fibre_makecontext(&job->fibrectx);
-            job->funcargs = NULL;
-            sk_ASYNC_JOB_push(pool, job);
-            curr_size++;
-            init_size--;
-        } else {
-            /*
-             * Not actually fatal because we already created the pool, just skip
-             * creation of any more jobs
-             */
-            init_size = 0;
-        }
-    }
-
-    if (!async_set_pool(pool, curr_size, max_size)) {
-        ASYNCerr(ASYNC_F_ASYNC_INIT_POOL, ASYNC_R_FAILED_TO_SET_POOL);
-        async_empty_pool(pool);
-        sk_ASYNC_JOB_free(pool);
-        return 0;
-    }
+    if (init_thread)
+        return ASYNC_init_thread(max_size, init_size);
 
     return 1;
 }
 
-void ASYNC_free_pool(void)
+int ASYNC_init_thread(size_t max_size, size_t init_size)
 {
-    STACK_OF(ASYNC_JOB) *pool;
+    async_pool *pool;
+    size_t curr_size = 0;
 
-    pool = async_get_pool();
+    if (init_size > max_size) {
+        ASYNCerr(ASYNC_F_ASYNC_INIT_THREAD, ASYNC_R_INVALID_POOL_SIZE);
+        return 0;
+    }
+
+    if (!async_local_init()) {
+        ASYNCerr(ASYNC_F_ASYNC_INIT_THREAD, ASYNC_R_INIT_FAILED);
+        return 0;
+    }
+    pool = OPENSSL_zalloc(sizeof *pool);
+    if (pool == NULL) {
+        ASYNCerr(ASYNC_F_ASYNC_INIT_THREAD, ERR_R_MALLOC_FAILURE);
+        return 0;
+    }
+
+    pool->jobs = sk_ASYNC_JOB_new_null();
+    if (pool->jobs == NULL) {
+        ASYNCerr(ASYNC_F_ASYNC_INIT_THREAD, ERR_R_MALLOC_FAILURE);
+        OPENSSL_free(pool);
+        return 0;
+    }
+
+    pool->max_size = max_size;
+
+    /* Pre-create jobs as required */
+    while (init_size--) {
+        ASYNC_JOB *job;
+        job = async_job_new();
+        if (job == NULL || !async_fibre_makecontext(&job->fibrectx)) {
+            /*
+             * Not actually fatal because we already created the pool, just
+             * skip creation of any more jobs
+             */
+            async_job_free(job);
+            break;
+        }
+        job->funcargs = NULL;
+        sk_ASYNC_JOB_push(pool->jobs, job);
+        curr_size++;
+    }
+    pool->curr_size = curr_size;
+    if (!async_set_pool(pool)) {
+        ASYNCerr(ASYNC_F_ASYNC_INIT_THREAD, ASYNC_R_FAILED_TO_SET_POOL);
+        goto err;
+    }
+
+    return 1;
+err:
+    async_free_pool_internal(pool);
+    return 0;
+}
+
+static void async_free_pool_internal(async_pool *pool)
+{
     if (pool == NULL)
         return;
 
     async_empty_pool(pool);
-    async_release_pool();
+    sk_ASYNC_JOB_free(pool->jobs);
+    OPENSSL_free(pool);
+    (void)async_set_pool(NULL);
+    async_local_cleanup();
     async_ctx_free();
+}
+
+void ASYNC_cleanup_thread(void)
+{
+    async_free_pool_internal(async_get_pool());
+}
+
+void ASYNC_cleanup(int cleanupthread)
+{
+    /*
+     * We don't actually have any global cleanup at the moment so just cleanup
+     * the thread
+     */
+    if (cleanupthread)
+        ASYNC_cleanup_thread();
 }
 
 ASYNC_JOB *ASYNC_get_current_job(void)
@@ -387,14 +439,9 @@ ASYNC_JOB *ASYNC_get_current_job(void)
     return ctx->currjob;
 }
 
-int ASYNC_get_wait_fd(ASYNC_JOB *job)
+OSSL_ASYNC_FD ASYNC_get_wait_fd(ASYNC_JOB *job)
 {
     return job->wait_fd;
-}
-
-void ASYNC_set_wait_fd(ASYNC_JOB *job, int fd)
-{
-    job->wait_fd = fd;
 }
 
 void ASYNC_wake(ASYNC_JOB *job)

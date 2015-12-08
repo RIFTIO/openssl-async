@@ -98,9 +98,9 @@ SSL_CTX_get_mode() and SSL_get_mode() return the current bitmask.
 
 L<ssl(3)>, L<SSL_read(3)>, L<SSL_write(3)>, L<SSL_get_error(3)>
 
+=======
 =head1 HISTORY
 
-SSL_MODE_AUTO_RETRY as been added in OpenSSL 0.9.6. SSL_MODE_ASYNC was first
-added to OpenSSL 1.1.0.
+SSL_MODE_ASYNC was first added to OpenSSL 1.1.0.
 
 =cut

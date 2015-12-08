@@ -51,7 +51,8 @@
  * ====================================================================
  */
 
-#include "async_win.h"
+/* This must be the first #include file */
+#include "../async_locl.h"
 
 #ifdef ASYNC_WIN
 
@@ -64,18 +65,80 @@ struct winpool {
     size_t max_size;
 };
 
+static DWORD asyncwinpool = 0;
+static DWORD asyncwinctx = 0;
+static DWORD asyncwindispatch = 0;
+
+
 void async_start_func(void);
+
+int async_global_init(void)
+{
+    asyncwinpool = TlsAlloc();
+    asyncwinctx = TlsAlloc();
+    asyncwindispatch = TlsAlloc();
+    if (asyncwinpool == TLS_OUT_OF_INDEXES || asyncwinctx == TLS_OUT_OF_INDEXES
+            || asyncwindispatch == TLS_OUT_OF_INDEXES) {
+        if (asyncwinpool != TLS_OUT_OF_INDEXES) {
+            TlsFree(asyncwinpool);
+        }
+        if (asyncwinctx != TLS_OUT_OF_INDEXES) {
+            TlsFree(asyncwinctx);
+        }
+        if (asyncwindispatch != TLS_OUT_OF_INDEXES) {
+            TlsFree(asyncwindispatch);
+        }
+        return 0;
+    }
+    return 1;
+}
+
+int async_local_init(void)
+{
+    return (TlsSetValue(asyncwinpool, NULL) != 0)
+        && (TlsSetValue(asyncwinctx, NULL) != 0)
+        && (TlsSetValue(asyncwindispatch, NULL) != 0);
+}
+
+void async_local_cleanup(void)
+{
+    async_ctx *ctx = async_get_ctx();
+    if (ctx != NULL) {
+        async_fibre *fibre = &ctx->dispatcher;
+        if(fibre != NULL && fibre->fibre != NULL && fibre->converted) {
+            ConvertFiberToThread();
+            fibre->fibre = NULL;
+        }
+    }
+}
+
+void async_global_cleanup(void)
+{
+    TlsFree(asyncwinpool);
+    TlsFree(asyncwinctx);
+    TlsFree(asyncwindispatch);
+    asyncwinpool = 0;
+    asyncwinctx = 0;
+    asyncwindispatch = 0;
+}
 
 int async_fibre_init_dispatcher(async_fibre *fibre)
 {
     LPVOID dispatcher;
 
-    dispatcher =
-        (LPVOID) CRYPTO_get_thread_local(CRYPTO_THREAD_LOCAL_ASYNC_DISPATCH);
+    dispatcher = (LPVOID)TlsGetValue(asyncwindispatch);
     if (dispatcher == NULL) {
         fibre->fibre = ConvertThreadToFiber(NULL);
-        CRYPTO_set_thread_local(CRYPTO_THREAD_LOCAL_ASYNC_DISPATCH,
-                                (void *)fibre->fibre);
+        if (fibre->fibre == NULL) {
+            fibre->converted = 0;
+            fibre->fibre = GetCurrentFiber();
+            if (fibre->fibre == NULL)
+                return 0;
+        } else {
+            fibre->converted = 1;
+        }
+        if (TlsSetValue(asyncwindispatch, (LPVOID)fibre->fibre) == 0)
+            return 0;
     } else {
         fibre->fibre = dispatcher;
     }
@@ -87,94 +150,61 @@ VOID CALLBACK async_start_func_win(PVOID unused)
     async_start_func();
 }
 
-int async_pipe(int *pipefds)
+int async_pipe(OSSL_ASYNC_FD *pipefds)
 {
-    if (_pipe(pipefds, 256, _O_BINARY) == 0)
-        return 1;
-
-    return 0;
-}
-
-int async_write1(int fd, const void *buf)
-{
-    if (_write(fd, buf, 1) > 0)
-        return 1;
-
-    return 0;
-}
-
-int async_read1(int fd, void *buf)
-{
-    if (_read(fd, buf, 1) > 0)
-        return 1;
-
-    return 0;
-}
-
-STACK_OF(ASYNC_JOB) *async_get_pool(void)
-{
-    struct winpool *pool;
-    pool = (struct winpool *)
-            CRYPTO_get_thread_local(CRYPTO_THREAD_LOCAL_ASYNC_POOL);
-    return pool->pool;
-}
-
-
-int async_set_pool(STACK_OF(ASYNC_JOB) *poolin, size_t curr_size,
-                    size_t max_size)
-{
-    struct winpool *pool;
-    pool = OPENSSL_malloc(sizeof *pool);
-    if (pool == NULL)
+    if (CreatePipe(&pipefds[0], &pipefds[1], NULL, 256) == 0)
         return 0;
 
-    pool->pool = poolin;
-    pool->curr_size = curr_size;
-    pool->max_size = max_size;
-    CRYPTO_set_thread_local(CRYPTO_THREAD_LOCAL_ASYNC_POOL, (void *)pool);
     return 1;
 }
 
-void async_increment_pool_size(void)
+int async_close_fd(OSSL_ASYNC_FD fd)
 {
-    struct winpool *pool;
-    pool = (struct winpool *)
-            CRYPTO_get_thread_local(CRYPTO_THREAD_LOCAL_ASYNC_POOL);
-    pool->curr_size++;
+    if (CloseHandle(fd) == 0)
+        return 0;
+
+    return 1;
 }
 
-void async_release_job_to_pool(ASYNC_JOB *job)
+int async_write1(OSSL_ASYNC_FD fd, const void *buf)
 {
-    struct winpool *pool;
-    pool = (struct winpool *)
-            CRYPTO_get_thread_local(CRYPTO_THREAD_LOCAL_ASYNC_POOL);
-    sk_ASYNC_JOB_push(pool->pool, job);
+    DWORD numwritten = 0;
+
+    if (WriteFile(fd, buf, 1, &numwritten, NULL) && numwritten == 1)
+        return 1;
+
+    return 0;
 }
 
-size_t async_pool_max_size(void)
+int async_read1(OSSL_ASYNC_FD fd, void *buf)
 {
-    struct winpool *pool;
-    pool = (struct winpool *)
-            CRYPTO_get_thread_local(CRYPTO_THREAD_LOCAL_ASYNC_POOL);
-    return pool->max_size;
+    DWORD numread = 0;
+
+    if (ReadFile(fd, buf, 1, &numread, NULL) && numread == 1)
+        return 1;
+
+    return 0;
 }
 
-void async_release_pool(void)
+async_pool *async_get_pool(void)
 {
-    struct winpool *pool;
-    pool = (struct winpool *)
-            CRYPTO_get_thread_local(CRYPTO_THREAD_LOCAL_ASYNC_POOL);
-    sk_ASYNC_JOB_free(pool->pool);
-    OPENSSL_free(pool);
-    CRYPTO_set_thread_local(CRYPTO_THREAD_LOCAL_ASYNC_POOL, NULL);
+    return (async_pool *)TlsGetValue(asyncwinpool);
 }
 
-int async_pool_can_grow(void)
+
+int async_set_pool(async_pool *pool)
 {
-    struct winpool *pool;
-    pool = (struct winpool *)
-            CRYPTO_get_thread_local(CRYPTO_THREAD_LOCAL_ASYNC_POOL);
-    return (pool->max_size == 0) || (pool->curr_size < pool->max_size);
+    return TlsSetValue(asyncwinpool, (LPVOID)pool) != 0;
+}
+
+async_ctx *async_get_ctx(void)
+{
+    return (async_ctx *)TlsGetValue(asyncwinctx);
+}
+
+int async_set_ctx(async_ctx *ctx)
+{
+    return TlsSetValue(asyncwinctx, (LPVOID)ctx) != 0;
 }
 
 #endif

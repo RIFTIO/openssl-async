@@ -87,7 +87,7 @@ err_all.o: ../../include/openssl/sha.h ../../include/openssl/stack.h
 err_all.o: ../../include/openssl/symhacks.h ../../include/openssl/ts.h
 err_all.o: ../../include/openssl/ui.h ../../include/openssl/x509.h
 err_all.o: ../../include/openssl/x509_vfy.h ../../include/openssl/x509v3.h
-err_all.o: err_all.c
+err_all.o: ../include/internal/ct_int.h err_all.c
 err_prn.o: ../../e_os.h ../../include/openssl/bio.h
 err_prn.o: ../../include/openssl/buffer.h ../../include/openssl/crypto.h
 err_prn.o: ../../include/openssl/e_os2.h ../../include/openssl/err.h

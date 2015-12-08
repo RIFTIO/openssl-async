@@ -51,51 +51,68 @@
  * ====================================================================
  */
 
+/* This must be the first #include file */
 #include "../async_locl.h"
-#include <openssl/async.h>
 
 #ifdef ASYNC_POSIX
-# include <stddef.h>
-# include <ucontext.h>
-# include <unistd.h>
-# include <openssl/crypto.h>
-# include <openssl/async.h>
 
-__thread async_ctx *sysvctx;
+# include <stddef.h>
+# include <unistd.h>
+
+pthread_key_t posixctx;
+pthread_key_t posixpool;
 
 #define STACKSIZE       32768
 
-extern __thread size_t posixpool_max_size;
-extern __thread size_t posixpool_curr_size;
-extern __thread STACK_OF(ASYNC_JOB) *posixpool;
-__thread size_t posixpool_max_size = 0;
-__thread size_t posixpool_curr_size = 0;
-__thread STACK_OF(ASYNC_JOB) *posixpool = NULL;
-
-int async_fibre_init(async_fibre *fibre)
+int async_global_init(void)
 {
-    void *stack = NULL;
-
-    stack = OPENSSL_malloc(STACKSIZE);
-    if (stack == NULL) {
+    if (pthread_key_create(&posixctx, NULL) != 0
+            || pthread_key_create(&posixpool, NULL) != 0)
         return 0;
-    }
-
-    fibre->fibre.uc_stack.ss_sp = stack;
-    fibre->fibre.uc_stack.ss_size = STACKSIZE;
-    fibre->fibre.uc_link = NULL;
-    fibre->env_init = 0;
 
     return 1;
 }
 
-void async_fibre_free(async_fibre *fibre)
+int async_local_init(void)
 {
-    if (fibre->fibre.uc_stack.ss_sp)
-        OPENSSL_free(fibre->fibre.uc_stack.ss_sp);
+    if (!async_set_ctx(NULL) || ! async_set_pool(NULL))
+        return 0;
+
+    return 1;
 }
 
-int async_pipe(int *pipefds)
+void async_local_cleanup(void)
+{
+}
+
+void async_global_cleanup(void)
+{
+}
+
+int async_fibre_makecontext(async_fibre *fibre)
+{
+    fibre->env_init = 0;
+    if (getcontext(&fibre->fibre) == 0) {
+        fibre->fibre.uc_stack.ss_sp = OPENSSL_malloc(STACKSIZE);
+        if (fibre->fibre.uc_stack.ss_sp != NULL) {
+            fibre->fibre.uc_stack.ss_size = STACKSIZE;
+            fibre->fibre.uc_link = NULL;
+            makecontext(&fibre->fibre, async_start_func, 0);
+            return 1;
+        }
+    } else {
+        fibre->fibre.uc_stack.ss_sp = NULL;
+    }
+    return 0;
+}
+
+void async_fibre_free(async_fibre *fibre)
+{
+    OPENSSL_free(fibre->fibre.uc_stack.ss_sp);
+    fibre->fibre.uc_stack.ss_sp = NULL;
+}
+
+int async_pipe(OSSL_ASYNC_FD *pipefds)
 {
     if (pipe(pipefds) == 0)
         return 1;
@@ -103,7 +120,15 @@ int async_pipe(int *pipefds)
     return 0;
 }
 
-int async_write1(int fd, const void *buf)
+int async_close_fd(OSSL_ASYNC_FD fd)
+{
+    if (close(fd) != 0)
+        return 0;
+
+    return 1;
+}
+
+int async_write1(OSSL_ASYNC_FD fd, const void *buf)
 {
     if (write(fd, buf, 1) > 0)
         return 1;
@@ -111,53 +136,12 @@ int async_write1(int fd, const void *buf)
     return 0;
 }
 
-int async_read1(int fd, void *buf)
+int async_read1(OSSL_ASYNC_FD fd, void *buf)
 {
     if (read(fd, buf, 1) > 0)
         return 1;
 
     return 0;
-}
-
-STACK_OF(ASYNC_JOB) *async_get_pool(void)
-{
-    return posixpool;
-}
-
-int async_set_pool(STACK_OF(ASYNC_JOB) *poolin, size_t curr_size,
-                    size_t max_size)
-{
-    posixpool = poolin;
-    posixpool_curr_size = curr_size;
-    posixpool_max_size = max_size;
-    return 1;
-}
-
-void async_increment_pool_size(void)
-{
-    posixpool_curr_size++;
-}
-
-void async_release_job_to_pool(ASYNC_JOB *job)
-{
-    sk_ASYNC_JOB_push(posixpool, job);
-}
-
-size_t async_pool_max_size(void)
-{
-    return posixpool_max_size;
-}
-
-void async_release_pool(void)
-{
-    sk_ASYNC_JOB_free(posixpool);
-    posixpool = NULL;
-}
-
-int async_pool_can_grow(void)
-{
-    return (posixpool_max_size == 0)
-        || (posixpool_curr_size < posixpool_max_size);
 }
 
 #endif

@@ -62,12 +62,12 @@
 #include <openssl/crypto.h>
 #include <../apps/apps.h>
 
-#ifdef OPENSSL_SYS_UNIX
+#if defined(OPENSSL_SYS_UNIX) && defined(OPENSSL_THREADS)
 # include <unistd.h>
 # if _POSIX_VERSION >= 200112L
 #  define ASYNC_POSIX
 # endif
-#elif (defined(_WIN32) || defined(__CYGWIN__)) && defined(_WINDLL)
+#elif defined(_WIN32) || defined(__CYGWIN__)
 # define ASYNC_WIN
 #endif
 
@@ -124,12 +124,12 @@ static int blockpause(void *args)
     return 1;
 }
 
-static int test_ASYNC_init_pool()
+static int test_ASYNC_init()
 {
     ASYNC_JOB *job1 = NULL, *job2 = NULL, *job3 = NULL;
     int funcret1, funcret2, funcret3;
 
-    if (       !ASYNC_init_pool(2, 0)
+    if (       !ASYNC_init(1, 2, 0)
             || ASYNC_start_job(&job1, &funcret1, only_pause, NULL, 0)
                 != ASYNC_PAUSE
             || ASYNC_start_job(&job2, &funcret2, only_pause, NULL, 0)
@@ -147,12 +147,12 @@ static int test_ASYNC_init_pool()
             || funcret1 != 1
             || funcret2 != 1
             || funcret3 != 1) {
-        fprintf(stderr, "test_ASYNC_init_pool() failed\n");
-        ASYNC_free_pool();
+        fprintf(stderr, "test_ASYNC_init() failed\n");
+        ASYNC_cleanup(1);
         return 0;
     }
 
-    ASYNC_free_pool();
+    ASYNC_cleanup(1);
     return 1;
 }
 
@@ -163,18 +163,18 @@ static int test_ASYNC_start_job()
 
     ctr = 0;
 
-    if (       !ASYNC_init_pool(1, 0)
+    if (       !ASYNC_init(1, 1, 0)
             || ASYNC_start_job(&job, &funcret, add_two, NULL, 0) != ASYNC_PAUSE
             || ctr != 1
             || ASYNC_start_job(&job, &funcret, add_two, NULL, 0) != ASYNC_FINISH
             || ctr != 2
             || funcret != 2) {
         fprintf(stderr, "test_ASYNC_start_job() failed\n");
-        ASYNC_free_pool();
+        ASYNC_cleanup(1);
         return 0;
     }
 
-    ASYNC_free_pool();
+    ASYNC_cleanup(1);
     return 1;
 }
 
@@ -185,7 +185,7 @@ static int test_ASYNC_get_current_job()
 
     currjob = NULL;
 
-    if (       !ASYNC_init_pool(1, 0)
+    if (       !ASYNC_init(1, 1, 0)
             || ASYNC_start_job(&job, &funcret, save_current, NULL, 0)
                 != ASYNC_PAUSE
             || currjob != job
@@ -193,16 +193,17 @@ static int test_ASYNC_get_current_job()
                 != ASYNC_FINISH
             || funcret != 1) {
         fprintf(stderr, "test_ASYNC_get_current_job() failed\n");
-        ASYNC_free_pool();
+        ASYNC_cleanup(1);
         return 0;
     }
 
-    ASYNC_free_pool();
+    ASYNC_cleanup(1);
     return 1;
 }
 
-static int hasdata(int fd)
+static int hasdata(OSSL_ASYNC_FD fd)
 {
+#ifdef ASYNC_POSIX
     fd_set checkfds;
     struct timeval tv;
     FD_ZERO(&checkfds);
@@ -213,14 +214,23 @@ static int hasdata(int fd)
     if (FD_ISSET(fd, &checkfds))
         return 1;
     return 0;
+#else
+    DWORD avail = 0;
+
+    if (PeekNamedPipe(fd, NULL, 0, NULL, &avail, NULL) && avail > 0)
+        return 1;
+
+    return 0;
+#endif
 }
 
 static int test_ASYNC_get_wait_fd()
 {
     ASYNC_JOB *job = NULL;
-    int funcret, fd;
+    int funcret;
+    OSSL_ASYNC_FD fd;
 
-    if (       !ASYNC_init_pool(1, 0)
+    if (       !ASYNC_init(1, 1, 0)
             || ASYNC_start_job(&job, &funcret, wake, NULL, 0)
                 != ASYNC_PAUSE
             || (fd = ASYNC_get_wait_fd(job)) < 0
@@ -236,11 +246,11 @@ static int test_ASYNC_get_wait_fd()
                 != ASYNC_FINISH
             || funcret != 1) {
         fprintf(stderr, "test_ASYNC_get_wait_fd() failed\n");
-        ASYNC_free_pool();
+        ASYNC_cleanup(1);
         return 0;
     }
 
-    ASYNC_free_pool();
+    ASYNC_cleanup(1);
     return 1;
 }
 
@@ -249,18 +259,18 @@ static int test_ASYNC_block_pause()
     ASYNC_JOB *job = NULL;
     int funcret;
 
-    if (       !ASYNC_init_pool(1, 0)
+    if (       !ASYNC_init(1, 1, 0)
             || ASYNC_start_job(&job, &funcret, blockpause, NULL, 0)
                 != ASYNC_PAUSE
             || ASYNC_start_job(&job, &funcret, blockpause, NULL, 0)
                 != ASYNC_FINISH
             || funcret != 1) {
         fprintf(stderr, "test_ASYNC_block_pause() failed\n");
-        ASYNC_free_pool();
+        ASYNC_cleanup(1);
         return 0;
     }
 
-    ASYNC_free_pool();
+    ASYNC_cleanup(1);
     return 1;
 }
 
@@ -276,7 +286,7 @@ int main(int argc, char **argv)
     CRYPTO_set_mem_debug_options(V_CRYPTO_MDEBUG_ALL);
     CRYPTO_mem_ctrl(CRYPTO_MEM_CHECK_ON);
 
-    if (       !test_ASYNC_init_pool()
+    if (       !test_ASYNC_init()
             || !test_ASYNC_start_job()
             || !test_ASYNC_get_current_job()
             || !test_ASYNC_get_wait_fd()

@@ -145,19 +145,6 @@
 extern "C" {
 #endif
 
-/* Backward compatibility to SSLeay */
-/*
- * This is more to be used to check the correct DLL is being used in the MS
- * world.
- */
-# define SSLEAY_VERSION_NUMBER   OPENSSL_VERSION_NUMBER
-# define SSLEAY_VERSION          0
-/* #define SSLEAY_OPTIONS       1 no longer supported */
-# define SSLEAY_CFLAGS           2
-# define SSLEAY_BUILT_ON         3
-# define SSLEAY_PLATFORM         4
-# define SSLEAY_DIR              5
-
 /*
  * When changing the CRYPTO_LOCK_* list, be sure to maintin the text lock
  * names in cryptlib.c
@@ -243,7 +230,7 @@ typedef struct {
 } CRYPTO_dynlock;
 
 /*
- * The following can be used to detect memory leaks in the SSLeay library. It
+ * The following can be used to detect memory leaks in the OpenSSL library. It
  * used, it turns on malloc checking
  */
 
@@ -269,33 +256,29 @@ typedef struct bio_st BIO_dummy;
 
 struct crypto_ex_data_st {
     STACK_OF(void) *sk;
-    /* gcc is screwing up this data structure :-( */
-    int dummy;
 };
 DECLARE_STACK_OF(void)
 
 /*
- * Per class, we have a STACK of CRYPTO_EX_DATA_FUNCS for each CRYPTO_EX_DATA
- * entry.
+ * Per class, we have a STACK of function pointers.
  */
-# define CRYPTO_EX_INDEX_BIO             0
-# define CRYPTO_EX_INDEX_SSL             1
-# define CRYPTO_EX_INDEX_SSL_CTX         2
-# define CRYPTO_EX_INDEX_SSL_SESSION     3
-# define CRYPTO_EX_INDEX_X509_STORE      4
-# define CRYPTO_EX_INDEX_X509_STORE_CTX  5
-# define CRYPTO_EX_INDEX_RSA             6
-# define CRYPTO_EX_INDEX_DSA             7
-# define CRYPTO_EX_INDEX_DH              8
-# define CRYPTO_EX_INDEX_ENGINE          9
-# define CRYPTO_EX_INDEX_X509            10
-# define CRYPTO_EX_INDEX_UI              11
-# define CRYPTO_EX_INDEX_ECDSA           12
-# define CRYPTO_EX_INDEX_ECDH            13
-# define CRYPTO_EX_INDEX_COMP            14
-# define CRYPTO_EX_INDEX_STORE           15
-# define CRYPTO_EX_INDEX_APP             16
-# define CRYPTO_EX_INDEX__COUNT          17
+# define CRYPTO_EX_INDEX_SSL              0
+# define CRYPTO_EX_INDEX_SSL_CTX          1
+# define CRYPTO_EX_INDEX_SSL_SESSION      2
+# define CRYPTO_EX_INDEX_X509             3
+# define CRYPTO_EX_INDEX_X509_STORE       4
+# define CRYPTO_EX_INDEX_X509_STORE_CTX   5
+# define CRYPTO_EX_INDEX_DH               6
+# define CRYPTO_EX_INDEX_DSA              7
+# define CRYPTO_EX_INDEX_ECDH             8
+# define CRYPTO_EX_INDEX_ECDSA            9
+# define CRYPTO_EX_INDEX_RSA             10
+# define CRYPTO_EX_INDEX_ENGINE          11
+# define CRYPTO_EX_INDEX_UI              12
+# define CRYPTO_EX_INDEX_BIO             13
+# define CRYPTO_EX_INDEX_STORE           14
+# define CRYPTO_EX_INDEX_APP             15
+# define CRYPTO_EX_INDEX__COUNT          16
 
 /*
  * This is the default callbacks, but we can have others as well: this is
@@ -350,15 +333,28 @@ int CRYPTO_is_mem_check_on(void);
 
 # define OPENSSL_MALLOC_MAX_NELEMS(type)  (((1U<<(sizeof(int)*8-1))-1)/sizeof(type))
 
-const char *SSLeay_version(int type);
-unsigned long SSLeay(void);
+unsigned long OpenSSL_version_num(void);
+const char *OpenSSL_version(int type);
+# define OPENSSL_VERSION          0
+# define OPENSSL_CFLAGS           1
+# define OPENSSL_BUILT_ON         2
+# define OPENSSL_PLATFORM         3
+# define OPENSSL_DIR              4
 
 int OPENSSL_issetugid(void);
 
-/* Within a given class, get/register a new index */
-int CRYPTO_get_ex_new_index(int class_index, long argl, void *argp,
+typedef void CRYPTO_EX_new (void *parent, void *ptr, CRYPTO_EX_DATA *ad,
+                           int idx, long argl, void *argp);
+typedef void CRYPTO_EX_free (void *parent, void *ptr, CRYPTO_EX_DATA *ad,
+                             int idx, long argl, void *argp);
+typedef int CRYPTO_EX_dup (CRYPTO_EX_DATA *to, CRYPTO_EX_DATA *from,
+                           void *srcp, int idx, long argl, void *argp);
+__owur int CRYPTO_get_ex_new_index(int class_index, long argl, void *argp,
                             CRYPTO_EX_new *new_func, CRYPTO_EX_dup *dup_func,
                             CRYPTO_EX_free *free_func);
+/* No longer use an index. */
+int CRYPTO_free_ex_index(int class_index, int idx);
+
 /*
  * Initialise/duplicate/free CRYPTO_EX_DATA variables corresponding to a
  * given class (invokes whatever per-class callbacks are applicable)
@@ -366,7 +362,9 @@ int CRYPTO_get_ex_new_index(int class_index, long argl, void *argp,
 int CRYPTO_new_ex_data(int class_index, void *obj, CRYPTO_EX_DATA *ad);
 int CRYPTO_dup_ex_data(int class_index, CRYPTO_EX_DATA *to,
                        CRYPTO_EX_DATA *from);
+
 void CRYPTO_free_ex_data(int class_index, void *obj, CRYPTO_EX_DATA *ad);
+
 /*
  * Get/set data in a CRYPTO_EX_DATA variable corresponding to a particular
  * index (relative to the class type involved)
@@ -592,6 +590,7 @@ void ERR_load_CRYPTO_strings(void);
 # define CRYPTO_F_DEF_ADD_INDEX                           104
 # define CRYPTO_F_DEF_GET_CLASS                           105
 # define CRYPTO_F_FIPS_MODE_SET                           109
+# define CRYPTO_F_GET_AND_LOCK                            113
 # define CRYPTO_F_INT_DUP_EX_DATA                         106
 # define CRYPTO_F_INT_FREE_EX_DATA                        107
 # define CRYPTO_F_INT_NEW_EX_DATA                         108

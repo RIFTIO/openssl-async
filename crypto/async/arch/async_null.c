@@ -51,59 +51,47 @@
  * ====================================================================
  */
 
+/* This must be the first #include file */
 #include "../async_locl.h"
-#include <openssl/async.h>
 
 #ifdef ASYNC_NULL
 
-STACK_OF(ASYNC_JOB) *async_get_pool(void)
-{
-    return NULL;
-}
-
-int async_set_pool(STACK_OF(ASYNC_JOB) *poolin, size_t curr_size,
-                   size_t max_size)
-{
-    return 0;
-}
-
-void async_increment_pool_size(void)
-{
-    return;
-}
-
-void async_release_job_to_pool(ASYNC_JOB *job)
-{
-    return;
-}
-
-size_t async_pool_max_size(void)
-{
-    return 0;
-}
-
-void async_release_pool(void)
-{
-    return;
-}
-
-int async_pool_can_grow(void) {
-    return 0;
-}
-
-int async_pipe(int *pipefds)
+int async_pipe(OSSL_ASYNC_FD *pipefds)
 {
     return -1;
 }
 
-int async_write1(int fd, const void *buf)
+int async_close_fd(OSSL_ASYNC_FD fd)
+{
+    return 0;
+}
+
+int async_write1(OSSL_ASYNC_FD fd, const void *buf)
 {
     return -1;
 }
 
-int async_read1(int fd, void *buf)
+int async_read1(OSSL_ASYNC_FD fd, void *buf)
 {
     return -1;
+}
+
+int async_global_init(void)
+{
+    return 0;
+}
+
+int async_local_init(void)
+{
+    return 0;
+}
+
+void async_local_cleanup(void)
+{
+}
+
+void async_global_cleanup(void)
+{
 }
 
 #endif

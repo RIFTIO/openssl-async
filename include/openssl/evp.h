@@ -427,6 +427,8 @@ struct evp_cipher_st {
 # define         EVP_CTRL_TLS1_1_MULTIBLOCK_DECRYPT      0x1b
 # define         EVP_CTRL_TLS1_1_MULTIBLOCK_MAX_BUFSIZE  0x1c
 
+# define         EVP_CTRL_SSL3_MASTER_SECRET             0x1d
+
 /* RFC 5246 defines additional data to be 13 bytes in length */
 # define         EVP_AEAD_TLS1_AAD_LEN           13
 
@@ -624,6 +626,7 @@ void BIO_set_md(BIO *, const EVP_MD *md);
 
 void EVP_MD_CTX_init(EVP_MD_CTX *ctx);
 int EVP_MD_CTX_cleanup(EVP_MD_CTX *ctx);
+int EVP_MD_CTX_ctrl(EVP_MD_CTX *ctx, int cmd, int p1, void *p2);
 EVP_MD_CTX *EVP_MD_CTX_create(void);
 void EVP_MD_CTX_destroy(EVP_MD_CTX *ctx);
 /*__owur*/ int EVP_MD_CTX_copy_ex(EVP_MD_CTX *out, const EVP_MD_CTX *in);
@@ -766,6 +769,7 @@ const EVP_MD *EVP_md4(void);
 # endif
 # ifndef OPENSSL_NO_MD5
 const EVP_MD *EVP_md5(void);
+const EVP_MD *EVP_md5_sha1(void);
 # endif
 const EVP_MD *EVP_sha1(void);
 const EVP_MD *EVP_dss1(void);
@@ -959,9 +963,6 @@ void OPENSSL_add_all_algorithms_conf(void);
 
 void OpenSSL_add_all_ciphers(void);
 void OpenSSL_add_all_digests(void);
-# define SSLeay_add_all_algorithms() OpenSSL_add_all_algorithms()
-# define SSLeay_add_all_ciphers() OpenSSL_add_all_ciphers()
-# define SSLeay_add_all_digests() OpenSSL_add_all_digests()
 
 int EVP_add_cipher(const EVP_CIPHER *cipher);
 int EVP_add_digest(const EVP_MD *digest);

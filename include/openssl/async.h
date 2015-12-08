@@ -56,6 +56,14 @@
 
 #include <stdlib.h>
 
+#if defined(_WIN32) || defined(__CYGWIN__)
+#include <windows.h>
+#define OSSL_ASYNC_FD   HANDLE
+#else
+#define OSSL_ASYNC_FD   int
+#endif
+
+
 # ifdef  __cplusplus
 extern "C" {
 # endif
@@ -67,15 +75,16 @@ typedef struct async_job_st ASYNC_JOB;
 #define ASYNC_PAUSE    2
 #define ASYNC_FINISH   3
 
-int ASYNC_init_pool(size_t max_size, size_t init_size);
-void ASYNC_free_pool(void);
+int ASYNC_init(int init_thread, size_t max_size, size_t init_size);
+void ASYNC_cleanup(int cleanupthread);
+int ASYNC_init_thread(size_t max_size, size_t init_size);
+void ASYNC_cleanup_thread(void);
 
 int ASYNC_start_job(ASYNC_JOB **job, int *ret, int (*func)(void *),
                          void *args, size_t size);
 int ASYNC_pause_job(void);
 
-int ASYNC_get_wait_fd(ASYNC_JOB *job);
-void ASYNC_set_wait_fd(ASYNC_JOB *job, int fd);
+OSSL_ASYNC_FD ASYNC_get_wait_fd(ASYNC_JOB *job);
 ASYNC_JOB *ASYNC_get_current_job(void);
 void ASYNC_wake(ASYNC_JOB *job);
 void ASYNC_clear_wake(ASYNC_JOB *job);
@@ -93,7 +102,7 @@ void ERR_load_ASYNC_strings(void);
 
 /* Function codes. */
 # define ASYNC_F_ASYNC_CTX_NEW                            100
-# define ASYNC_F_ASYNC_INIT_POOL                          101
+# define ASYNC_F_ASYNC_INIT_THREAD                        101
 # define ASYNC_F_ASYNC_JOB_NEW                            102
 # define ASYNC_F_ASYNC_PAUSE_JOB                          103
 # define ASYNC_F_ASYNC_START_FUNC                         104
@@ -103,7 +112,9 @@ void ERR_load_ASYNC_strings(void);
 # define ASYNC_R_CANNOT_CREATE_WAIT_PIPE                  100
 # define ASYNC_R_FAILED_TO_SET_POOL                       101
 # define ASYNC_R_FAILED_TO_SWAP_CONTEXT                   102
+# define ASYNC_R_INIT_FAILED                              105
 # define ASYNC_R_INVALID_POOL_SIZE                        103
+# define ASYNC_R_POOL_ALREADY_INITED                      104
 
 #ifdef  __cplusplus
 }

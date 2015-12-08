@@ -170,15 +170,6 @@ SSL_SESSION *SSL_get1_session(SSL *ssl)
     return (sess);
 }
 
-int SSL_SESSION_get_ex_new_index(long argl, void *argp,
-                                 CRYPTO_EX_new *new_func,
-                                 CRYPTO_EX_dup *dup_func,
-                                 CRYPTO_EX_free *free_func)
-{
-    return CRYPTO_get_ex_new_index(CRYPTO_EX_INDEX_SSL_SESSION, argl, argp,
-                                   new_func, dup_func, free_func);
-}
-
 int SSL_SESSION_set_ex_data(SSL_SESSION *s, int idx, void *arg)
 {
     return (CRYPTO_set_ex_data(&s->ex_data, idx, arg));
@@ -466,7 +457,7 @@ int ssl_get_new_session(SSL *s, int session)
          * Don't allow the callback to set the session length to zero. nor
          * set it higher than it was.
          */
-        if (!tmp || (tmp > ss->session_id_length)) {
+        if (tmp == 0 || tmp > ss->session_id_length) {
             /* The callback set an illegal length */
             SSLerr(SSL_F_SSL_GET_NEW_SESSION,
                    SSL_R_SSL_SESSION_ID_HAS_BAD_LENGTH);
@@ -1009,7 +1000,7 @@ int SSL_set_session_ticket_ext(SSL *s, void *ext_data, int ext_len)
         s->tlsext_session_ticket = NULL;
         s->tlsext_session_ticket =
             OPENSSL_malloc(sizeof(TLS_SESSION_TICKET_EXT) + ext_len);
-        if (!s->tlsext_session_ticket) {
+        if (s->tlsext_session_ticket == NULL) {
             SSLerr(SSL_F_SSL_SET_SESSION_TICKET_EXT, ERR_R_MALLOC_FAILURE);
             return 0;
         }

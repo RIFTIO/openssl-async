@@ -176,6 +176,7 @@ typedef unsigned int u_int;
 
 #undef BUFSIZZ
 #define BUFSIZZ 1024*8
+#define S_CLIENT_IRC_READ_TIMEOUT 8
 
 extern int verify_depth;
 extern int verify_error;
@@ -519,7 +520,7 @@ OPTIONS s_client_options[] = {
     {"tls1_1", OPT_TLS1_1, '-', "Just use TLSv1.1"},
     {"tls1", OPT_TLS1, '-', "Just use TLSv1"},
     {"starttls", OPT_STARTTLS, 's',
-     "Use the STARTTLS command before starting TLS"},
+     "Use the appropriate STARTTLS command before starting TLS"},
     {"xmpphost", OPT_XMPPHOST, 's',
      "Host to use with \"-starttls xmpp[-server]\""},
     {"rand", OPT_RAND, 's',
@@ -618,7 +619,8 @@ typedef enum PROTOCOL_choice {
     PROTO_TELNET,
     PROTO_XMPP,
     PROTO_XMPP_SERVER,
-    PROTO_CONNECT
+    PROTO_CONNECT,
+    PROTO_IRC
 } PROTOCOL_CHOICE;
 
 static OPT_PAIR services[] = {
@@ -629,6 +631,7 @@ static OPT_PAIR services[] = {
     {"xmpp", PROTO_XMPP},
     {"xmpp-server", PROTO_XMPP_SERVER},
     {"telnet", PROTO_TELNET},
+    {"irc", PROTO_IRC},
     {NULL}
 };
 
@@ -1070,9 +1073,6 @@ int s_client_main(int argc, char **argv)
     argc = opt_num_rest();
     argv = opt_rest();
 
-    if (!app_load_modules(NULL))
-        goto end;
-
     if (proxystr) {
         if (connectstr == NULL) {
             BIO_printf(bio_err, "%s: -proxy requires use of -connect\n", prog);
@@ -1208,7 +1208,7 @@ int s_client_main(int argc, char **argv)
 
     if (async) {
         SSL_CTX_set_mode(ctx, SSL_MODE_ASYNC);
-        ASYNC_init_pool(0, 0);
+        ASYNC_init(1, 0, 0);
     }
 
     if (!config_ctx(cctx, ssl_args, ctx, 1, jpake_secret == NULL))
@@ -1394,7 +1394,7 @@ int s_client_main(int argc, char **argv)
             goto end;
         }
 
-        (void)BIO_ctrl_set_connected(sbio, 1, &peer);
+        (void)BIO_ctrl_set_connected(sbio, &peer);
 
         if (enable_timeouts) {
             timeout.tv_sec = 0;
@@ -1513,8 +1513,8 @@ int s_client_main(int argc, char **argv)
             BIO_free(fbio);
             if (!foundit)
                 BIO_printf(bio_err,
-                           "didn't found starttls in server response,"
-                           " try anyway...\n");
+                           "didn't find starttls in server response,"
+                           " trying anyway...\n");
             BIO_printf(sbio, "STARTTLS\r\n");
             BIO_read(sbio, sbuf, BUFSIZZ);
         }
@@ -1551,8 +1551,8 @@ int s_client_main(int argc, char **argv)
             BIO_free(fbio);
             if (!foundit)
                 BIO_printf(bio_err,
-                           "didn't found STARTTLS in server response,"
-                           " try anyway...\n");
+                           "didn't find STARTTLS in server response,"
+                           " trying anyway...\n");
             BIO_printf(sbio, ". STARTTLS\r\n");
             BIO_read(sbio, sbuf, BUFSIZZ);
         }
@@ -1659,6 +1659,67 @@ int s_client_main(int argc, char **argv)
             }
         }
         break;
+    case PROTO_IRC:
+        {
+            int numeric;
+            BIO *fbio = BIO_new(BIO_f_buffer());
+
+            BIO_push(fbio, sbio);
+            BIO_printf(fbio, "STARTTLS\r\n");
+            (void)BIO_flush(fbio);
+            width = SSL_get_fd(con) + 1;
+
+            do {
+                numeric = 0;
+
+                FD_ZERO(&readfds);
+                openssl_fdset(SSL_get_fd(con), &readfds);
+                timeout.tv_sec = S_CLIENT_IRC_READ_TIMEOUT;
+                timeout.tv_usec = 0;
+                /*
+                 * If the IRCd doesn't respond within
+                 * S_CLIENT_IRC_READ_TIMEOUT seconds, assume
+                 * it doesn't support STARTTLS. Many IRCds
+                 * will not give _any_ sort of response to a
+                 * STARTTLS command when it's not supported.
+                 */
+                if (!BIO_get_buffer_num_lines(fbio)
+                    && !BIO_pending(fbio)
+                    && !BIO_pending(sbio)
+                    && select(width, (void *)&readfds, NULL, NULL,
+                              &timeout) < 1) {
+                    BIO_printf(bio_err,
+                               "Timeout waiting for response (%d seconds).\n",
+                               S_CLIENT_IRC_READ_TIMEOUT);
+                    break;
+                }
+
+                mbuf_len = BIO_gets(fbio, mbuf, BUFSIZZ);
+                if (mbuf_len < 1 || sscanf(mbuf, "%*s %d", &numeric) != 1)
+                    break;
+                /* :example.net 451 STARTTLS :You have not registered */
+                /* :example.net 421 STARTTLS :Unknown command */
+                if ((numeric == 451 || numeric == 421)
+                    && strstr(mbuf, "STARTTLS") != NULL) {
+                    BIO_printf(bio_err, "STARTTLS not supported: %s", mbuf);
+                    break;
+                }
+                if (numeric == 691) {
+                    BIO_printf(bio_err, "STARTTLS negotiation failed: ");
+                    ERR_print_errors(bio_err);
+                    break;
+                }
+            } while (numeric != 670);
+
+            (void)BIO_flush(fbio);
+            BIO_pop(fbio);
+            BIO_free(fbio);
+            if (numeric != 670) {
+                BIO_printf(bio_err, "Server does not support STARTTLS.\n");
+                ret = 1;
+                goto shut;
+            }
+        }
     }
 
     for (;;) {
@@ -2041,7 +2102,7 @@ int s_client_main(int argc, char **argv)
         SSL_free(con);
     }
     if (async) {
-        ASYNC_free_pool();
+        ASYNC_cleanup(1);
     }
 #if !defined(OPENSSL_NO_NEXTPROTONEG)
     OPENSSL_free(next_proto.data);

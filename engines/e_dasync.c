@@ -87,7 +87,7 @@ static void dummy_pause_job(void);
 /* SHA1 */
 static int dasync_sha1_init(EVP_MD_CTX *ctx);
 static int dasync_sha1_update(EVP_MD_CTX *ctx, const void *data,
-                             unsigned long count);
+                             size_t count);
 static int dasync_sha1_final(EVP_MD_CTX *ctx, unsigned char *md);
 
 static const EVP_MD dasync_sha1 = {
@@ -276,7 +276,7 @@ static int dasync_sha1_init(EVP_MD_CTX *ctx)
 }
 
 static int dasync_sha1_update(EVP_MD_CTX *ctx, const void *data,
-                             unsigned long count)
+                             size_t count)
 {
     dummy_pause_job();
 
@@ -296,29 +296,32 @@ static int dasync_sha1_final(EVP_MD_CTX *ctx, unsigned char *md)
 
 static int dasync_pub_enc(int flen, const unsigned char *from,
                     unsigned char *to, RSA *rsa, int padding) {
+    /* Ignore errors - we carry on anyway */
     dummy_pause_job();
-    return RSA_PKCS1_SSLeay()->rsa_pub_enc(flen, from, to, rsa, padding);
+    return RSA_PKCS1_OpenSSL()->rsa_pub_enc(flen, from, to, rsa, padding);
 }
 
 static int dasync_pub_dec(int flen, const unsigned char *from,
                     unsigned char *to, RSA *rsa, int padding) {
+    /* Ignore errors - we carry on anyway */
     dummy_pause_job();
-    return RSA_PKCS1_SSLeay()->rsa_pub_dec(flen, from, to, rsa, padding);
+    return RSA_PKCS1_OpenSSL()->rsa_pub_dec(flen, from, to, rsa, padding);
 }
 
 static int dasync_rsa_priv_enc(int flen, const unsigned char *from,
                       unsigned char *to, RSA *rsa, int padding)
 {
+    /* Ignore errors - we carry on anyway */
     dummy_pause_job();
-    return RSA_PKCS1_SSLeay()->rsa_priv_enc(flen, from, to, rsa, padding);
+    return RSA_PKCS1_OpenSSL()->rsa_priv_enc(flen, from, to, rsa, padding);
 }
 
 static int dasync_rsa_priv_dec(int flen, const unsigned char *from,
                       unsigned char *to, RSA *rsa, int padding)
 {
     /* Ignore errors - we carry on anyway */
-    ASYNC_pause_job();
-    return RSA_PKCS1_SSLeay()->rsa_priv_dec(flen, from, to, rsa, padding);
+    dummy_pause_job();
+    return RSA_PKCS1_OpenSSL()->rsa_priv_dec(flen, from, to, rsa, padding);
 }
 
 static int dasync_rsa_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa, BN_CTX *ctx)
@@ -329,11 +332,11 @@ static int dasync_rsa_mod_exp(BIGNUM *r0, const BIGNUM *I, RSA *rsa, BN_CTX *ctx
 
 static int dasync_rsa_init(RSA *rsa)
 {
-    return RSA_PKCS1_SSLeay()->init(rsa);
+    return RSA_PKCS1_OpenSSL()->init(rsa);
 }
 static int dasync_rsa_finish(RSA *rsa)
 {
-    return RSA_PKCS1_SSLeay()->finish(rsa);
+    return RSA_PKCS1_OpenSSL()->finish(rsa);
 }
 
 static int dasync_rsa_sign(int type, const unsigned char *m,

@@ -176,7 +176,6 @@ SSL3_ENC_METHOD ssl3_undef_enc_method = {
     (int (*)(SSL *, const char *, int, unsigned char *))
         ssl_undefined_function,
     0,                          /* finish_mac_length */
-    (int (*)(SSL *, int, unsigned char *))ssl_undefined_function,
     NULL,                       /* client_finished_label */
     0,                          /* client_finished_label_len */
     NULL,                       /* server_finished_label */
@@ -227,9 +226,7 @@ int SSL_clear(SSL *s)
         return 0;
     }
 
-    s->type = 0;
-
-    s->state = SSL_ST_BEFORE | ((s->server) ? SSL_ST_ACCEPT : SSL_ST_CONNECT);
+    ossl_statem_clear(s);
 
     s->version = s->method->version;
     s->client_version = s->version;
@@ -244,7 +241,7 @@ int SSL_clear(SSL *s)
      * Check to see if we were changed into a different method, if so, revert
      * back if we are not doing session-id reuse.
      */
-    if (!s->in_handshake && (s->session == NULL)
+    if (!ossl_statem_get_in_handshake(s) && (s->session == NULL)
         && (s->method != s->ctx->method)) {
         s->method->ssl_free(s);
         s->method = s->ctx->method;
@@ -325,7 +322,7 @@ SSL *SSL_new(SSL_CTX *ctx)
     s->generate_session_id = ctx->generate_session_id;
 
     s->param = X509_VERIFY_PARAM_new();
-    if (!s->param)
+    if (s->param == NULL)
         goto err;
     X509_VERIFY_PARAM_inherit(s->param, ctx->param);
     s->quiet_shutdown = ctx->quiet_shutdown;
@@ -379,6 +376,9 @@ SSL *SSL_new(SSL_CTX *ctx)
     }
 
     s->verify_result = X509_V_OK;
+
+    s->default_passwd_callback = ctx->default_passwd_callback;
+    s->default_passwd_callback_userdata = ctx->default_passwd_callback_userdata;
 
     s->method = ctx->method;
 
@@ -872,7 +872,7 @@ int SSL_copy_session_id(SSL *t, const SSL *f)
     }
 
     /*
-     * what if we are setup as SSLv2 but want to talk SSLv3 or vice-versa
+     * what if we are setup for one protocol version but want to talk another
      */
     if (t->method != f->method) {
         t->method->ssl_free(t); /* cleanup current */
@@ -975,7 +975,7 @@ static int ssl_start_async_job(SSL *s, struct ssl_async_args *args,
         sizeof(struct ssl_async_args))) {
     case ASYNC_ERR:
         s->rwstate = SSL_NOTHING;
-        SSLerr(SSL_F_START_ASYNC_JOB, SSL_R_FAILED_TO_INIT_ASYNC);
+        SSLerr(SSL_F_SSL_START_ASYNC_JOB, SSL_R_FAILED_TO_INIT_ASYNC);
         return -1;
     case ASYNC_PAUSE:
         s->rwstate = SSL_ASYNC_PAUSED;
@@ -985,7 +985,7 @@ static int ssl_start_async_job(SSL *s, struct ssl_async_args *args,
         return ret;
     default:
         s->rwstate = SSL_NOTHING;
-        SSLerr(SSL_F_START_ASYNC_JOB, ERR_R_INTERNAL_ERROR);
+        SSLerr(SSL_F_SSL_START_ASYNC_JOB, ERR_R_INTERNAL_ERROR);
         /* Shouldn't happen */
         return -1;
     }
@@ -1102,7 +1102,7 @@ int SSL_shutdown(SSL *s)
         return -1;
     }
 
-    if ((s != NULL) && !SSL_in_init(s))
+    if (!SSL_in_init(s))
         return (s->method->ssl_shutdown(s));
     else
         return (1);
@@ -1192,7 +1192,7 @@ long SSL_ctrl(SSL *s, int cmd, long larg, void *parg)
             return TLS_CIPHER_LEN;
         }
     case SSL_CTRL_GET_EXTMS_SUPPORT:
-        if (!s->session || SSL_in_init(s) || s->in_handshake)
+        if (!s->session || SSL_in_init(s) || ossl_statem_get_in_handshake(s))
 		return -1;
 	if (s->session->flags & SSL_SESS_FLAG_EXTMS)
             return 1;
@@ -1336,25 +1336,21 @@ long SSL_CTX_callback_ctrl(SSL_CTX *ctx, int cmd, void (*fp) (void))
 
 int ssl_cipher_id_cmp(const SSL_CIPHER *a, const SSL_CIPHER *b)
 {
-    long l;
-
-    l = a->id - b->id;
-    if (l == 0L)
-        return (0);
-    else
-        return ((l > 0) ? 1 : -1);
+    if (a->id > b->id)
+        return 1;
+    if (a->id < b->id)
+        return -1;
+    return 0;
 }
 
 int ssl_cipher_ptr_id_cmp(const SSL_CIPHER *const *ap,
                           const SSL_CIPHER *const *bp)
 {
-    long l;
-
-    l = (*ap)->id - (*bp)->id;
-    if (l == 0L)
-        return (0);
-    else
-        return ((l > 0) ? 1 : -1);
+    if ((*ap)->id > (*bp)->id)
+        return 1;
+    if ((*ap)->id < (*bp)->id)
+        return -1;
+    return 0;
 }
 
 /** return a STACK of the ciphers available for the SSL and in order of
@@ -1473,7 +1469,6 @@ int SSL_set_cipher_list(SSL *s, const char *str)
     return 1;
 }
 
-/* works well for SSLv2, not so good for SSLv3 */
 char *SSL_get_shared_ciphers(const SSL *s, char *buf, int len)
 {
     char *p;
@@ -1664,7 +1659,7 @@ int SSL_CTX_set_alpn_protos(SSL_CTX *ctx, const unsigned char *protos,
 {
     OPENSSL_free(ctx->alpn_client_proto_list);
     ctx->alpn_client_proto_list = OPENSSL_malloc(protos_len);
-    if (!ctx->alpn_client_proto_list)
+    if (ctx->alpn_client_proto_list == NULL)
         return 1;
     memcpy(ctx->alpn_client_proto_list, protos, protos_len);
     ctx->alpn_client_proto_list_len = protos_len;
@@ -1682,7 +1677,7 @@ int SSL_set_alpn_protos(SSL *ssl, const unsigned char *protos,
 {
     OPENSSL_free(ssl->alpn_client_proto_list);
     ssl->alpn_client_proto_list = OPENSSL_malloc(protos_len);
-    if (!ssl->alpn_client_proto_list)
+    if (ssl->alpn_client_proto_list == NULL)
         return 1;
     memcpy(ssl->alpn_client_proto_list, protos, protos_len);
     ssl->alpn_client_proto_list_len = protos_len;
@@ -1825,7 +1820,7 @@ SSL_CTX *SSL_CTX_new(const SSL_METHOD *meth)
     }
 
     ret->param = X509_VERIFY_PARAM_new();
-    if (!ret->param)
+    if (ret->param == NULL)
         goto err;
 
     if ((ret->md5 = EVP_get_digestbyname("ssl3-md5")) == NULL) {
@@ -1963,6 +1958,16 @@ void SSL_CTX_set_default_passwd_cb_userdata(SSL_CTX *ctx, void *u)
     ctx->default_passwd_callback_userdata = u;
 }
 
+void SSL_set_default_passwd_cb(SSL *s, pem_password_cb *cb)
+{
+    s->default_passwd_callback = cb;
+}
+
+void SSL_set_default_passwd_cb_userdata(SSL *s, void *u)
+{
+    s->default_passwd_callback_userdata = u;
+}
+
 void SSL_CTX_set_cert_verify_callback(SSL_CTX *ctx,
                                       int (*cb) (X509_STORE_CTX *, void *),
                                       void *arg)
@@ -2063,11 +2068,23 @@ void ssl_set_masks(SSL *s, const SSL_CIPHER *cipher)
             rsa_enc_export, rsa_sign, dsa_sign, dh_rsa, dh_dsa);
 #endif
 
+#ifndef OPENSSL_NO_GOST
+    cpk = &(c->pkeys[SSL_PKEY_GOST12_512]);
+    if (cpk->x509 != NULL && cpk->privatekey != NULL) {
+        mask_k |= SSL_kGOST;
+        mask_a |= SSL_aGOST12;
+    }
+    cpk = &(c->pkeys[SSL_PKEY_GOST12_256]);
+    if (cpk->x509 != NULL && cpk->privatekey != NULL) {
+        mask_k |= SSL_kGOST;
+        mask_a |= SSL_aGOST12;
+    }
     cpk = &(c->pkeys[SSL_PKEY_GOST01]);
     if (cpk->x509 != NULL && cpk->privatekey != NULL) {
         mask_k |= SSL_kGOST;
         mask_a |= SSL_aGOST01;
     }
+#endif
 
     if (rsa_enc || (rsa_tmp && rsa_sign))
         mask_k |= SSL_kRSA;
@@ -2249,6 +2266,16 @@ static int ssl_get_server_cert_index(const SSL *s)
     idx = ssl_cipher_get_cert_index(s->s3->tmp.new_cipher);
     if (idx == SSL_PKEY_RSA_ENC && !s->cert->pkeys[SSL_PKEY_RSA_ENC].x509)
         idx = SSL_PKEY_RSA_SIGN;
+    if (idx == SSL_PKEY_GOST_EC) {
+        if (s->cert->pkeys[SSL_PKEY_GOST12_512].x509)
+            idx = SSL_PKEY_GOST12_512;
+        else if (s->cert->pkeys[SSL_PKEY_GOST12_256].x509)
+            idx = SSL_PKEY_GOST12_256;
+        else if (s->cert->pkeys[SSL_PKEY_GOST01].x509)
+            idx = SSL_PKEY_GOST01;
+        else
+            idx = -1;
+    }
     if (idx == -1)
         SSLerr(SSL_F_SSL_GET_SERVER_CERT_INDEX, ERR_R_INTERNAL_ERROR);
     return idx;
@@ -2529,7 +2556,7 @@ void SSL_set_accept_state(SSL *s)
 {
     s->server = 1;
     s->shutdown = 0;
-    s->state = SSL_ST_ACCEPT | SSL_ST_BEFORE;
+    ossl_statem_clear(s);
     s->handshake_func = s->method->ssl_accept;
     clear_ciphers(s);
 }
@@ -2538,7 +2565,7 @@ void SSL_set_connect_state(SSL *s)
 {
     s->server = 0;
     s->shutdown = 0;
-    s->state = SSL_ST_CONNECT | SSL_ST_BEFORE;
+    ossl_statem_clear(s);
     s->handshake_func = s->method->ssl_connect;
     clear_ciphers(s);
 }
@@ -2598,7 +2625,6 @@ SSL *SSL_dup(SSL *s)
         return (NULL);
 
     ret->version = s->version;
-    ret->type = s->type;
     ret->method = s->method;
 
     if (s->session != NULL) {
@@ -2659,20 +2685,22 @@ SSL *SSL_dup(SSL *s)
             ret->wbio = ret->rbio;
     }
     ret->rwstate = s->rwstate;
-    ret->in_handshake = s->in_handshake;
     ret->handshake_func = s->handshake_func;
     ret->server = s->server;
     ret->renegotiate = s->renegotiate;
     ret->new_session = s->new_session;
     ret->quiet_shutdown = s->quiet_shutdown;
     ret->shutdown = s->shutdown;
-    ret->state = s->state;      /* SSL_dup does not really work at any state,
-                                 * though */
+    ret->statem = s->statem;      /* SSL_dup does not really work at any state,
+                                   * though */
     RECORD_LAYER_dup(&ret->rlayer, &s->rlayer);
     ret->init_num = 0;          /* would have to copy ret->init_buf,
                                  * ret->init_msg, ret->init_num,
                                  * ret->init_off */
     ret->hit = s->hit;
+
+    ret->default_passwd_callback = s->default_passwd_callback;
+    ret->default_passwd_callback_userdata = s->default_passwd_callback_userdata;
 
     X509_VERIFY_PARAM_inherit(ret->param, s->param);
 
@@ -2969,16 +2997,6 @@ void (*SSL_get_info_callback(const SSL *ssl)) (const SSL * /* ssl */ ,
     return ssl->info_callback;
 }
 
-int SSL_state(const SSL *ssl)
-{
-    return (ssl->state);
-}
-
-void SSL_set_state(SSL *ssl, int state)
-{
-    ssl->state = state;
-}
-
 void SSL_set_verify_result(SSL *ssl, long arg)
 {
     ssl->verify_result = arg;
@@ -3024,13 +3042,6 @@ size_t SSL_SESSION_get_master_key(const SSL_SESSION *session,
     return outlen;
 }
 
-int SSL_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new *new_func,
-                         CRYPTO_EX_dup *dup_func, CRYPTO_EX_free *free_func)
-{
-    return CRYPTO_get_ex_new_index(CRYPTO_EX_INDEX_SSL, argl, argp,
-                                   new_func, dup_func, free_func);
-}
-
 int SSL_set_ex_data(SSL *s, int idx, void *arg)
 {
     return (CRYPTO_set_ex_data(&s->ex_data, idx, arg));
@@ -3039,14 +3050,6 @@ int SSL_set_ex_data(SSL *s, int idx, void *arg)
 void *SSL_get_ex_data(const SSL *s, int idx)
 {
     return (CRYPTO_get_ex_data(&s->ex_data, idx));
-}
-
-int SSL_CTX_get_ex_new_index(long argl, void *argp, CRYPTO_EX_new *new_func,
-                             CRYPTO_EX_dup *dup_func,
-                             CRYPTO_EX_free *free_func)
-{
-    return CRYPTO_get_ex_new_index(CRYPTO_EX_INDEX_SSL_CTX, argl, argp,
-                                   new_func, dup_func, free_func);
 }
 
 int SSL_CTX_set_ex_data(SSL_CTX *s, int idx, void *arg)
@@ -3298,8 +3301,11 @@ EVP_MD_CTX *ssl_replace_hash(EVP_MD_CTX **hash, const EVP_MD *md)
 {
     ssl_clear_hash_ctx(hash);
     *hash = EVP_MD_CTX_create();
-    if (md)
-        EVP_DigestInit_ex(*hash, md, NULL);
+    if (*hash == NULL || (md && EVP_DigestInit_ex(*hash, md, NULL) <= 0)) {
+        EVP_MD_CTX_destroy(*hash);
+        *hash = NULL;
+        return NULL;
+    }
     return *hash;
 }
 
@@ -3314,27 +3320,17 @@ void ssl_clear_hash_ctx(EVP_MD_CTX **hash)
 /* Retrieve handshake hashes */
 int ssl_handshake_hash(SSL *s, unsigned char *out, int outlen)
 {
-    unsigned char *p = out;
-    int idx, ret = 0;
-    long mask;
     EVP_MD_CTX ctx;
-    const EVP_MD *md;
+    EVP_MD_CTX *hdgst = s->s3->handshake_dgst;
+    int ret = EVP_MD_CTX_size(hdgst);
     EVP_MD_CTX_init(&ctx);
-    for (idx = 0; ssl_get_handshake_digest(idx, &mask, &md); idx++) {
-        if (mask & ssl_get_algorithm2(s)) {
-            int hashsize = EVP_MD_size(md);
-            EVP_MD_CTX *hdgst = s->s3->handshake_dgst[idx];
-            if (!hdgst || hashsize < 0 || hashsize > outlen)
-                goto err;
-            if (!EVP_MD_CTX_copy_ex(&ctx, hdgst))
-                goto err;
-            if (!EVP_DigestFinal_ex(&ctx, p, NULL))
-                goto err;
-            p += hashsize;
-            outlen -= hashsize;
-        }
+    if (ret < 0 || ret > outlen) {
+        ret = 0;
+        goto err;
     }
-    ret = p - out;
+    if (!EVP_MD_CTX_copy_ex(&ctx, hdgst)
+        || EVP_DigestFinal_ex(&ctx, out, NULL) <= 0)
+        ret = 0;
  err:
     EVP_MD_CTX_cleanup(&ctx);
     return ret;

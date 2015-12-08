@@ -50,30 +50,27 @@
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  * ====================================================================
  */
+#ifndef OPENSSL_ASYNC_ARCH_ASYNC_POSIX_H
+#define OPENSSL_ASYNC_ARCH_ASYNC_POSIX_H
 #include <openssl/e_os2.h>
 
-#ifdef OPENSSL_SYS_UNIX
+#if defined(OPENSSL_SYS_UNIX) && defined(OPENSSL_THREADS)
 
 # include <unistd.h>
 
 # if _POSIX_VERSION >= 200112L
 
+# include <pthread.h>
+
 #  define ASYNC_POSIX
 #  define ASYNC_ARCH
-
-/*
- * Some platforms complain (e.g. OS-X) that setcontext/getcontext/makecontext
- * are deprecated without the following defined. We know its deprecated but
- * there is no alternative.
- */
-#  define _XOPEN_SOURCE
-#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 #  include <ucontext.h>
 #  include <setjmp.h>
 #  include "e_os.h"
 
-extern __thread async_ctx *sysvctx;
+extern pthread_key_t posixctx;
+extern pthread_key_t posixpool;
 
 typedef struct async_fibre_st {
     ucontext_t fibre;
@@ -81,8 +78,10 @@ typedef struct async_fibre_st {
     int env_init;
 } async_fibre;
 
-#  define async_set_ctx(nctx)             (sysvctx = (nctx))
-#  define async_get_ctx()                 (sysvctx)
+#  define async_set_ctx(nctx)  (pthread_setspecific(posixctx , (nctx)) == 0)
+#  define async_get_ctx()      ((async_ctx *)pthread_getspecific(posixctx))
+#  define async_set_pool(p)    (pthread_setspecific(posixpool , (p)) == 0)
+#  define async_get_pool()     ((async_pool *)pthread_getspecific(posixpool))
 
 static inline int async_fibre_swapcontext(async_fibre *o, async_fibre *n, int r)
 {
@@ -98,14 +97,11 @@ static inline int async_fibre_swapcontext(async_fibre *o, async_fibre *n, int r)
     return 1;
 }
 
-#  define async_fibre_makecontext(c) \
-            (!getcontext(&(c)->fibre) \
-            && async_fibre_init(c) \
-            && (makecontext(&(c)->fibre, async_start_func, 0), 1))
 #  define async_fibre_init_dispatcher(d)
 
-int async_fibre_init(async_fibre *fibre);
+int async_fibre_makecontext(async_fibre *fibre);
 void async_fibre_free(async_fibre *fibre);
 
 # endif
 #endif
+#endif /* OPENSSL_ASYNC_ARCH_ASYNC_POSIX_H */
