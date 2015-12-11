@@ -122,7 +122,14 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char* buf, size_t len)
     cb->aio_resfd = aio->efd;
 
     if((job = ASYNC_get_current_job()) != NULL) {
+//Not sure of best approach to connect our efd to jobs wait_fd
+#if 0
         ASYNC_set_wait_fd(job, aio->efd);
+#else
+        if (-1 == dup2(aio->efd, ASYNC_get_wake_fd(job))) {
+            printf("dup2 error\n");
+        }
+#endif
     }
 
     r = io_read(aio->aio_ctx, 1, &cb);

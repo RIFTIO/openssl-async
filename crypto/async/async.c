@@ -444,6 +444,15 @@ OSSL_ASYNC_FD ASYNC_get_wait_fd(ASYNC_JOB *job)
     return job->wait_fd;
 }
 
+void ASYNC_set_wait_fd(ASYNC_JOB *job, OSSL_ASYNC_FD fd)
+{
+    job->wait_fd = fd;
+}
+OSSL_ASYNC_FD ASYNC_get_wake_fd(ASYNC_JOB *job)
+{
+    return job->wake_fd;
+}
+
 void ASYNC_wake(ASYNC_JOB *job)
 {
     char dummy = 0;
