@@ -87,7 +87,6 @@
 #include <openssl/evp.h>
 #include <openssl/objects.h>
 #include <openssl/async.h>
-#include <sys/select.h>
 #include <sys/time.h>
 #if !defined(OPENSSL_SYS_MSDOS)
 # include OPENSSL_UNISTD
@@ -107,6 +106,19 @@
 #  define _WIN32
   /* this is done because Cygwin alarm() fails sometimes. */
 # endif
+#endif
+
+#if defined(OPENSSL_SYS_UNIX) && defined(OPENSSL_THREADS)
+# include <unistd.h>
+# if _POSIX_VERSION >= 200112L
+#  define ASYNC_POSIX
+# endif
+#elif defined(_WIN32) || defined(__CYGWIN__)
+# define ASYNC_WIN
+#endif
+
+#if !defined(ASYNC_POSIX) && !defined(ASYNC_WIN)
+# define ASYNC_NULL
 #endif
 
 #include <openssl/bn.h>
@@ -408,7 +420,9 @@ OPTIONS speed_options[] = {
 #ifndef NO_FORK
     {"multi", OPT_MULTI, 'p', "Run benchmarks in parallel"},
 #endif
+#ifndef ASYNC_NULL
     {"async_jobs", OPT_ASYNCJOBS, 'p', "Enable async mode and start N jobs"},
+#endif
 #ifndef OPENSSL_NO_ENGINE
     {"engine", OPT_ENGINE, 's', "Use engine, possibly a hardware device"},
 #endif
@@ -978,16 +992,10 @@ int ECDH_compute_key_loop(void *args) {
 
 
 int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function)(void *)) {
-    int error = 0;
-    int count = 0;
-    int job_num = 0;
-    int job_count = 0;
+    int job_op_count = 0;
+    int total_op_count = 0;
     int num_inprogress = 0;
-    int job_fd = 0;
-    int max_fd = 0;
-    fd_set waitfdset;
-    struct timeval select_timeout;
-    int select_result = 0;
+    int error = 0;
     int i = 0;
 
     run = 1;
@@ -996,16 +1004,17 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
         return loop_function((void *)array_loopargs[0]);
     }
 
-    for (job_num=0; job_num < async_jobs && !error; job_num++) {
-        switch (ASYNC_start_job(&(array_loopargs[job_num]->inprogress_job), &job_count, loop_function, (void *)array_loopargs[job_num], sizeof(loopargs))) {
+    for (i = 0; i < async_jobs && !error; i++) {
+        switch (ASYNC_start_job(&(array_loopargs[i]->inprogress_job), &job_op_count,
+                                loop_function, (void *)array_loopargs[i], sizeof(loopargs))) {
             case ASYNC_PAUSE:
                 ++num_inprogress;
                 break;
             case ASYNC_FINISH:
-                if (job_count == -1) {
+                if (job_op_count == -1) {
                     error = 1;
                 } else {
-                    count += job_count;
+                    total_op_count += job_op_count;
                 }
                 break;
             case ASYNC_NO_JOBS:
@@ -1018,13 +1027,19 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
     }
 
     while (num_inprogress > 0) {
+        OSSL_ASYNC_FD job_fd = 0;
+#if defined(ASYNC_POSIX)
+        OSSL_ASYNC_FD max_fd = 0;
+        int select_result = 0;
+        fd_set waitfdset;
+        struct timeval select_timeout;
         FD_ZERO(&waitfdset);
-        max_fd=0;
         select_timeout.tv_sec=0;
         select_timeout.tv_usec=0;
-        for (job_num=0; job_num < async_jobs; job_num++) {
-            if (array_loopargs[job_num]->inprogress_job) {
-                job_fd = ASYNC_get_wait_fd(array_loopargs[job_num]->inprogress_job);
+
+        for (i = 0; i < async_jobs; i++) {
+            if (array_loopargs[i]->inprogress_job) {
+                job_fd = ASYNC_get_wait_fd(array_loopargs[i]->inprogress_job);
                 FD_SET(job_fd, &waitfdset);
                 if (job_fd > max_fd)
                     max_fd = job_fd;
@@ -1042,44 +1057,54 @@ int run_benchmark(int async_jobs, loopargs **array_loopargs, int (*loop_function
                 break;
         }
 
-        if (select_result > 0) {
-            for (i=0; i < async_jobs; i++) {
-                if (NULL == array_loopargs[i]->inprogress_job)
-                    continue;
+        if (select_result == 0)
+            continue;
 
-                job_fd = ASYNC_get_wait_fd(array_loopargs[i]->inprogress_job);
+#elif defined(ASYNC_WIN)
+        DWORD avail = 0;
+#endif
 
-                if (!FD_ISSET(job_fd, &waitfdset))
-                    continue;
+        for (i = 0; i < async_jobs; i++) {
+            if (NULL == array_loopargs[i]->inprogress_job)
+                continue;
 
-                switch (ASYNC_start_job(&(array_loopargs[i]->inprogress_job), &job_count, loop_function, (void *)array_loopargs[i], sizeof(loopargs))) {
-                    case ASYNC_PAUSE:
-                        break;
-                    case ASYNC_FINISH:
-                        if (job_count == -1) {
-                            error = 1;
-                        } else {
-                            count += job_count;
-                        }
-                        --num_inprogress;
-                        array_loopargs[i]->inprogress_job = NULL;
-                        FD_CLR(job_fd, &waitfdset);
-                        break;
-                    case ASYNC_NO_JOBS:
-                    case ASYNC_ERR:
-                        --num_inprogress;
-                        array_loopargs[i]->inprogress_job = NULL;
-                        FD_CLR(job_fd, &waitfdset);
-                        BIO_printf(bio_err, "Failure in the job\n");
-                        ERR_print_errors(bio_err);
+            job_fd = ASYNC_get_wait_fd(array_loopargs[i]->inprogress_job);
+
+#if defined(ASYNC_POSIX)
+            if (!FD_ISSET(job_fd, &waitfdset))
+                continue;
+#elif defined(ASYNC_WIN)
+            if (!PeekNamedPipe(job_fd, NULL, 0, NULL, &avail, NULL) && avail > 0)
+                continue;
+#endif
+
+            switch (ASYNC_start_job(&(array_loopargs[i]->inprogress_job),
+                        &job_op_count, loop_function, (void *)array_loopargs[i],
+                        sizeof(loopargs))) {
+                case ASYNC_PAUSE:
+                    break;
+                case ASYNC_FINISH:
+                    if (job_op_count == -1) {
                         error = 1;
-                        break;
-                }
+                    } else {
+                        total_op_count += job_op_count;
+                    }
+                    --num_inprogress;
+                    array_loopargs[i]->inprogress_job = NULL;
+                    break;
+                case ASYNC_NO_JOBS:
+                case ASYNC_ERR:
+                    --num_inprogress;
+                    array_loopargs[i]->inprogress_job = NULL;
+                    BIO_printf(bio_err, "Failure in the job\n");
+                    ERR_print_errors(bio_err);
+                    error = 1;
+                    break;
             }
         }
     }
 
-    return error ? -1 : count;
+    return error ? -1 : total_op_count;
 }
 
 int speed_main(int argc, char **argv)
@@ -1304,7 +1329,9 @@ int speed_main(int argc, char **argv)
 #endif
             break;
         case OPT_ASYNCJOBS:
+#ifndef ASYNC_NULL
             async_jobs = atoi(opt_arg());
+#endif
             break;
         case OPT_MISALIGN:
             if (!opt_int(opt_arg(), &misalign))
@@ -1412,11 +1439,19 @@ int speed_main(int argc, char **argv)
         goto end;
     }
 
+    if (async_jobs > 0) {
+        if (!ASYNC_init(1, 0, 0)) {
+            BIO_printf(bio_err, "Error creating the ASYNC job pool\n");
+            goto end;
+        }
+    }
+
     array_loopargs = app_malloc((!async_jobs ? 1 : async_jobs) * sizeof(loopargs*), "array of loopargs*");
     for (i = 0; i < (!async_jobs ? 1 : async_jobs); i++) {
         array_loopargs[i] = app_malloc((sizeof(loopargs)), "an individual looparg structure");
         memset(array_loopargs[i], 0, sizeof(loopargs));
     }
+
 
 #ifndef NO_FORK
     if (multi && do_multi(multi))
@@ -2570,6 +2605,8 @@ int speed_main(int argc, char **argv)
         EC_KEY_free(ecdh_b[i]);
     }
 #endif
+    if (async_jobs > 0)
+        ASYNC_cleanup(1);
     return (ret);
 }
 

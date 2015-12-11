@@ -75,7 +75,6 @@ static int dasync_init(ENGINE *e);
 static int dasync_finish(ENGINE *e);
 void ENGINE_load_dasync(void);
 
-
 /* Set up digests. Just SHA1 for now */
 static int dasync_digests(ENGINE *e, const EVP_MD **digest,
                           const int **nids, int nid);
