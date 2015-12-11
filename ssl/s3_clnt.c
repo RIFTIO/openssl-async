@@ -1331,6 +1331,9 @@ static int ssl3_get_key_exchange_md_post(unsigned char *md, unsigned int size,
     s->s3->key_exchange_cache.status = status;
     s->s3->pkeystate = 10;
     s->s3->key_exchange_cache.i = size;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,md,size,s,NULL);
+    }
     return 1;
 }
 
@@ -1338,6 +1341,9 @@ static int ssl3_get_key_exchange_verify_post(SSL *s, int status)
 {
     s->s3->key_exchange_cache.status = status;
     s->s3->pkeystate = 1;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,NULL,0,s,NULL);
+    }
     return 1;
 }
 
@@ -2035,7 +2041,7 @@ int ssl3_get_key_exchange(SSL *s)
                 if (i <= 0) {
                     int error = 0;
                     s->s3->pkeystate = 0;
-                    error = ERR_get_error();
+                    error = ERR_peek_error();
                     if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                         s->s3->pkeystate = 2;
                         s->s3->tmp.reuse_message = 1;
@@ -2077,7 +2083,7 @@ int ssl3_get_key_exchange(SSL *s)
                 if (EVP_VerifyFinal(&md_ctx, p, (int)n, pkey) <= 0) {
                     int error = 0;
                     s->s3->pkeystate = 0;
-                    error = ERR_get_error();
+                    error = ERR_peek_error();
                     if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                         s->s3->tmp.reuse_message = 1;
                         s->s3->pkeystate = 2;
@@ -2667,7 +2673,7 @@ int ssl3_send_client_key_exchange(SSL *s)
                 if (n <= 0) {
                     int error = 0;
                     s->s3->pkeystate = 0;
-                    error = ERR_get_error();
+                    error = ERR_peek_error();
                     if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                         s->s3->pkeystate = 2;
                         goto post_prf_rsa;
@@ -2953,7 +2959,7 @@ int ssl3_send_client_key_exchange(SSL *s)
                                             ssl3_send_client_key_exchange_post, s)) {
                     int error = 0;
                     s->s3->pkeystate = 0;
-                    error = ERR_get_error();
+                    error = ERR_peek_error();
                     if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                         s->s3->pkeystate = 2;
                         goto err;
@@ -2993,7 +2999,7 @@ int ssl3_send_client_key_exchange(SSL *s)
                 if (n <= 0) {
                     int error = 0;
                     s->s3->pkeystate = 0;
-                    error = ERR_get_error();
+                    error = ERR_peek_error();
                     if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                         s->s3->pkeystate = 2;
                         goto err;
@@ -3191,7 +3197,7 @@ int ssl3_send_client_key_exchange(SSL *s)
                          ssl3_send_client_key_exchange_post, s)) {
                         int error = 0;
                         s->s3->pkeystate = 0;
-                        error = ERR_get_error();
+                        error = ERR_peek_error();
                         if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                             s->s3->pkeystate = 2;
                             goto err;
@@ -3253,7 +3259,7 @@ int ssl3_send_client_key_exchange(SSL *s)
                 if (n <= 0) {
                     int error = 0;
                     s->s3->pkeystate = 0;
-                    error = ERR_get_error();
+                    error = ERR_peek_error();
                     if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                         s->s3->pkeystate = 2;
                         goto err;
@@ -3709,6 +3715,9 @@ static int ssl3_send_client_verify_dsa_post(unsigned char *res, size_t reslen,
     s->s3->send_client_verify.status = status;
     s->s3->send_client_verify.u = (int)reslen;
     s->s3->pkeystate = 4;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,res,reslen,s,NULL);
+    }
     return 1;
 }
 
@@ -3722,6 +3731,9 @@ static int ssl3_send_client_verify_ecdsa_post(unsigned char *res,
     s->s3->send_client_verify.status = status;
     s->s3->send_client_verify.u = (int)reslen;
     s->s3->pkeystate = 3;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,res,reslen,s,NULL);
+    }
     return 1;
 }
 
@@ -3733,6 +3745,9 @@ static int ssl3_send_client_verify_post(unsigned char *res, size_t reslen,
      */
     s->s3->send_client_verify.status = status;
     s->s3->pkeystate = 1;
+    if(s->asynch_completion_callback) {
+        s->asynch_completion_callback(0,status,res,reslen,s,NULL);
+    }
     return 1;
 }
 
@@ -3842,7 +3857,7 @@ int ssl3_send_client_verify(SSL *s)
                     (&mctx, p + 2, &s->s3->send_client_verify.u, pkey)) {
                     int error = 0;
                     s->s3->pkeystate = 0;
-                    error = ERR_get_error();
+                    error = ERR_peek_error();
                     if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                         s->s3->pkeystate = 2;
                         goto err;

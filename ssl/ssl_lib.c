@@ -2653,11 +2653,11 @@ int SSL_get_error(const SSL *s, int i)
         return (SSL_ERROR_WANT_X509_LOOKUP);
     }
     if ((i < 0) && s->s3 && s->s3->flags & SSL3_FLAGS_ASYNCH) {
-        if( s->s3->pkeystate == 2) {
-            /* retry happens */
-            return (SSL_ERROR_WANT_ASYNCH);
-        }
-        else if( s->s3->pkeystate != 0) {
+        if( s->s3->pkeystate != 0) {
+            if(ERR_R_RETRY == ERR_GET_REASON(l)) {
+                /* retry happens */
+                return (SSL_ERROR_WANT_ASYNCH);
+            }
             return (SSL_ERROR_WAIT_ASYNCH);
         }
     }

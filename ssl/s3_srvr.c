@@ -1899,7 +1899,7 @@ int ssl3_send_server_key_exchange(SSL *s)
                                                 ssl3_send_server_key_exchange_dh_post, s)) {
                         int error = 0;
                         s->s3->pkeystate = 0;
-                        error = ERR_get_error();
+                        error = ERR_peek_error();
                         if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                             s->s3->pkeystate = 2;
 # ifndef OPENSSL_NO_DH
@@ -1997,7 +1997,7 @@ int ssl3_send_server_key_exchange(SSL *s)
                                                   ssl3_send_server_key_exchange_ecdh_gen_post, s)) <= 0) {
                         int error = 0;
                         s->s3->pkeystate = 0;
-                        error = ERR_get_error();
+                        error = ERR_peek_error();
                         if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                             s->s3->pkeystate = 2;
                             goto err;
@@ -2292,7 +2292,7 @@ int ssl3_send_server_key_exchange(SSL *s)
                          (int (*)(unsigned char *, size_t, void *, int))
                          ssl3_send_server_key_exchange_post, s)) {
                         int error = 0;
-                        error = ERR_get_error();
+                        error = ERR_peek_error();
                         if (ERR_R_RETRY == ERR_GET_REASON(error))
                             s->s3->pkeystate = 11;
                         else {
@@ -2371,7 +2371,7 @@ int ssl3_send_server_key_exchange(SSL *s)
                                        pkey)) {
                         int error = 0;
                         s->s3->pkeystate = 0;
-                        error = ERR_get_error();
+                        error = ERR_peek_error();
                         if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                             s->s3->pkeystate = 2;
 #ifndef OPENSSL_NO_DH
@@ -2837,7 +2837,7 @@ int ssl3_get_client_key_exchange(SSL *s)
             if (i <= 0) {
                 int error = 0;
                 s->s3->pkeystate = 0;
-                error = ERR_get_error();
+                error = ERR_peek_error();
                 if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                     s->s3->pkeystate = 2;
                     s->s3->tmp.reuse_message = 1;
@@ -2984,7 +2984,7 @@ int ssl3_get_client_key_exchange(SSL *s)
             if (i <= 0) {
                 int error = 0;
                 s->s3->pkeystate = 0;
-                error = ERR_get_error();
+                error = ERR_peek_error();
                 if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                     s->s3->pkeystate = 2;
                     s->s3->tmp.reuse_message = 1;
@@ -3371,7 +3371,7 @@ int ssl3_get_client_key_exchange(SSL *s)
             if (i <= 0) {
                 int error = 0;
                 s->s3->pkeystate = 0;
-                error = ERR_get_error();
+                error = ERR_peek_error();
                 if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                     s->s3->pkeystate = 2;
                     s->s3->tmp.reuse_message = 1;
@@ -3904,7 +3904,7 @@ int ssl3_get_cert_verify(SSL *s)
             if (!EVP_VerifyFinal(&mctx, p, i, pkey)) {
                 int error = 0;
                 s->s3->pkeystate = 0;
-                error = ERR_get_error();
+                error = ERR_peek_error();
                 if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                     s->s3->tmp.reuse_message = 1;
                     s->s3->pkeystate = 2;
@@ -3962,7 +3962,7 @@ int ssl3_get_cert_verify(SSL *s)
             if (!i) {
                 int error = 0;
                 s->s3->pkeystate = 0;
-                error = ERR_get_error();
+                error = ERR_peek_error();
                 if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                     s->s3->pkeystate = 2;
                     s->s3->tmp.reuse_message = 1;
@@ -4008,7 +4008,7 @@ int ssl3_get_cert_verify(SSL *s)
             if (!j) {
                 int error = 0;
                 s->s3->pkeystate = 0;
-                error = ERR_get_error();
+                error = ERR_peek_error();
                 if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                     s->s3->pkeystate = 2;
                     s->s3->tmp.reuse_message = 1;
@@ -4050,7 +4050,7 @@ int ssl3_get_cert_verify(SSL *s)
             if (!j) {
                 int error = 0;
                 s->s3->pkeystate = 0;
-                error = ERR_get_error();
+                error = ERR_peek_error();
                 if (ERR_R_RETRY == ERR_GET_REASON(error)) {
                     s->s3->pkeystate = 2;
                     s->s3->tmp.reuse_message = 1;
