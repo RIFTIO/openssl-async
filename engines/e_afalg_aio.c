@@ -12,7 +12,7 @@
 #include <linux/aio_abi.h>
 #include <sys/syscall.h>
 #include <errno.h>
-
+#include <fcntl.h>
 #include <openssl/crypto.h>
 #include <openssl/async.h>
 
@@ -55,7 +55,6 @@ static inline int io_getevents(aio_context_t ctx, long min, long max,
     return syscall(__NR_io_getevents, ctx, min, max, events, timeout);
 }
 
-
 void * afalg_init_aio(void)
 {
     int r = -1;
@@ -84,6 +83,11 @@ void * afalg_init_aio(void)
     aio->failed = 0;
     memset(aio->cbt, 0, sizeof(aio->cbt));
     
+    if(ASYNC_get_current_job() != NULL) {
+    /* make efd non-blocking in async mode */
+    fcntl(aio->efd, F_SETFL, O_NONBLOCK);
+    }
+
     return (void *)aio;
 
  err:
@@ -123,13 +127,7 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char* buf, size_t len)
 
     if((job = ASYNC_get_current_job()) != NULL) {
 //Not sure of best approach to connect our efd to jobs wait_fd
-#if 0
         ASYNC_set_wait_fd(job, aio->efd);
-#else
-        if (-1 == dup2(aio->efd, ASYNC_get_wake_fd(job))) {
-            printf("dup2 error\n");
-        }
-#endif
     }
 
     r = io_read(aio->aio_ctx, 1, &cb);
@@ -140,9 +138,8 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char* buf, size_t len)
     
     do {
         ASYNC_pause_job();
-/* TODO: should this read be made non-blocking? what is best in sync mode? */
         r = read(aio->efd, &eval, sizeof(eval));
-        if (r>=0 && eval > 0) {
+        if (r>0 && eval > 0) {
             r = io_getevents(aio->aio_ctx, 1, 1, events, &timeout);
             if (r > 0) {
                 cb = (void*) events[0].obj;
@@ -160,6 +157,9 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char* buf, size_t len)
                 aio->retrys++;
             }   
         }
+        else
+           perror("read of aio->efd not as expected");
+
     } while (cb->aio_fildes != 0) ;
 
     return 1;
