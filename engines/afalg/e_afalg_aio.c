@@ -137,7 +137,9 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char* buf, size_t len)
     }
     
     do {
-        ASYNC_pause_job();
+        if(ASYNC_get_current_job() != NULL) 
+            ASYNC_pause_job();
+
         r = read(aio->efd, &eval, sizeof(eval));
         if (r>0 && eval > 0) {
             r = io_getevents(aio->aio_ctx, 1, 1, events, &timeout);
