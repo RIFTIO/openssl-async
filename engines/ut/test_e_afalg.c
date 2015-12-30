@@ -117,9 +117,7 @@ static void test_afalg_cipher_init(void)
     assert (ret = 1 && 
             ((afalg_ctx *)ctx->cipher_data)->sfd > 1 &&
             ((afalg_ctx *)ctx->cipher_data)->init_done == MAGIC_INIT_NUM &&
-# ifdef ALG_USE_AIO
             ((afalg_ctx *)ctx->cipher_data)->aio != NULL &&
-# endif
             "afalg_cipher_init Failed valid socket fd test");
     PRINT_INFO("%s: Passed valid socket fd test\n", s);
 

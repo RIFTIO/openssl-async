@@ -24,9 +24,7 @@ struct afalg_ctx_st {
 # ifdef ALG_ZERO_COPY
     int zc_pipe[2];  
 # endif
-# ifdef ALG_USE_AIO
     void *aio;
-# endif
 };
 
 typedef struct afalg_ctx_st afalg_ctx;

@@ -1,9 +1,3 @@
-/* Currently under this define until a way is
- * found to selectively compile the file in openssl/engine/Makefile
- * */
-# ifdef ALG_USE_AIO
-
-/* AIO headers */
 #include <stdio.h>
 #include <string.h>
 # define _GNU_SOURCE
@@ -176,4 +170,3 @@ void afalg_cipher_cleanup_aio(void *ptr)
     free(aio);
 }
 
-#endif /* ALG_USE_AIO */

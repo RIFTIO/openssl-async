@@ -50,12 +50,10 @@
 #define ALG_OP_TYPE     unsigned int
 #define ALG_OP_LEN      (sizeof(ALG_OP_TYPE))
 
-# ifdef ALG_USE_AIO
 extern void *afalg_init_aio(void);
 extern int afalg_fin_cipher_aio(void *ptr, int sfd, 
                                 unsigned char* buf, size_t len);
 extern void afalg_cipher_cleanup_aio(void *ptr);
-#endif
 
 /* Engine Id and Name */
 static const char *engine_afalg_id = "afalg";
@@ -268,32 +266,6 @@ static int afalg_start_cipher_sk(afalg_ctx *actx, const unsigned char *in,
     return ret;
 }
 
-# ifndef ALG_USE_AIO
-static int afalg_fin_cipher_sk(afalg_ctx *actx, unsigned char* buf, size_t len)
-{
-    struct msghdr msg = {};
-    struct iovec iov;
-    ssize_t rbytes;
-
-    iov.iov_base = buf;
-    iov.iov_len = len;
-
-    msg.msg_iovlen = 1;
-    msg.msg_iov = &iov;
-
-    rbytes = recvmsg(actx->sfd, &msg, 0);
-    if (rbytes < 0) {
-            perror("Recvmsg failed for cipher operation");
-            return 0;
-    }
-    
-    if(rbytes != len)
-        ALG_WARN("Cipher operation send bytes %zd != inlen %zd\n", rbytes, len);
-    return 1;
-    
-}
-#endif
-
 static int afalg_do_cipher_sk(afalg_ctx *actx, unsigned char *out,
                               const unsigned char *in, size_t inl,
                               unsigned char *iv, unsigned int ivlen,
@@ -306,11 +278,7 @@ static int afalg_do_cipher_sk(afalg_ctx *actx, unsigned char *out,
         goto err;
     }
 
-# ifdef ALG_USE_AIO
     ret = afalg_fin_cipher_aio(actx->aio, actx->sfd, out, inl);
-# else 
-    ret = afalg_fin_cipher_sk(actx, out, inl);
-# endif
 
  err:
     return ret;
@@ -354,12 +322,10 @@ STATIC int afalg_cipher_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
         return 0;
     }
 
-# ifdef ALG_USE_AIO
     actx->aio = afalg_init_aio();
     if(!actx->aio) {
         return 0;
     }
-#endif
 
 #ifdef ALG_ZERO_COPY
     pipe(actx->zc_pipe);
@@ -435,9 +401,7 @@ static int afalg_cipher_cleanup(EVP_CIPHER_CTX *ctx)
     close(actx->zc_pipe[0]);
     close(actx->zc_pipe[1]);
 #endif
-# ifdef ALG_USE_AIO
     afalg_cipher_cleanup_aio(actx->aio);
-# endif    
 
     return 1;
 }
