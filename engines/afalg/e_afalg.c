@@ -8,11 +8,20 @@
 #include <openssl/evp.h>
 #include <openssl/bn.h>
 
+#include <linux/version.h>
+#define K_MAJ   2
+#define K_MIN1  6
+#define K_MIN2  38
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(K_MAJ, K_MIN1, K_MIN2)
+#error "AFALG ENGINE reguires Kernel Headers >= 2.6.38"
+#endif
+
 /* AF_ALG Socket based headers */
 #include <linux/if_alg.h>
 #include <sys/socket.h>
 #include <fcntl.h>
 #include <sys/uio.h> 
+#include <sys/utsname.h>
 
 #include "e_afalg.h"
 
@@ -504,9 +513,45 @@ static ENGINE *engine_afalg(void)
     return ret;
 }
 
+static int afalg_chk_platform(void)
+{
+    int ret;
+    int i;
+    int kver[3] = {-1};
+    char *str;
+    struct utsname ut;
+
+    ret = uname(&ut);
+    if (ret != 0) {
+        ALG_ERR("Failed to get system information\n");
+        return 0;
+    }
+
+    str = strtok(ut.release, ".");
+    for (i=0; i<3 && str != NULL; i++) {
+        kver [i] = atoi(str);   
+        str = strtok(NULL, ".");
+    }
+    
+    if (KERNEL_VERSION(kver[0], kver[1], kver[2])
+        < KERNEL_VERSION(K_MAJ, K_MIN1, K_MIN2))
+    {
+        ALG_WARN("AFALG not supported this kernel(%d.%d.%d)\n",
+                kver[0], kver[1], kver[2]);
+        return 0;
+    }
+
+    return 1;
+}
+
 void ENGINE_load_afalg(void)
 {
-    ENGINE *toadd = engine_afalg();
+    ENGINE *toadd;
+
+    if (!afalg_chk_platform())
+        return;
+
+    toadd = engine_afalg();
     if (!toadd)
         return;
     ENGINE_add(toadd);

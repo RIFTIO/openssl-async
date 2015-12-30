@@ -2,6 +2,10 @@
 # OpenSSL/engines/afalg/Makefile
 #
 
+RES = $(filter linux%, $(PLATFORM))
+
+ifneq ( $(strip $(RES)), "")
+
 DIR=	afalg
 TOP=	../..
 CC=	cc
@@ -15,7 +19,7 @@ LIB=$(TOP)/libcrypto.a
 
 LIBNAME=afalg
 LIBSRC=	e_afalg.c e_afalg_aio.c
-LIBOBJ=	e_afalg.o e_afalg_aio.o e_afalg_err.o 
+LIBOBJ=	e_afalg.o e_afalg_aio.o 
 
 SRC= $(LIBSRC)
 
@@ -85,4 +89,24 @@ dclean:
 clean:
 	rm -f *.s *.o *.obj lib tags core .pure .nfs* *.old *.bak fluff *.so *.dll *.dylib
 
+else
+
+top:
+all:
+	@echo "!!! AFALG $(RES) not supported for $(PLATFORM)"
+
+errors:
+lib:
+install:
+tests:
+update:
+depend:
+local_depend:
+files:
+lint:
+dclean:
+clean:
+check:
+
+endif # $(PLATFORM)==linux*
 # DO NOT DELETE THIS LINE -- make depend depends on it.
