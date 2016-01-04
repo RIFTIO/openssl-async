@@ -9,11 +9,11 @@
 #include <openssl/bn.h>
 
 #include <linux/version.h>
-#define K_MAJ   2
-#define K_MIN1  6
-#define K_MIN2  38
+#define K_MAJ   4
+#define K_MIN1  1
+#define K_MIN2  0
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(K_MAJ, K_MIN1, K_MIN2)
-#error "AFALG ENGINE reguires Kernel Headers >= 2.6.38"
+#error "AFALG ENGINE reguires Kernel Headers >= 4.1.0"
 #endif
 
 /* AF_ALG Socket based headers */
