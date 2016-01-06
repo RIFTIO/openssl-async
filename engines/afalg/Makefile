@@ -26,13 +26,13 @@ SRC= $(LIBSRC)
 top:
 	(cd $(TOP); $(MAKE) DIRS=engines sub_all)
 
-all: lib
+all: errors lib
 
 errors:
 	$(PERL) $(TOP)/util/mkerr.pl -conf e_afalg.ec -nostatic -write $(SRC)
 
 lib: $(LIBOBJ)
-	if [ -n "$(SHARED_LIBS)" ]; then \
+	@if [ -n "$(SHARED_LIBS)" ]; then \
 		$(MAKE) -f $(TOP)/Makefile.shared -e \
 			LIBNAME=$(LIBNAME) \
 			LIBEXTRAS='$(LIBOBJ)' \
@@ -73,7 +73,7 @@ update: local_depend
 depend: local_depend
 	@if [ -z "$(THIS)" ]; then $(MAKE) -f $(TOP)/Makefile reflect THIS=$@; fi
 
-local_depend:
+local_depend: errors
 	@[ -z "$(THIS)" ] || $(MAKEDEPEND) -- $(CFLAG) $(INCLUDES) $(DEPFLAG) -- $(PROGS) $(LIBSRC)
 
 files:
