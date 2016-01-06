@@ -10,6 +10,9 @@
 #include <openssl/crypto.h>
 #include <openssl/async.h>
 
+#include "e_afalg.h"
+#include "e_afalg_err.h"
+
 #define MAX_INFLIGHTS 1
 
 struct afalg_aio_st {
@@ -56,7 +59,7 @@ void *afalg_init_aio(void)
 
     aio = (afalg_aio *) OPENSSL_malloc(sizeof(afalg_aio));
     if (!aio) {
-        fprintf(stderr, "Failed to allocate memory for afalg_aio\n");
+        AFALGerr(AFALG_F_AFALG_INIT_AIO, AFALG_R_MEM_ALLOC_FAILED);
         goto err;
     }
 
@@ -64,7 +67,7 @@ void *afalg_init_aio(void)
     aio->aio_ctx = 0;
     r = io_setup(MAX_INFLIGHTS, &aio->aio_ctx);
     if (r < 0) {
-        perror("io_setup error");
+        ALG_PERR("%s: io_setup error", __func__);
         r = 0;
         goto err;
     }
@@ -79,7 +82,9 @@ void *afalg_init_aio(void)
 
     if (ASYNC_get_current_job() != NULL) {
         /* make efd non-blocking in async mode */
-        fcntl(aio->efd, F_SETFL, O_NONBLOCK);
+        if (fcntl(aio->efd, F_SETFL, O_NONBLOCK) != 0) {
+            ALG_PERR("%s: Failed to set event fd as NONBLOCKING", __func__);
+        }
     }
 
     return (void *)aio;
@@ -101,7 +106,7 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char *buf, size_t len)
     u_int64_t eval = 0;
 
     if (!aio) {
-        fprintf(stderr, "%s:ALG AIO CTX Null Pointer\n", __func__);
+        ALG_ERR("%s: ALG AIO CTX Null Pointer\n", __func__);
         return 0;
     }
 
@@ -126,7 +131,7 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char *buf, size_t len)
 
     r = io_read(aio->aio_ctx, 1, &cb);
     if (r < 0) {
-        perror("io_read failed for cipher operation");
+        ALG_PERR("%s: io_read failed", __func__);
         return 0;
     }
 
@@ -143,17 +148,17 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char *buf, size_t len)
                 if (events[0].res == -EBUSY)
                     aio->ring_fulls++;
                 else if (events[0].res != 0) {
-                    printf("req failed with %lld\n", events[0].res);
+                    ALG_WARN("aio_getevents failed with %lld\n", events[0].res);
                     aio->failed++;
                 }
             } else if (r < 0) {
-                perror("io_getevents failed");
+                ALG_PERR("%s: io_getevents failed", __func__);
                 return 0;
             } else {
                 aio->retrys++;
             }
         } else
-            perror("read of aio->efd not as expected");
+            ALG_PERR("%s: read failed for event fd", __func__);
 
     } while (cb->aio_fildes != 0);
 

@@ -1,6 +1,6 @@
 /* e_afalg_err.c */
 /* ====================================================================
- * Copyright (c) 1999-2015 The OpenSSL Project.  All rights reserved.
+ * Copyright (c) 1999-2016 The OpenSSL Project.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -70,12 +70,21 @@
 # define ERR_REASON(reason) ERR_PACK(0,0,reason)
 
 static ERR_STRING_DATA AFALG_str_functs[] = {
-    {ERR_FUNC(AFALG_F_BIND_AFALG), "BIND_AFALG"},
+    {ERR_FUNC(AFALG_F_AFALG_CHK_PLATFORM), "afalg_chk_platform"},
+    {ERR_FUNC(AFALG_F_AFALG_INIT_AIO), "afalg_init_aio"},
+    {ERR_FUNC(AFALG_F_AFALG_SOCKET), "afalg_socket"},
+    {ERR_FUNC(AFALG_F_AFALG_START_CIPHER_SK), "afalg_start_cipher_sk"},
+    {ERR_FUNC(AFALG_F_BIND_AFALG), "bind_afalg"},
     {0, NULL}
 };
 
 static ERR_STRING_DATA AFALG_str_reasons[] = {
     {ERR_REASON(AFALG_R_INIT_FAILED), "init failed"},
+    {ERR_REASON(AFALG_R_KERNEL_DOES_NOT_SUPPORT_AFALG),
+     "kernel does not support afalg"},
+    {ERR_REASON(AFALG_R_MEM_ALLOC_FAILED), "mem alloc failed"},
+    {ERR_REASON(AFALG_R_SOCKET_BIND_FAILED), "socket bind failed"},
+    {ERR_REASON(AFALG_R_SOCKET_OPERATION_FAILED), "socket operation failed"},
     {0, NULL}
 };
 
@@ -91,7 +100,7 @@ static ERR_STRING_DATA AFALG_lib_name[] = {
 static int AFALG_lib_error_code = 0;
 static int AFALG_error_init = 1;
 
-static void ERR_load_AFALG_strings(void)
+void ERR_load_AFALG_strings(void)
 {
     if (AFALG_lib_error_code == 0)
         AFALG_lib_error_code = ERR_get_next_error_library();
@@ -110,7 +119,7 @@ static void ERR_load_AFALG_strings(void)
     }
 }
 
-static void ERR_unload_AFALG_strings(void)
+void ERR_unload_AFALG_strings(void)
 {
     if (AFALG_error_init == 0) {
 #ifndef OPENSSL_NO_ERR
@@ -125,7 +134,7 @@ static void ERR_unload_AFALG_strings(void)
     }
 }
 
-static void ERR_AFALG_error(int function, int reason, char *file, int line)
+void ERR_AFALG_error(int function, int reason, char *file, int line)
 {
     if (AFALG_lib_error_code == 0)
         AFALG_lib_error_code = ERR_get_next_error_library();

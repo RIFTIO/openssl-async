@@ -10,6 +10,16 @@
 #  define STATIC
 # endif
 
+#define ALG_DGB(x, args...) fprintf(stderr, "ALG_DBG: " x, ##args)
+#define ALG_INFO(x, args...) fprintf(stderr, "ALG_INFO: " x, ##args)
+#define ALG_WARN(x, args...) fprintf(stderr, "ALG_WARN: " x, ##args)
+#define ALG_ERR(x, args...) fprintf(stderr, "ALG_ERR: " x, ##args)
+#define ALG_PERR(x, args...) \
+                do { \
+                    fprintf(stderr, "ALG_PERR: " x, ##args); \
+                    perror(NULL); \
+                } while(0)
+
 # ifndef AES_BLOCK_SIZE
 #  define AES_BLOCK_SIZE   16
 # endif

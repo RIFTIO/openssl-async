@@ -30,19 +30,12 @@
 #define AFALG_LIB_NAME "AFALG"
 #include "e_afalg_err.c"
 
-/* OUTPUTS */
-#define ALG_DGB(x, args...) fprintf(stderr, "ALG_DBG: " x, ##args)
-#define ALG_INFO(x, args...) fprintf(stderr, "ALG_INFO: " x, ##args)
-#define ALG_WARN(x, args...) fprintf(stderr, "ALG_WARN: " x, ##args)
-#define ALG_ERR(x, args...) fprintf(stderr, "ALG_ERR: " x, ##args)
-
 /* AF_ALG Socket based defines */
 #ifndef SOL_ALG
 # define SOL_ALG 279
 #endif
 
 #ifdef ALG_ZERO_COPY
-/* For zero copy mode */
 # ifndef SPLICE_F_GIFT
 /* pages passed in are a gift */
 #  define SPLICE_F_GIFT    (0x08)
@@ -113,13 +106,13 @@ static int afalg_create_bind_sk(void)
 
     sfd = socket(AF_ALG, SOCK_SEQPACKET, 0);
     if (sfd == -1) {
-        perror("Failed to open socket");
+        ALG_PERR("%s: Failed to open socket", __func__);
         goto err;
     }
 
     r = bind(sfd, (struct sockaddr *)&sa, sizeof(sa));
     if (r < 0) {
-        perror("Failed to bind socket");
+        ALG_PERR("%s: Failed to bind socket", __func__);
         goto err;
     }
 
@@ -141,7 +134,7 @@ static int afalg_set_key_sk(int sfd, const unsigned char *key,
 
     r = setsockopt(sfd, SOL_ALG, ALG_SET_KEY, key, keylen);
     if (r < 0) {
-        perror("Failed to set socket option");
+        ALG_PERR("%s: Failed to set socket option", __func__);
         return -1;
     }
 
@@ -179,9 +172,7 @@ static int afalg_socket(const unsigned char *key, const int klen,
 
     bfd = afalg_create_bind_sk();
     if (bfd < 1) {
-        /*
-         * TODO: Create a generic socket setup error code for openssl
-         */
+        AFALGerr(AFALG_F_AFALG_SOCKET, AFALG_R_SOCKET_OPERATION_FAILED);
         return 0;
     }
 
@@ -193,7 +184,8 @@ static int afalg_socket(const unsigned char *key, const int klen,
 
     sfd = accept(bfd, NULL, 0);
     if (sfd < 0) {
-        perror("Socket Accept Failed");
+        ALG_PERR("%s: Socket Accept Failed", __func__);
+        AFALGerr(AFALG_F_AFALG_SOCKET, AFALG_R_SOCKET_BIND_FAILED);
         goto err;
     }
 
@@ -224,6 +216,7 @@ static int afalg_start_cipher_sk(afalg_ctx *actx, const unsigned char *in,
     cbuf = (char *)OPENSSL_malloc(cbuf_sz);
     if (!cbuf) {
         ALG_WARN("Failed to allocate memory for cmsg\n");
+        AFALGerr(AFALG_F_AFALG_START_CIPHER_SK, AFALG_R_MEM_ALLOC_FAILED);
         goto err;
     }
     /*
@@ -254,18 +247,19 @@ static int afalg_start_cipher_sk(afalg_ctx *actx, const unsigned char *in,
 
     sbytes = sendmsg(actx->sfd, &msg, 0);
     if (sbytes < 0) {
-        perror("Sendmsg failed for zero copy cipher operation");
+        ALG_PERR("%s: sendmsg failed for zero copy cipher operation", __func__);
         goto err;
     }
 
     ret = vmsplice(actx->zc_pipe[1], &iov, 1, SPLICE_F_GIFT);
     if (ret < 0) {
-        printf("vmsplice returned Error: %d\n", errno);
+        ALG_PERR("%s: vmsplice failed", __func__);
         goto err;
     }
+
     ret = splice(actx->zc_pipe[0], NULL, actx->sfd, NULL, inl, 0);
     if (ret < 0) {
-        printf("splice returned Error: %d\n", errno);
+        ALG_PERR("%s: splice failed", __func__);
         goto err;
     }
 #else
@@ -274,7 +268,7 @@ static int afalg_start_cipher_sk(afalg_ctx *actx, const unsigned char *in,
 
     sbytes = sendmsg(actx->sfd, &msg, 0);
     if (sbytes < 0) {
-        perror("Sendmsg failed for cipher operation");
+        ALG_PERR("%s: sendmsg failed for cipher operation", __func__);
         goto err;
     }
 
@@ -527,13 +521,14 @@ static int afalg_chk_platform(void)
         < KERNEL_VERSION(K_MAJ, K_MIN1, K_MIN2)) {
         ALG_WARN("AFALG not supported this kernel(%d.%d.%d)\n",
                  kver[0], kver[1], kver[2]);
+        AFALGerr(AFALG_F_AFALG_CHK_PLATFORM, AFALG_R_KERNEL_DOES_NOT_SUPPORT_AFALG);
         return 0;
     }
 
     return 1;
 }
 
-static void ENGINE_load_afalg(void)
+static void __ign_unused ENGINE_load_afalg(void)
 {
     ENGINE *toadd;
 
