@@ -16,6 +16,8 @@
 # error "AFALG ENGINE reguires Kernel Headers >= 4.1.0"
 #endif
 
+#define __ign_unused    __attribute__((__unused__))
+
 /* AF_ALG Socket based headers */
 #include <linux/if_alg.h>
 #include <sys/socket.h>
@@ -70,6 +72,7 @@ static int afalg_cipher_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
 static int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
                            const unsigned char *in, size_t inl);
 static int afalg_cipher_cleanup(EVP_CIPHER_CTX *ctx);
+static int afalg_chk_platform(void);
 
 
 
@@ -476,6 +479,10 @@ static int bind_helper(ENGINE *e, const char *id)
 {
     if (id && (strcmp(id, engine_afalg_id) != 0))
         return 0;
+
+    if (!afalg_chk_platform())
+        return 0;
+
     if (!bind_afalg(e))
         return 0;
     return 1;
