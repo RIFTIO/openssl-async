@@ -51,10 +51,27 @@
 #define ALG_OP_TYPE     unsigned int
 #define ALG_OP_LEN      (sizeof(ALG_OP_TYPE))
 
+/* Extern Functions */
 extern void *afalg_init_aio(void);
 extern int afalg_fin_cipher_aio(void *ptr, int sfd,
                                 unsigned char *buf, size_t len);
 extern void afalg_cipher_cleanup_aio(void *ptr);
+
+/* Local Linkage Functions */
+static int afalg_create_bind_sk(void);
+static int afalg_destroy(ENGINE *e);
+static int afalg_init(ENGINE *e);
+static int afalg_finish(ENGINE *e);
+static void ENGINE_load_afalg(void);
+static int afalg_ciphers(ENGINE *e, const EVP_CIPHER **cipher,
+                  const int **nids, int nid);
+static int afalg_cipher_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
+                             const unsigned char *iv, int enc);
+static int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
+                           const unsigned char *in, size_t inl);
+static int afalg_cipher_cleanup(EVP_CIPHER_CTX *ctx);
+
+
 
 /* Engine Id and Name */
 static const char *engine_afalg_id = "afalg";
@@ -290,7 +307,7 @@ static int afalg_do_cipher_sk(afalg_ctx *actx, unsigned char *out,
     return ret;
 }
 
-STATIC int afalg_cipher_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
+static int afalg_cipher_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
                              const unsigned char *iv, int enc)
 {
     int ciphertype;
@@ -348,7 +365,7 @@ STATIC int afalg_cipher_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
     return 1;
 }
 
-STATIC int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
+static int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
                            const unsigned char *in, size_t inl)
 {
     afalg_ctx *actx;
@@ -409,7 +426,7 @@ static int afalg_cipher_cleanup(EVP_CIPHER_CTX *ctx)
     return 1;
 }
 
-int afalg_ciphers(ENGINE *e, const EVP_CIPHER **cipher,
+static int afalg_ciphers(ENGINE *e, const EVP_CIPHER **cipher,
                   const int **nids, int nid)
 {
     int r = 1;
@@ -509,7 +526,7 @@ static int afalg_chk_platform(void)
     return 1;
 }
 
-void ENGINE_load_afalg(void)
+static void ENGINE_load_afalg(void)
 {
     ENGINE *toadd;
 
