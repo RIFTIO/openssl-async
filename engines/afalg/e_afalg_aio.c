@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <string.h>
-# define _GNU_SOURCE
+#define _GNU_SOURCE
 #include <unistd.h>
 
 #include <linux/aio_abi.h>
@@ -37,27 +37,27 @@ static inline int io_destroy(aio_context_t ctx)
     return syscall(__NR_io_destroy, ctx);
 }
 
-static inline int io_read(aio_context_t ctx, long n,  struct iocb **iocb)
+static inline int io_read(aio_context_t ctx, long n, struct iocb **iocb)
 {
     return syscall(__NR_io_submit, ctx, n, iocb);
 }
 
-
 static inline int io_getevents(aio_context_t ctx, long min, long max,
-            struct io_event *events, struct timespec *timeout)
+                               struct io_event *events,
+                               struct timespec *timeout)
 {
     return syscall(__NR_io_getevents, ctx, min, max, events, timeout);
 }
 
-void * afalg_init_aio(void)
+void *afalg_init_aio(void)
 {
     int r = -1;
     afalg_aio *aio;
 
-    aio = (afalg_aio *)OPENSSL_malloc(sizeof(afalg_aio));
-    if(!aio) {
-       fprintf(stderr, "Failed to allocate memory for afalg_aio\n");
-       goto err;
+    aio = (afalg_aio *) OPENSSL_malloc(sizeof(afalg_aio));
+    if (!aio) {
+        fprintf(stderr, "Failed to allocate memory for afalg_aio\n");
+        goto err;
     }
 
     /* Initialise for AIO */
@@ -76,31 +76,31 @@ void * afalg_init_aio(void)
     aio->ring_fulls = 0;
     aio->failed = 0;
     memset(aio->cbt, 0, sizeof(aio->cbt));
-    
-    if(ASYNC_get_current_job() != NULL) {
-    /* make efd non-blocking in async mode */
-    fcntl(aio->efd, F_SETFL, O_NONBLOCK);
+
+    if (ASYNC_get_current_job() != NULL) {
+        /* make efd non-blocking in async mode */
+        fcntl(aio->efd, F_SETFL, O_NONBLOCK);
     }
 
     return (void *)aio;
 
  err:
-    if(aio)
+    if (aio)
         free(aio);
     return NULL;
 }
 
-int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char* buf, size_t len)
+int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char *buf, size_t len)
 {
     int r;
     struct iocb *cb;
     struct timespec timeout;
     struct io_event events[MAX_INFLIGHTS];
-    afalg_aio *aio = (afalg_aio *)ptr;
+    afalg_aio *aio = (afalg_aio *) ptr;
     ASYNC_JOB *job;
     u_int64_t eval = 0;
-    
-    if(!aio) {
+
+    if (!aio) {
         fprintf(stderr, "%s:ALG AIO CTX Null Pointer\n", __func__);
         return 0;
     }
@@ -119,8 +119,8 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char* buf, size_t len)
     cb->aio_flags = IOCB_FLAG_RESFD;
     cb->aio_resfd = aio->efd;
 
-    if((job = ASYNC_get_current_job()) != NULL) {
-//Not sure of best approach to connect our efd to jobs wait_fd
+    if ((job = ASYNC_get_current_job()) != NULL) {
+        /* Not sure of best approach to connect our efd to jobs wait_fd */
         ASYNC_set_wait_fd(job, aio->efd);
     }
 
@@ -129,16 +129,16 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char* buf, size_t len)
         perror("io_read failed for cipher operation");
         return 0;
     }
-    
+
     do {
-        if(ASYNC_get_current_job() != NULL) 
+        if (ASYNC_get_current_job() != NULL)
             ASYNC_pause_job();
 
         r = read(aio->efd, &eval, sizeof(eval));
-        if (r>0 && eval > 0) {
+        if (r > 0 && eval > 0) {
             r = io_getevents(aio->aio_ctx, 1, 1, events, &timeout);
             if (r > 0) {
-                cb = (void*) events[0].obj;
+                cb = (void *)events[0].obj;
                 cb->aio_fildes = 0;
                 if (events[0].res == -EBUSY)
                     aio->ring_fulls++;
@@ -151,22 +151,20 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char* buf, size_t len)
                 return 0;
             } else {
                 aio->retrys++;
-            }   
-        }
-        else
-           perror("read of aio->efd not as expected");
+            }
+        } else
+            perror("read of aio->efd not as expected");
 
-    } while (cb->aio_fildes != 0) ;
+    } while (cb->aio_fildes != 0);
 
     return 1;
 }
 
 void afalg_cipher_cleanup_aio(void *ptr)
 {
-    afalg_aio *aio = (afalg_aio *)ptr;
+    afalg_aio *aio = (afalg_aio *) ptr;
     close(aio->efd);
-    //close(aio->bfd);
-    io_destroy(aio->aio_ctx); 
+    /* close(aio->bfd); */
+    io_destroy(aio->aio_ctx);
     free(aio);
 }
-

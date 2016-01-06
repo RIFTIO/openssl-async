@@ -1,28 +1,28 @@
 #ifndef _E_AFALG_H_
-#define _E_AFALG_H_
+# define _E_AFALG_H_
 
-/* If compiling with Unit Tests
- * disable local linkage.
- * */
-#ifndef AFALG_NO_UNIT_TEST
-#define STATIC static
-#else
-#define STATIC
-#endif
+/*
+ * If compiling with Unit Tests disable local linkage.
+ */
+# ifndef AFALG_NO_UNIT_TEST
+#  define STATIC static
+# else
+#  define STATIC
+# endif
 
-#ifndef AES_BLOCK_SIZE
-#define AES_BLOCK_SIZE   16
-#endif
-#define AES_KEY_SIZE_128 16
-#define AES_IV_LEN       16
+# ifndef AES_BLOCK_SIZE
+#  define AES_BLOCK_SIZE   16
+# endif
+# define AES_KEY_SIZE_128 16
+# define AES_IV_LEN       16
 
-#define MAGIC_INIT_NUM 0x1890671
+# define MAGIC_INIT_NUM 0x1890671
 
 struct afalg_ctx_st {
     int init_done;
     int sfd;
 # ifdef ALG_ZERO_COPY
-    int zc_pipe[2];  
+    int zc_pipe[2];
 # endif
     void *aio;
 };
@@ -36,7 +36,7 @@ static int afalg_destroy(ENGINE *e);
 static int afalg_init(ENGINE *e);
 static int afalg_finish(ENGINE *e);
 void ENGINE_load_afalg(void);
-int afalg_ciphers(ENGINE *e, const EVP_CIPHER **cipher, 
+int afalg_ciphers(ENGINE *e, const EVP_CIPHER **cipher,
                   const int **nids, int nid);
 STATIC int afalg_cipher_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
                              const unsigned char *iv, int enc);
