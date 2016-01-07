@@ -18,8 +18,8 @@ CFLAGS= $(INCLUDES) $(CFLAG)
 LIB=$(TOP)/libcrypto.a
 
 LIBNAME=afalg
-LIBSRC=	e_afalg.c e_afalg_aio.c
-LIBOBJ=	e_afalg.o e_afalg_aio.o 
+LIBSRC=	e_afalg.c
+LIBOBJ=	e_afalg.o
 
 SRC= $(LIBSRC)
 
