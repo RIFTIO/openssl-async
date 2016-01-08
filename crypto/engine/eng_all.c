@@ -92,9 +92,6 @@ void ENGINE_load_builtin_engines(void)
 # ifndef OPENSSL_NO_GMP
     ENGINE_load_gmp();
 # endif
-# ifndef OPENSSL_NO_AFALG
-    ENGINE_load_afalg();
-# endif
 # if defined(OPENSSL_SYS_WIN32) && !defined(OPENSSL_NO_CAPIENG)
     ENGINE_load_capi();
 # endif
