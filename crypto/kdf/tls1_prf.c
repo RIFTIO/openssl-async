@@ -111,11 +111,12 @@ static int pkey_tls1_prf_ctrl(EVP_PKEY_CTX *ctx, int type, int p1, void *p2)
         return 1;
 
     case EVP_PKEY_CTRL_TLS_SECRET:
-        if (kctx->sec) {
+        if (p1 < 0)
+            return 0;
+        if (kctx->sec != NULL)
             OPENSSL_clear_free(kctx->sec, kctx->seclen);
-            OPENSSL_cleanse(kctx->seed, kctx->seedlen);
-            kctx->seedlen = 0;
-        }
+        OPENSSL_cleanse(kctx->seed, kctx->seedlen);
+        kctx->seedlen = 0;
         kctx->sec = OPENSSL_memdup(p2, p1);
         if (kctx->sec == NULL)
             return 0;
@@ -125,8 +126,7 @@ static int pkey_tls1_prf_ctrl(EVP_PKEY_CTX *ctx, int type, int p1, void *p2)
     case EVP_PKEY_CTRL_TLS_SEED:
         if (p1 == 0 || p2 == NULL)
             return 1;
-        if (p1 < 0 || p1 > TLS1_PRF_MAXBUF
-            || p1 + kctx->seedlen > TLS1_PRF_MAXBUF)
+        if (p1 < 0 || p1 > (int)(TLS1_PRF_MAXBUF - kctx->seedlen))
             return 0;
         memcpy(kctx->seed + kctx->seedlen, p2, p1);
         kctx->seedlen += p1;
@@ -185,7 +185,6 @@ static int tls1_prf_P_hash(const EVP_MD *md,
                            unsigned char *out, size_t olen)
 {
     int chunk;
-    size_t j;
     EVP_MD_CTX *ctx = NULL, *ctx_tmp = NULL, *ctx_init = NULL;
     EVP_PKEY *mac_key = NULL;
     unsigned char A1[EVP_MAX_MD_SIZE];
@@ -202,13 +201,13 @@ static int tls1_prf_P_hash(const EVP_MD *md,
         goto err;
     EVP_MD_CTX_set_flags(ctx_init, EVP_MD_CTX_FLAG_NON_FIPS_ALLOW);
     mac_key = EVP_PKEY_new_mac_key(EVP_PKEY_HMAC, NULL, sec, sec_len);
-    if (!mac_key)
+    if (mac_key == NULL)
         goto err;
     if (!EVP_DigestSignInit(ctx_init, NULL, md, NULL, mac_key))
         goto err;
     if (!EVP_MD_CTX_copy_ex(ctx, ctx_init))
         goto err;
-    if (seed && !EVP_DigestSignUpdate(ctx, seed, seed_len))
+    if (seed != NULL && !EVP_DigestSignUpdate(ctx, seed, seed_len))
         goto err;
     if (!EVP_DigestSignFinal(ctx, A1, &A1_len))
         goto err;
@@ -225,10 +224,11 @@ static int tls1_prf_P_hash(const EVP_MD *md,
             goto err;
 
         if (olen > (size_t)chunk) {
-            if (!EVP_DigestSignFinal(ctx, out, &j))
+            size_t mac_len;
+            if (!EVP_DigestSignFinal(ctx, out, &mac_len))
                 goto err;
-            out += j;
-            olen -= j;
+            out += mac_len;
+            olen -= mac_len;
             /* calc the next A1 value */
             if (!EVP_DigestSignFinal(ctx_tmp, A1, &A1_len))
                 goto err;

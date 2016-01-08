@@ -59,19 +59,19 @@
 extern "C" {
 #endif
 
-#define EVP_PKEY_CTRL_TLS_MD        (EVP_PKEY_ALG_CTRL)
-#define EVP_PKEY_CTRL_TLS_SECRET    (EVP_PKEY_ALG_CTRL + 1)
-#define EVP_PKEY_CTRL_TLS_SEED      (EVP_PKEY_ALG_CTRL + 2)
+# define EVP_PKEY_CTRL_TLS_MD       (EVP_PKEY_ALG_CTRL)
+# define EVP_PKEY_CTRL_TLS_SECRET   (EVP_PKEY_ALG_CTRL + 1)
+# define EVP_PKEY_CTRL_TLS_SEED     (EVP_PKEY_ALG_CTRL + 2)
 
-#define EVP_PKEY_CTX_set_tls1_prf_md(pctx, md) \
+# define EVP_PKEY_CTX_set_tls1_prf_md(pctx, md) \
             EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, \
                               EVP_PKEY_CTRL_TLS_MD, 0, (void *)md)
 
-#define EVP_PKEY_CTX_set1_tls1_prf_secret(pctx, sec, seclen) \
+# define EVP_PKEY_CTX_set1_tls1_prf_secret(pctx, sec, seclen) \
             EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, \
                               EVP_PKEY_CTRL_TLS_SECRET, seclen, (void *)sec)
 
-#define EVP_PKEY_CTX_add1_tls1_prf_seed(pctx, seed, seedlen) \
+# define EVP_PKEY_CTX_add1_tls1_prf_seed(pctx, seed, seedlen) \
             EVP_PKEY_CTX_ctrl(pctx, -1, EVP_PKEY_OP_DERIVE, \
                               EVP_PKEY_CTRL_TLS_SEED, seedlen, (void *)seed)
 
