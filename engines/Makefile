@@ -31,11 +31,11 @@ AFLAGS= $(ASFLAGS)
 GENERAL=Makefile engines.com install.com engine_vector.mar
 
 LIB=$(TOP)/libcrypto.a
-LIBNAMES= gmp padlock capi dasync 
+LIBNAMES= gmp padlock capi dasync
 LIBSRC=	e_gmp.c \
 	e_padlock.c \
 	e_capi.c \
-	e_dasync.c 
+	e_dasync.c
 LIBOBJ= e_gmp.o \
 	e_padlock.o \
 	e_capi.o \
@@ -53,7 +53,7 @@ HEADER=	e_gmp_err.c e_gmp_err.h \
 	e_ubsec_err.c e_ubsec_err.h \
 	e_capi_err.c e_capi_err.h \
 	e_ossltest_err.c e_ossltest_err.h \
-	e_dasync_err.c e_dasync_err.h 
+	e_dasync_err.c e_dasync_err.h
 
 ALL=	$(GENERAL) $(SRC) $(HEADER)
 
