@@ -55,18 +55,16 @@
 #ifndef _E_AFALG_H_
 # define _E_AFALG_H_
 
-/*
- * If compiling with Unit Tests disable local linkage.
- */
-# ifndef AFALG_NO_UNIT_TEST
-#  define STATIC static
-# else
-#  define STATIC
-# endif
-
+# ifdef ALG_DEBUG
 #define ALG_DGB(x, args...) fprintf(stderr, "ALG_DBG: " x, ##args)
 #define ALG_INFO(x, args...) fprintf(stderr, "ALG_INFO: " x, ##args)
 #define ALG_WARN(x, args...) fprintf(stderr, "ALG_WARN: " x, ##args)
+# else
+#define ALG_DGB(x, args...)
+#define ALG_INFO(x, args...)
+#define ALG_WARN(x, args...)
+# endif 
+
 #define ALG_ERR(x, args...) fprintf(stderr, "ALG_ERR: " x, ##args)
 #define ALG_PERR(x, args...) \
                 do { \
@@ -80,6 +78,21 @@
 # define AES_KEY_SIZE_128 16
 # define AES_IV_LEN       16
 
+#define MAX_INFLIGHTS 1
+
+struct afalg_aio_st {
+    int efd;
+    unsigned int retrys, ring_fulls, failed;
+    aio_context_t aio_ctx;
+    struct io_event events[MAX_INFLIGHTS];
+    struct iocb cbt[MAX_INFLIGHTS];
+};
+typedef struct afalg_aio_st afalg_aio;
+
+/* 
+ * MAGIC Number to identify correct initialisation 
+ * of afalg_ctx.
+ */
 # define MAGIC_INIT_NUM 0x1890671
 
 struct afalg_ctx_st {
@@ -88,7 +101,7 @@ struct afalg_ctx_st {
 # ifdef ALG_ZERO_COPY
     int zc_pipe[2];
 # endif
-    void *aio;
+    afalg_aio aio;
 };
 
 typedef struct afalg_ctx_st afalg_ctx;

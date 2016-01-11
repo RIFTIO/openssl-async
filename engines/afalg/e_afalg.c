@@ -80,7 +80,7 @@
 #include "e_afalg.h"
 
 #define AFALG_LIB_NAME "AFALG"
-#include "e_afalg_err.c"
+#include "e_afalg_err.h"
 
 #ifndef SOL_ALG
 # define SOL_ALG 279
@@ -92,16 +92,13 @@
 # endif
 #endif
 
-#define MAX_INFLIGHTS 1
-
 #define ALG_IV_LEN(len) (sizeof(struct af_alg_iv) + (len))
 #define ALG_OP_TYPE     unsigned int
 #define ALG_OP_LEN      (sizeof(ALG_OP_TYPE))
 
-extern void *afalg_init_aio(void);
-extern int afalg_fin_cipher_aio(void *ptr, int sfd,
+int afalg_init_aio(afalg_aio *aio);
+int afalg_fin_cipher_aio(afalg_aio *ptr, int sfd,
                                 unsigned char *buf, size_t len);
-extern void afalg_cipher_cleanup_aio(void *ptr);
 
 /* Local Linkage Functions */
 static int afalg_create_bind_sk(void);
@@ -116,16 +113,6 @@ static int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
                            const unsigned char *in, size_t inl);
 static int afalg_cipher_cleanup(EVP_CIPHER_CTX *ctx);
 static int afalg_chk_platform(void);
-
-
-struct afalg_aio_st {
-    int efd;
-    unsigned int retrys, ring_fulls, failed;
-    aio_context_t aio_ctx;
-    struct io_event events[MAX_INFLIGHTS];
-    struct iocb cbt[MAX_INFLIGHTS];
-};
-typedef struct afalg_aio_st afalg_aio;
 
 /* Engine Id and Name */
 static const char *engine_afalg_id = "afalg";
@@ -178,16 +165,9 @@ static inline int io_getevents(aio_context_t ctx, long min, long max,
     return syscall(__NR_io_getevents, ctx, min, max, events, timeout);
 }
 
-void *afalg_init_aio(void)
+int afalg_init_aio(afalg_aio *aio)
 {
     int r = -1;
-    afalg_aio *aio;
-
-    aio = (afalg_aio *) OPENSSL_malloc(sizeof(afalg_aio));
-    if (!aio) {
-        AFALGerr(AFALG_F_AFALG_INIT_AIO, AFALG_R_MEM_ALLOC_FAILED);
-        goto err;
-    }
 
     /* Initialise for AIO */
     aio->aio_ctx = 0;
@@ -195,11 +175,15 @@ void *afalg_init_aio(void)
     if (r < 0) {
         ALG_PERR("%s: io_setup error", __func__);
         AFALGerr(AFALG_F_AFALG_INIT_AIO, AFALG_R_IO_SETUP_FAILED);
-        r = 0;
-        goto err;
+        return 0;
     }
 
     aio->efd = eventfd(0);
+    if (aio->efd == -1) {
+        ALG_PERR("%s: Failed to get eventfd", __func__);
+        AFALGerr(AFALG_F_AFALG_INIT_AIO, AFALG_R_EVENTFD_FAILED);
+        return 0;
+    }
     aio->retrys = 0;
     aio->ring_fulls = 0;
     aio->failed = 0;
@@ -212,24 +196,16 @@ void *afalg_init_aio(void)
         }
     }
 
-    return (void *)aio;
-
- err:
-    if (aio) {
-        if (aio->efd >= 0)
-            close(aio->efd);
-        free(aio);
-    }
-    return NULL;
+    return 1;
 }
 
-int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char *buf, size_t len)
+int afalg_fin_cipher_aio(afalg_aio *aio, int sfd, unsigned char *buf, size_t len)
 {
     int r;
+    unsigned int rd_retry = 0;
     struct iocb *cb;
     struct timespec timeout;
     struct io_event events[MAX_INFLIGHTS];
-    afalg_aio *aio = (afalg_aio *) ptr;
     ASYNC_JOB *job;
     u_int64_t eval = 0;
 
@@ -256,12 +232,15 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char *buf, size_t len)
         ALG_PERR("%s: io_read failed", __func__);
         return 0;
     }
-
+    
     do {
-        ASYNC_pause_job();
+        /* Pause Job only when there are no read retries */
+        if (!rd_retry)
+            ASYNC_pause_job();
 
         r = read(aio->efd, &eval, sizeof(eval));
         if (r > 0 && eval > 0) {
+            rd_retry = 0;
             r = io_getevents(aio->aio_ctx, 1, 1, events, &timeout);
             if (r > 0) {
                 cb = (void *)events[0].obj;
@@ -269,7 +248,8 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char *buf, size_t len)
                 if (events[0].res == -EBUSY)
                     aio->ring_fulls++;
                 else if (events[0].res != 0) {
-                    ALG_WARN("Crypto Operation failed with code %lld\n", events[0].res);
+                    ALG_WARN("Crypto Operation failed with code %lld\n", 
+                              events[0].res);
                     aio->failed++;
                 }
             } else if (r < 0) {
@@ -278,20 +258,18 @@ int afalg_fin_cipher_aio(void *ptr, int sfd, unsigned char *buf, size_t len)
             } else {
                 aio->retrys++;
             }
-        } else
+        } else {
             ALG_PERR("%s: read failed for event fd", __func__);
-
+            rd_retry++;
+            if (rd_retry > 2) {
+                ALG_ERR("%s: Max Read retries reached for event fd.\n", 
+                         __func__);
+                return 0;
+            }
+        }
     } while (cb->aio_fildes != 0);
 
     return 1;
-}
-
-void afalg_cipher_cleanup_aio(void *ptr)
-{
-    afalg_aio *aio = (afalg_aio *) ptr;
-    close(aio->efd);
-    io_destroy(aio->aio_ctx);
-    free(aio);
 }
 
 static int afalg_create_bind_sk(void)
@@ -308,12 +286,16 @@ static int afalg_create_bind_sk(void)
     sfd = socket(AF_ALG, SOCK_SEQPACKET, 0);
     if (sfd == -1) {
         ALG_PERR("%s: Failed to open socket", __func__);
+        AFALGerr(AFALG_F_AFALG_CREATE_BIND_SK, 
+                 AFALG_R_SOCKET_CREATE_FAILED);
         goto err;
     }
 
     r = bind(sfd, (struct sockaddr *)&sa, sizeof(sa));
     if (r < 0) {
         ALG_PERR("%s: Failed to bind socket", __func__);
+        AFALGerr(AFALG_F_AFALG_CREATE_BIND_SK, 
+                 AFALG_R_SOCKET_BIND_FAILED);
         goto err;
     }
 
@@ -356,7 +338,6 @@ static int afalg_socket(const unsigned char *key, const int klen,
 
     bfd = afalg_create_bind_sk();
     if (bfd < 1) {
-        AFALGerr(AFALG_F_AFALG_SOCKET, AFALG_R_SOCKET_OPERATION_FAILED);
         return -1;
     }
 
@@ -507,8 +488,7 @@ static int afalg_cipher_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
         return 0;
     }
 
-    actx->aio = afalg_init_aio();
-    if (!actx->aio) {
+    if (!afalg_init_aio(&actx->aio)) {
         close(actx->sfd);
         return 0;
     }
@@ -546,18 +526,13 @@ static int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
         return 0;
     }
 
-    if (!actx->aio) {
-        ALG_ERR("%s: ALG AIO CTX Null Pointer\n", __func__);
-        return 0;
-    }
-
     ret = afalg_start_cipher_sk(actx, (unsigned char *)in, inl, ctx->iv,
                                 EVP_CIPHER_CTX_iv_length(ctx), ctx->encrypt);
     if (ret < 1) {
         return 0;
     }
 
-    ret = afalg_fin_cipher_aio(actx->aio, actx->sfd, out, inl);
+    ret = afalg_fin_cipher_aio(&actx->aio, actx->sfd, out, inl);
     if (ret < 1) {
         ALG_WARN("Socket cipher operation failed\n");
         return 0;
@@ -594,7 +569,9 @@ static int afalg_cipher_cleanup(EVP_CIPHER_CTX *ctx)
     close(actx->zc_pipe[0]);
     close(actx->zc_pipe[1]);
 #endif
-    afalg_cipher_cleanup_aio(actx->aio);
+    if (actx->aio.efd >= 0)
+        close(actx->aio.efd);
+    io_destroy(actx->aio.aio_ctx);
 
     return 1;
 }

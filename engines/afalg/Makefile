@@ -19,7 +19,7 @@ LIB=$(TOP)/libcrypto.a
 
 LIBNAME=afalg
 LIBSRC=	e_afalg.c
-LIBOBJ=	e_afalg.o
+LIBOBJ=	e_afalg.o e_afalg_err.o
 
 SRC= $(LIBSRC)
 
