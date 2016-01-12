@@ -56,17 +56,17 @@
 # define _E_AFALG_H_
 
 # ifdef ALG_DEBUG
-#define ALG_DGB(x, args...) fprintf(stderr, "ALG_DBG: " x, ##args)
-#define ALG_INFO(x, args...) fprintf(stderr, "ALG_INFO: " x, ##args)
-#define ALG_WARN(x, args...) fprintf(stderr, "ALG_WARN: " x, ##args)
+#  define ALG_DGB(x, args...) fprintf(stderr, "ALG_DBG: " x, ##args)
+#  define ALG_INFO(x, args...) fprintf(stderr, "ALG_INFO: " x, ##args)
+#  define ALG_WARN(x, args...) fprintf(stderr, "ALG_WARN: " x, ##args)
 # else
-#define ALG_DGB(x, args...)
-#define ALG_INFO(x, args...)
-#define ALG_WARN(x, args...)
-# endif 
+#  define ALG_DGB(x, args...)
+#  define ALG_INFO(x, args...)
+#  define ALG_WARN(x, args...)
+# endif
 
-#define ALG_ERR(x, args...) fprintf(stderr, "ALG_ERR: " x, ##args)
-#define ALG_PERR(x, args...) \
+# define ALG_ERR(x, args...) fprintf(stderr, "ALG_ERR: " x, ##args)
+# define ALG_PERR(x, args...) \
                 do { \
                     fprintf(stderr, "ALG_PERR: " x, ##args); \
                     perror(NULL); \
@@ -78,7 +78,7 @@
 # define AES_KEY_SIZE_128 16
 # define AES_IV_LEN       16
 
-#define MAX_INFLIGHTS 1
+# define MAX_INFLIGHTS 1
 
 struct afalg_aio_st {
     int efd;
