@@ -427,3 +427,5 @@ SSL_get0_dane_tlsa                      461	1_1_0	EXIST::FUNCTION:
 SSL_set_hostflags                       462	1_1_0	EXIST::FUNCTION:
 SSL_dane_enable                         463	1_1_0	EXIST::FUNCTION:
 SSL_get0_dane                           464	1_1_0	EXIST::FUNCTION:
+SSL_CTX_set_default_read_buffer_len     465	1_1_0	EXIST::FUNCTION:
+SSL_set_default_read_buffer_len         466	1_1_0	EXIST::FUNCTION:
