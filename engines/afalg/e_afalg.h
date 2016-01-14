@@ -98,6 +98,7 @@ typedef struct afalg_aio_st afalg_aio;
 struct afalg_ctx_st {
     int init_done;
     int sfd;
+    int bfd;
 # ifdef ALG_ZERO_COPY
     int zc_pipe[2];
 # endif
