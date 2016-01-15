@@ -891,7 +891,8 @@ my %disabled = ( # "what"         => "comment" [or special keyword "experimental
 		 "store"	  => "experimental",
 		 "unit-test"	  => "default",
 		 "zlib"           => "default",
-		 "zlib-dynamic"   => "default"
+		 "zlib-dynamic"   => "default",
+		 "afalg"          => "default"
 	       );
 my @experimental = ();
 
@@ -1213,6 +1214,23 @@ if ($target eq "HASH") {
 
 if ($target =~ m/^CygWin32(-.*)$/) {
 	$target = "Cygwin".$1;
+}
+
+if ($target =~ m/.*linux/) {
+    my $minver = 4*10000 + 1*100 + 0;
+    if ($cross_compile_prefix eq "") {
+        # Target is Linux and not cross compiling
+        # then safe to assume uname is available
+        my $verstr = `uname -r`;
+        my ($ma, $mi1, $mi2) = split("\\.", $verstr);
+        # Minor 2 may be further decorated. Pick starting
+        # digits.
+        ($mi2) = $mi2 =~ /(\d+)/;
+        my $ver = $ma*10000 + $mi1*100 + $mi2;
+        if ( $ver >= $minver ) {
+            delete $disabled{"afalg"};
+        }
+    }
 }
 
 print "Configuring for $target\n";
@@ -1772,6 +1790,7 @@ while (<IN>)
         s/fips // if (/^DIRS=/ && !$fips);
         s/engines // if (/^DIRS=/ && $disabled{"engine"});
 	s/ccgost// if (/^ENGDIRS=/ && $disabled{"gost"});
+	s/afalg// if (/^ENGDIRS=/ && $disabled{"afalg"});
 	s/^VERSION=.*/VERSION=$version/;
 	s/^MAJOR=.*/MAJOR=$major/;
 	s/^MINOR=.*/MINOR=$minor/;
