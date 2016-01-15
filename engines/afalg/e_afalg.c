@@ -65,8 +65,9 @@
 #define K_MIN1  1
 #define K_MIN2  0
 #if LINUX_VERSION_CODE <= KERNEL_VERSION(K_MAJ, K_MIN1, K_MIN2)
-# error "AFALG ENGINE requires Kernel Headers >= 4.1.0"
-#endif
+# warning "AFALG ENGINE requires Kernel Headers >= 4.1.0"
+# warning "Skipping Compilation of AFALG engine"
+#else
 
 #include <linux/if_alg.h>
 #include <sys/socket.h>
@@ -688,3 +689,5 @@ static int afalg_destroy(ENGINE *e)
     ERR_unload_AFALG_strings();
     return 1;
 }
+
+#endif /* KERNEL VERSION */
