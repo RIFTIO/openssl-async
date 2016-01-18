@@ -93,7 +93,7 @@
 # endif
 #endif
 
-#define ALG_AES_MAX_IV_LEN 16
+#define ALG_AES_IV_LEN 16
 #define ALG_IV_LEN(len) (sizeof(struct af_alg_iv) + (len))
 #define ALG_OP_TYPE     unsigned int
 #define ALG_OP_LEN      (sizeof(ALG_OP_TYPE))
@@ -374,7 +374,7 @@ static int afalg_start_cipher_sk(afalg_ctx * actx, const unsigned char *in,
     struct iovec iov;
     ssize_t sbytes;
 
-    const ssize_t cbuf_sz = CMSG_SPACE(ALG_IV_LEN(ALG_AES_MAX_IV_LEN)) 
+    const ssize_t cbuf_sz = CMSG_SPACE(ALG_IV_LEN(ALG_AES_IV_LEN)) 
                             + CMSG_SPACE(ALG_OP_LEN);
     char cbuf[cbuf_sz];
     
@@ -385,7 +385,7 @@ static int afalg_start_cipher_sk(afalg_ctx * actx, const unsigned char *in,
     cmsg = CMSG_FIRSTHDR(&msg);
     afalg_set_op_sk(cmsg, enc);
     cmsg = CMSG_NXTHDR(&msg, cmsg);
-    afalg_set_iv_sk(cmsg, iv, ALG_AES_MAX_IV_LEN);
+    afalg_set_iv_sk(cmsg, iv, ALG_AES_IV_LEN);
 
     iov.iov_base = (unsigned char *)in;
     iov.iov_len = inl;
@@ -427,6 +427,12 @@ static int afalg_start_cipher_sk(afalg_ctx * actx, const unsigned char *in,
         ALG_PERR("%s: sendmsg failed for cipher operation : ", __func__);
         return 0;
     }
+
+    if (sbytes != inl) {
+        ALG_ERR("Cipher operation send bytes %zd != inlen %zd\n", sbytes,
+                inl);
+        return 0;
+   }
 #endif
 
     return 1;
@@ -460,6 +466,12 @@ static int afalg_cipher_init(EVP_CIPHER_CTX *ctx, const unsigned char *key,
         break;
     default:
         ALG_WARN("Unsupported Cipher type %d\n", ciphertype);
+        return 0;
+    }
+    
+    if (ALG_AES_IV_LEN != EVP_CIPHER_CTX_iv_length(ctx)) {
+        ALG_ERR("%s: Unsupported IV length :%d\n", __func__, 
+                EVP_CIPHER_CTX_iv_length(ctx));
         return 0;
     }
 
@@ -538,6 +550,7 @@ static int afalg_cipher_cleanup(EVP_CIPHER_CTX *ctx)
     }
 
     close(actx->sfd);
+    close(actx->bfd);
 #ifdef ALG_ZERO_COPY
     close(actx->zc_pipe[0]);
     close(actx->zc_pipe[1]);
