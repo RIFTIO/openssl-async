@@ -499,6 +499,7 @@ static int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
 {
     afalg_ctx *actx;
     int ret;
+    char nxtiv[ALG_AES_IV_LEN];
 
     if (!ctx || !out || !in) {
         ALG_WARN("NULL parameter passed to function %s\n", __func__);
@@ -509,6 +510,14 @@ static int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
     if (!actx || actx->init_done != MAGIC_INIT_NUM) {
         ALG_WARN("%s afalg ctx passed\n", !ctx ? "NULL" : "Uninitialised");
         return 0;
+    }
+    
+    /* set iv now for decrypty operation as the input buffer can be 
+     * overwritten for inplace operation where in = out.
+     */
+    if (!ctx->encrypt) {
+        memcpy(nxtiv, in + (inl - ALG_AES_IV_LEN),
+               ALG_AES_IV_LEN);
     }
 
     ret = afalg_start_cipher_sk(actx, (unsigned char *)in, inl, ctx->iv,
@@ -524,11 +533,10 @@ static int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
     }
 
     if (ctx->encrypt) {
-        memcpy(ctx->iv, out + (inl - EVP_CIPHER_CTX_iv_length(ctx)),
-               EVP_CIPHER_CTX_iv_length(ctx));
+        memcpy(ctx->iv, out + (inl - ALG_AES_IV_LEN),
+               ALG_AES_IV_LEN);
     } else {
-        memcpy(ctx->iv, in + (inl - EVP_CIPHER_CTX_iv_length(ctx)),
-               EVP_CIPHER_CTX_iv_length(ctx));
+        memcpy(ctx->iv, nxtiv, ALG_AES_IV_LEN); 
     }
 
     return 1;
