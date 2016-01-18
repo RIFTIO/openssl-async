@@ -259,6 +259,7 @@ int afalg_fin_cipher_aio(afalg_aio *aio, int sfd, unsigned char *buf,
                     ALG_WARN("%s: Crypto Operation failed with code %lld\n",
                              __func__, events[0].res);
                     aio->failed++;
+                    return 0;
                 }
             } else if (r < 0) {
                 ALG_PERR("%s: io_getevents failed : ", __func__);
@@ -499,7 +500,7 @@ static int afalg_do_cipher(EVP_CIPHER_CTX *ctx, unsigned char *out,
 {
     afalg_ctx *actx;
     int ret;
-    char nxtiv[ALG_AES_IV_LEN];
+    char nxtiv[ALG_AES_IV_LEN] = {0};
 
     if (!ctx || !out || !in) {
         ALG_WARN("NULL parameter passed to function %s\n", __func__);
