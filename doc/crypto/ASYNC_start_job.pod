@@ -4,8 +4,8 @@
 
 ASYNC_init, ASYNC_cleanup, ASYNC_init_thread, ASYNC_cleanup_thread,
 ASYNC_start_job, ASYNC_pause_job, ASYNC_in_job, ASYNC_get_wait_fd,
-ASYNC_get_current_job, ASYNC_wake, ASYNC_clear_wake, ASYNC_block_pause,
-ASYNC_unblock_pause - asynchronous job management functions
+ASYNC_set_wait_fd, ASYNC_clear_wait_fd, ASYNC_get_current_job,
+ASYNC_block_pause, ASYNC_unblock_pause - asynchronous job management functions
 
 =head1 SYNOPSIS
 
@@ -21,10 +21,10 @@ ASYNC_unblock_pause - asynchronous job management functions
                      void *args, size_t size);
  int ASYNC_pause_job(void);
 
- int ASYNC_get_wait_fd(ASYNC_JOB *job);
+ OSSL_ASYNC_FD ASYNC_get_wait_fd(ASYNC_JOB *job);
+ void ASYNC_set_wait_fd(ASYNC_JOB *job, OSSL_ASYNC_FD fd);
+ void ASYNC_clear_wait_fd(ASYNC_JOB *job);
  ASYNC_JOB *ASYNC_get_current_job(void);
- void ASYNC_wake(ASYNC_JOB *job);
- void ASYNC_clear_wake(ASYNC_JOB *job);
  void ASYNC_block_pause(void);
  void ASYNC_unblock_pause(void);
 
@@ -114,23 +114,30 @@ B<*job> parameter will resume execution from the ASYNC_pause_job() call. If
 ASYNC_pause_job() is called whilst not within the context of a job then no
 action is taken and ASYNC_pause_job() returns immediately.
 
-Every ASYNC_JOB has a "wait" file descriptor associated with it. Calling
+ASYNC_JOBs can have a "wait" file descriptor associated with them. Calling
 ASYNC_get_wait_fd() and passing in a pointer to an ASYNC_JOB in the B<job>
-parameter will return the wait file descriptor associated with that job. This
+parameter will return the wait file descriptor associated with that job or
+OSSL_BAD_ASYNC_FD if there is no associated file descriptor. This
 file descriptor can be used to signal that the job should be resumed.
 Applications can wait for the file descriptor to be ready for "read" using a
 system function call such as select or poll (being ready for "read" indicates
-that the job should be resumed). Applications can signal that a job is ready to
-resume using ASYNC_wake() or clear an existing signal using ASYNC_clear_wake().
+that the job should be resumed). If no file descriptor is made available then an
+application will have to priodically "poll" the job by attempting to restart it
+to see if it is ready to continue.
+
+Applications can provide a file descriptor to use for waiting on by calling
+ASYNC_set_wait_fd(). Typically this would be done by an engine immediately prior
+to calling ASYNC_pause_job() and not by end user code. An existing association
+with a file descriptor can be cleared using ASYNC_clear_wait_fd().
 
 An example of typical usage might be an async capable engine. User code would
 initiate cryptographic operations. The engine would initiate those operations
-asynchronously and then call ASYNC_pause_job() to return control to the user
-code. The user code can then perform other tasks or wait for the job to be ready
-by calling "select" or other similar function on the wait file descriptor. The
-engine can signal to the user code that the job should be resumed using
-ASYNC_wake(). Once resumed the engine would clear the wake signal by calling
-ASYNC_clear_wake().
+asynchronously and then call ASYNC_set_wait_fd() followed by ASYNC_pause_job()
+to return control to the user code. The user code can then perform other tasks
+or wait for the job to be ready by calling "select" or other similar function
+on the wait file descriptor. The engine can signal to the user code that the job
+should be resumed by making the wait file descriptor "readable". Once resumed
+the engine should clear the wake signal on the wait file descriptor.
 
 The ASYNC_block_pause() function will prevent the currently active job from
 pausing. The block will remain in place until a subsequent call to
@@ -169,12 +176,17 @@ NULL if not within the context of a job.
 The following example demonstrates how to use most of the core async APIs:
 
  #include <stdio.h>
+ #include <unistd.h>
  #include <openssl/async.h>
+
+ #define WAIT_SIGNAL_CHAR   'X'
 
  int jobfunc(void *arg)
  {
      ASYNC_JOB *currjob;
      unsigned char *msg;
+     int pipefds[2] = {0, 0};
+     char buf = WAIT_SIGNAL_CHAR;
 
      currjob = ASYNC_get_current_job();
      if (currjob != NULL) {
@@ -187,19 +199,27 @@ The following example demonstrates how to use most of the core async APIs:
      msg = (unsigned char *)arg;
      printf("Passed in message is: %s\n", msg);
 
+     if (pipe(pipefds) != 0) {
+         printf("Failed to create pipe\n");
+         return 0;
+     }
+     ASYNC_set_wait_fd(currjob, pipefds[0]);
+
      /*
       * Normally some external event would cause this to happen at some
       * later point - but we do it here for demo purposes, i.e.
       * immediately signalling that the job is ready to be woken up after
       * we return to main via ASYNC_pause_job().
       */
-     ASYNC_wake(currjob);
+     write(pipefds[1], &buf, 1);
 
      /* Return control back to main */
      ASYNC_pause_job();
 
      /* Clear the wake signal */
-     ASYNC_clear_wake(currjob);
+     ASYNC_clear_wait_fd(currjob);
+     close(pipefds[0]);
+     close(pipefds[1]);
 
      printf ("Resumed the job after a pause\n");
 

@@ -2913,15 +2913,29 @@ BIO *bio_open_default_quiet(const char *filename, char mode, int format)
 
 void wait_for_async(SSL *s)
 {
-    int width, fd;
+    int width = 0;
     fd_set asyncfds;
+    ASYNC_WAIT_CTX *waitctx;
+    OSSL_ASYNC_FD *fds;
+    size_t numfds;
 
-    fd = SSL_get_async_wait_fd(s);
-    if (fd < 0)
+    waitctx = SSL_get_async_wait_ctx(s);
+    if (waitctx == NULL || !ASYNC_WAIT_CTX_get_all_fds(waitctx, NULL, &numfds))
         return;
+    if (numfds == 0)
+        return;
+    fds = OPENSSL_malloc(sizeof(OSSL_ASYNC_FD) * numfds);
+    if (fds == NULL || !ASYNC_WAIT_CTX_get_all_fds(waitctx, fds, &numfds)) {
+        OPENSSL_free(fds);
+    }
 
-    width = fd + 1;
     FD_ZERO(&asyncfds);
-    openssl_fdset(fd, &asyncfds);
+    while (numfds > 0) {
+        if (width <= (int)*fds)
+            width = (int)*fds + 1;
+        openssl_fdset((int)*fds, &asyncfds);
+        numfds--;
+        fds++;
+    }
     select(width, (void *)&asyncfds, NULL, NULL, NULL);
 }
