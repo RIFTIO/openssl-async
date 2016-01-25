@@ -4536,10 +4536,10 @@ ASYNC_pause_job                         5013	1_1_0	EXIST::FUNCTION:
 ASYNC_start_job                         5014	1_1_0	EXIST::FUNCTION:
 ASYNC_init_thread                       5015	1_1_0	EXIST::FUNCTION:
 ASYNC_cleanup_thread                    5016	1_1_0	EXIST::FUNCTION:
-ASYNC_wake                              5017	1_1_0	EXIST::FUNCTION:
-ASYNC_clear_wake                        5018	1_1_0	EXIST::FUNCTION:
+ASYNC_wake                              5017	1_1_0	NOEXIST::FUNCTION:
+ASYNC_clear_wake                        5018	1_1_0	NOEXIST::FUNCTION:
 ASYNC_get_current_job                   5019	1_1_0	EXIST::FUNCTION:
-ASYNC_get_wait_fd                       5020	1_1_0	EXIST::FUNCTION:
+ASYNC_get_wait_fd                       5020	1_1_0	NOEXIST::FUNCTION:
 ERR_load_ASYNC_strings                  5021	1_1_0	EXIST::FUNCTION:
 ASYNC_unblock_pause                     5022	1_1_0	EXIST::FUNCTION:
 ASYNC_block_pause                       5023	1_1_0	EXIST::FUNCTION:
@@ -4732,3 +4732,11 @@ OPENSSL_thread_stop                     5213	1_1_0	EXIST::FUNCTION:
 OPENSSL_INIT_new                        5215	1_1_0	EXIST::FUNCTION:
 OPENSSL_INIT_free                       5216	1_1_0	EXIST::FUNCTION:
 OPENSSL_INIT_set_config_filename        5217	1_1_0	EXIST::FUNCTION:
+ASYNC_WAIT_CTX_free                     5218	1_1_0	EXIST::FUNCTION:
+ASYNC_WAIT_CTX_get_all_fds              5219	1_1_0	EXIST::FUNCTION:
+ASYNC_WAIT_CTX_get_fd                   5220	1_1_0	EXIST::FUNCTION:
+ASYNC_WAIT_CTX_clear_fd                 5221	1_1_0	EXIST::FUNCTION:
+ASYNC_WAIT_CTX_get_changed_fds          5222	1_1_0	EXIST::FUNCTION:
+ASYNC_WAIT_CTX_set_wait_fd              5223	1_1_0	EXIST::FUNCTION:
+ASYNC_WAIT_CTX_new                      5224	1_1_0	EXIST::FUNCTION:
+ASYNC_get_wait_ctx                      5225	1_1_0	EXIST::FUNCTION:
