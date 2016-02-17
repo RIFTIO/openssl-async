@@ -224,6 +224,8 @@ INSTALLDIRS=	\
 		$(INSTALL_PREFIX)$(OPENSSLDIR)/certs \
 		$(INSTALL_PREFIX)$(OPENSSLDIR)/private
 
+ENGDIRS={- $config{afalg} -}
+
 all: Makefile build_all
 
 # as we stick to -e, CLEARENV ensures that local variables in lower
@@ -267,6 +269,7 @@ BUILDENV=	LC_ALL=C PLATFORM='$(PLATFORM)' PROCESSOR='$(PROCESSOR)'\
 		AES_ENC='$(AES_ENC)' CMLL_ENC='$(CMLL_ENC)'	\
 		BF_ENC='$(BF_ENC)' CAST_ENC='$(CAST_ENC)'	\
 		RC4_ENC='$(RC4_ENC)' RC5_ENC='$(RC5_ENC)'	\
+		ENGDIRS='$(ENGDIRS)'    \
 		SHA1_ASM_OBJ='$(SHA1_ASM_OBJ)'			\
 		MD5_ASM_OBJ='$(MD5_ASM_OBJ)'			\
 		RMD160_ASM_OBJ='$(RMD160_ASM_OBJ)'		\
