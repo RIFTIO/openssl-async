@@ -2255,7 +2255,17 @@ int ssl3_send_server_key_exchange(SSL *s)
                                            (unsigned int *)&s->
                                            s3->send_server_key_exchange.i);
                     }
-                    return -1;
+                    /*  Within this function it is not possible to determine whether there
+                        is an asynchronous implementation of the digest code for the engine or not.
+                        If -1 is returned when a non-asynchronous implementation is used there
+                        will be no event notification to trigger recalling the function. By
+                        recursively calling this function we can ensure that in the non-
+                        asynchronous case the code will progress correctly through the state
+                        machine without returning -1 on the digest. In the case of an
+                        asynchronous implementation, the code will still perform correctly by
+                        returning -1 but will perform a second check of whether the asynchronous
+                        message has come back in the recursive call. */
+                    return ssl3_send_server_key_exchange(s);
                 } else { /* synch mode */
                     q = md_buf;
                     j = 0;
