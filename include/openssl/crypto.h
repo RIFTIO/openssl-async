@@ -565,6 +565,7 @@ int CRYPTO_memcmp(const volatile void * volatile in_a,
 # define OPENSSL_INIT_ENGINE_CAPI            0x002000
 # define OPENSSL_INIT_ENGINE_PADLOCK         0x004000
 # define OPENSSL_INIT_ENGINE_DASYNC          0x008000
+# define OPENSSL_INIT_ENGINE_AFALG           0x010000
 /* OPENSSL_INIT flag 0x010000 reserved for internal use */
 /* Max OPENSSL_INIT flag value is 0x80000000 */
 
