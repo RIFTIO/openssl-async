@@ -363,14 +363,13 @@ int int_rsa_verify(int dtype, const unsigned char *m,
             memcpy(rm, s + 2, 16);
             *prm_len = 16;
             ret = 1;
-        } else if (memcmp(m, s + 2, 16))
+        } else if (memcmp(m, s + 2, 16)) {
             RSAerr(RSA_F_INT_RSA_VERIFY, RSA_R_BAD_SIGNATURE);
-        else
+        } else {
             ret = 1;
-    }
-
-    /* Special case: SSL signature */
-    if (dtype == NID_md5_sha1) {
+        }
+    } else if (dtype == NID_md5_sha1) {
+        /* Special case: SSL signature */
         if ((i != SSL_SIG_LENGTH) || memcmp(s, m, SSL_SIG_LENGTH))
             RSAerr(RSA_F_INT_RSA_VERIFY, RSA_R_BAD_SIGNATURE);
         else
@@ -580,10 +579,8 @@ static int int_rsa_verify_post2(unsigned char *res, size_t i,
             RSAerr(RSA_F_INT_RSA_VERIFY_POST2, RSA_R_BAD_SIGNATURE);
         else
             ret = 1;
-    }
-
-    /* Special case: SSL signature */
-    if (dtype == NID_md5_sha1) {
+    } else if (dtype == NID_md5_sha1) {
+        /* Special case: SSL signature */
         if ((i != SSL_SIG_LENGTH) || memcmp(s, m, SSL_SIG_LENGTH))
             RSAerr(RSA_F_INT_RSA_VERIFY_POST2, RSA_R_BAD_SIGNATURE);
         else
