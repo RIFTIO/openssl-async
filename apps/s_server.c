@@ -191,6 +191,14 @@ typedef unsigned int u_int;
 #endif
 #include "s_apps.h"
 #include "timeouts.h"
+#ifndef OPENSSL_NO_HW_QAT
+#ifdef USE_QAT_MEM
+#include "qae_mem_utils.h"
+#endif
+#ifdef USE_QAE_MEM
+#include "qat_mem_drv_inf.h"
+#endif
+#endif
 
 #if (defined(OPENSSL_SYS_VMS) && __VMS_VER < 70000000)
 /* FIONBIO used as a switch to enable ioctl, and that isn't in VMS < 7.0 */
@@ -566,6 +574,9 @@ static void sv_usage(void)
 # endif
 #endif
 	BIO_printf(bio_err," -keymatexport label   - Export keying material using label\n");
+#ifndef OPENSSL_NO_HW_QAT
+	BIO_printf(bio_err," -zero_copy    - Run in zero copy mode ");
+#endif
 	BIO_printf(bio_err," -keymatexportlen len  - Export len bytes of keying material (default 20)\n");
 	BIO_printf(bio_err," -status           - respond to certificate status requests\n");
 	BIO_printf(bio_err," -status_verbose   - enable status request verbose printout\n");
@@ -966,6 +977,9 @@ int MAIN(int argc, char *argv[])
 	X509 *s_cert = NULL, *s_dcert = NULL;
 	EVP_PKEY *s_key = NULL, *s_dkey = NULL;
 	int no_cache = 0;
+#ifndef OPENSSL_NO_HW_QAT
+	int zero_copy = 0;
+#endif
 #ifndef OPENSSL_NO_TLSEXT
 	EVP_PKEY *s_key2 = NULL;
 	X509 *s_cert2 = NULL;
@@ -1356,6 +1370,12 @@ int MAIN(int argc, char *argv[])
 			{
 			ssl_mode = SSL_MODE_ASYNCHRONOUS;
 			}
+#ifndef OPENSSL_NO_HW_QAT
+		else if (strcmp(*argv,"-zero_copy") == 0)
+			{
+			zero_copy = 1;
+			}
+#endif
 		else
 			{
 			BIO_printf(bio_err,"unknown option %s\n",*argv);
@@ -1404,7 +1424,34 @@ bad:
 	OpenSSL_add_ssl_algorithms();
 
 #ifndef OPENSSL_NO_ENGINE
+#ifndef OPENSSL_NO_HW_QAT
+	if (engine_id != NULL)
+		e = ENGINE_by_id(engine_id);
+	if (e != NULL)
+		{
+		if (zero_copy)
+			{
+			if(!ENGINE_ctrl_cmd(e,"SET_V2P", (long) qaeCryptoMemV2P, NULL, NULL, 0))
+				{
+				printf("Cannot set V2P function\n");
+				ENGINE_free(e);
+				goto end;
+				}
+			if (!ENGINE_ctrl_cmd(e, "ENABLE_ZERO_COPY_MODE", 0, NULL, NULL, 0))
+				{
+				printf("Unable to enable zero copy mode on engine\n");
+				ENGINE_free(e);
+				goto end;
+				}
+			}
+		}
+#endif
         e = setup_engine(bio_err, engine_id, 1);
+
+#ifndef OPENSSL_NO_HW_QAT
+	if ((e == NULL) && (zero_copy))
+		goto end;
+#endif
 #endif
 
 	if (!app_passwd(bio_err, passarg, dpassarg, &pass, &dpass))

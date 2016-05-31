@@ -133,6 +133,16 @@
 #include <openssl/fips.h>
 #endif
 
+#ifndef OPENSSL_NO_HW_QAT
+#ifdef USE_QAT_MEM
+#include "qae_mem_utils.h"
+#define QAT_DEV "/dev/qat_mem"
+#endif
+#ifdef USE_QAE_MEM
+#include "qat_mem_drv_inf.h"
+#define QAT_DEV "/dev/qae_mem"
+#endif
+#endif
 /* The LHASH callbacks ("hash" & "cmp") have been replaced by functions with the
  * base prototypes (we cast each variable inside the function to the required
  * type of "FUNCTION*"). This removes the necessity for macro-generated wrapper
@@ -283,6 +293,23 @@ int main(int Argc, char *ARGV[])
 		Argv = (char **)_Argv;
 		}
 #endif /* defined( OPENSSL_SYS_VMS) && (__INITIAL_POINTER_SIZE == 64) */
+
+#ifndef OPENSSL_NO_HW_QAT
+	for (i=0; i < Argc; i++)
+	{
+		if (!strcmp("-zero_copy",Argv[i])){
+			if (access(QAT_DEV, F_OK) == 0)
+			{
+				if (CRYPTO_set_mem_ex_functions(qaeCryptoMemAlloc, qaeCryptoMemRealloc, qaeCryptoMemFree))
+			           printf("%s: CRYPTO_set_mem_functions succeeded\n", __func__);
+			}
+			else
+			{
+				perror("access");
+			}
+		}
+	}
+#endif
 
 	arg.data=NULL;
 	arg.count=0;

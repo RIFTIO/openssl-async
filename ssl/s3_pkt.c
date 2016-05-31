@@ -146,6 +146,12 @@ int ssl3_read_n(SSL *s, int n, int max, int extend)
 	left  = rb->left;
 #if defined(SSL3_ALIGN_PAYLOAD) && SSL3_ALIGN_PAYLOAD!=0
 	align = (long)rb->buf + SSL3_RT_HEADER_LENGTH;
+ #ifndef OPENSSL_NO_HW_QAT
+                if (s->enc_read_ctx && s->version >= TLS1_1_VERSION)
+                {
+                        align += EVP_CIPHER_CTX_block_size(s->enc_read_ctx);
+                }
+ #endif
 	align = (-align)&(SSL3_ALIGN_PAYLOAD-1);
 #endif
 
@@ -1158,6 +1164,12 @@ static int do_ssl3_write_inner(SSL *s, int type, const unsigned char *buf,
 		{
 #if defined(SSL3_ALIGN_PAYLOAD) && SSL3_ALIGN_PAYLOAD!=0
 		align = (long)wb->buf + SSL3_RT_HEADER_LENGTH;
+ #ifndef OPENSSL_NO_HW_QAT
+                if (s->enc_write_ctx && s->version >= TLS1_1_VERSION)
+                        {
+                        align += EVP_CIPHER_CTX_block_size(s->enc_write_ctx);
+                        }
+ #endif
 		align = (-align)&(SSL3_ALIGN_PAYLOAD-1);
 #endif
 		p = wb->buf + align;

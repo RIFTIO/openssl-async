@@ -32,6 +32,48 @@ LIBSSL=-L.. -lssl
 LIBPTHREAD=-lpthread
 LIBRARIES=$(LIBSSL) $(LIBKRB5) $(LIBCRYPTO) $(LIBPTHREAD) 
 
+ifndef CMN_ROOT
+CRYPTO_MEMORY_DRIVER=qat_mem
+else
+CRYPTO_MEMORY_DRIVER=qae_mem
+endif
+
+ifeq ($(CRYPTO_MEMORY_DRIVER),qat_mem)
+CFLAGS+=-D USE_QAT_MEM -I$(OPENSSL_ROOT)/engines/qat_engine/
+DLIB_QAE_MEM= -L../engines/qat_engine -lqae_mem_utils
+LIB_QAE_MEM= 
+endif
+ifeq ($(CRYPTO_MEMORY_DRIVER),qae_mem)
+CFLAGS+=-D USE_QAE_MEM -I$(OPENSSL_ROOT)/engines/qat_engine/
+DLIB_QAE_MEM = -Wl,-rpath,$(CMN_ROOT) -L$(CMN_ROOT) -lqae_mem_s
+DLIB_QAE_MEM += -L$(OPENSSL_ROOT)/engines/qat_engine/ -lqat_mem_drv_inf
+LIB_QAE_MEM+= $(CMN_ROOT)/libqae_mem.a
+endif
+
+LIBQATDL=-ldl
+LIBRARIES += $(LIBQATDL)
+LIBQATZ=-lz
+LIBQATRT=-lrt
+DRIVER=icp_qa_al
+ifdef WITH_CPA_MUX
+DRIVER=qat_mux
+BUILD_PATH=-L$(ICP_ROOT)/../cpa_mux/src/build/linux_2.6/user_space
+endif
+
+ifdef ICP_BUILD_OUTPUT
+LIBQATDRIVER= 
+DLIBQATDRIVER= -L$(ICP_BUILD_OUTPUT) $(BUILD_PATH) -l$(DRIVER) -ladf_proxy -losal
+else
+LIBQATDRIVER=
+DLIBQATDRIVER= -l$(DRIVER) -ladf_proxy -losal
+endif
+
+ifneq ($(shell test -n "$(SHARED_LIBS)" && echo 1),1) #STATIC
+LIBRARIES += $(LIB_QAE_MEM) $(DLIBQATDRIVER) 
+else #SHARED
+LIBRARIES += $(DLIB_QAE_MEM)
+endif 
+LIBRARIES += $(LIBQATZ) $(LIBQATRT)
 
 PROGRAM= openssl
 
